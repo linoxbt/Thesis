@@ -46,7 +46,7 @@ export default function FeedPage() {
         <div className="glow-line absolute inset-x-0 bottom-0" />
       </section>
 
-      {stats && (
+      {stats && Number(stats.theses) + Number(stats.wallets) > 0 && (
         <section className="grid grid-cols-2 overflow-hidden rounded-2xl border border-line sm:grid-cols-4">
           {[
             ["Volume", usdc(stats.volume_usdc, 0)],
