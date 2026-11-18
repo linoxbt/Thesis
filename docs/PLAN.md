@@ -243,6 +243,18 @@ position behind it, derived from onchain data only (`lib/position.ts`):
   image" and "Copy link". `/t/:pda` sets og/twitter large-image metadata.
 - On phones, detail pages (`/t/`, `/u/`) hide the tab bar and show a back button.
 
+### App polish (Phase 4d)
+
+- Light (Paper) is the default theme; the setting (Light / Dark / Match device)
+  lives in Profile → Settings, not the header.
+- The app runs at a 15px root (one step below the landing page).
+- Desktop sidebar collapses to an icon rail with hover labels, remembered per browser.
+- Landing motion: staggered hero entrance, the dot field draws in, the example
+  terminal rises with candles drawing and a ticking mark, scroll reveals with
+  staggered cards, floating band cards, hover lift; all off under reduced motion.
+- Telegram alerts (worker bot + notifier, wallet-signed linking from Profile);
+  see DEPLOY.md to switch on.
+
 ### Brand (Phase 4b)
 
 - **Mark**: a T drawn as a market event. The crossbar is the strike line, the

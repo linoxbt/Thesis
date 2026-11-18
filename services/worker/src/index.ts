@@ -14,6 +14,10 @@
  *   DATABASE_URL        Postgres (Supabase) for the indexer; unset = no indexer
  *   INDEXER_INTERVAL_MS default 15000
  *   VOL_KEEPER          "on" (default when DATABASE_URL is set) | "off"
+ *   TELEGRAM_BOT_TOKEN  enables Telegram alerts (needs DATABASE_URL)
+ *   TELEGRAM_ADMIN_CHAT_ID  optional operator chat for ops alerts
+ *   SITE_URL            links in alerts; default https://thesis-calls.netlify.app
+ *   ALERTS_INTERVAL_MS  default 20000
  */
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { readFileSync } from "node:fs";
@@ -23,6 +27,7 @@ import { log, makeCtx } from "./client";
 import { Indexer } from "./indexer";
 import { Keeper } from "./keeper";
 import { OnchainFeedSource } from "./sources";
+import { AlertNotifier, OpsAlerts, TelegramBot, telegramApi } from "./telegram";
 import { VolatilityKeeper } from "./volkeeper";
 import { Watcher } from "./watcher";
 
@@ -51,6 +56,11 @@ async function main() {
 
   let indexer: Indexer | undefined;
   let volKeeper: VolatilityKeeper | undefined;
+  let bot: TelegramBot | undefined;
+  let notifier: AlertNotifier | undefined;
+  let ops: OpsAlerts | undefined;
+  const tgToken = process.env.TELEGRAM_BOT_TOKEN;
+  const siteUrl = (process.env.SITE_URL ?? "https://thesis-calls.netlify.app").replace(/\/$/, "");
   if (process.env.DATABASE_URL) {
     const db = connect();
     const applied = await migrate(db);
@@ -65,8 +75,27 @@ async function main() {
       volKeeper = new VolatilityKeeper(ctx, db);
       await volKeeper.start();
     }
+    if (tgToken) {
+      const api = telegramApi(tgToken);
+      bot = new TelegramBot(api, db, { siteUrl });
+      notifier = new AlertNotifier(api, db, { siteUrl, intervalMs: Number(process.env.ALERTS_INTERVAL_MS ?? "20000") });
+      await bot.start();
+      await notifier.start();
+      log("worker", "telegram alerts on");
+    } else {
+      log("worker", "TELEGRAM_BOT_TOKEN not set: telegram alerts are off");
+    }
   } else {
     log("worker", "DATABASE_URL not set: indexer and volatility keeper are off");
+  }
+  if (tgToken && process.env.TELEGRAM_ADMIN_CHAT_ID) {
+    ops = new OpsAlerts(telegramApi(tgToken), process.env.TELEGRAM_ADMIN_CHAT_ID, {
+      connection: ctx.connection,
+      keeper: keeper.publicKey,
+      minSol: Number(process.env.KEEPER_MIN_SOL ?? "0.1"),
+      cluster: /mainnet/.test(rpc) ? "mainnet" : "devnet",
+    });
+    await ops.start();
   }
 
   const shutdown = async () => {
@@ -75,6 +104,9 @@ async function main() {
     await keeperLoop.stop();
     await indexer?.stop();
     await volKeeper?.stop();
+    await bot?.stop();
+    await notifier?.stop();
+    await ops?.stop();
     process.exit(0);
   };
   process.on("SIGINT", shutdown);

@@ -1,3 +1,6 @@
+import type { ReactNode } from "react";
+import { Tick } from "./Tick";
+
 /**
  * The hero product shot: an example Thesis market rendered as the trading
  * screen, always dark (like a terminal). Static and deterministic.
@@ -61,7 +64,7 @@ export function ProductWindow() {
 
       <div className="num flex gap-7 overflow-hidden border-b border-white/[0.07] px-4 py-2.5 text-[10px] uppercase tracking-wide text-white/40">
         <Stat k="Position" v="Long 20x" tone="text-[#3ecf8e]" />
-        <Stat k="Mark" v="$75.82" tone="text-white" sub="+3.8%" />
+        <Stat k="Mark" v={<Tick base={75.82} />} tone="text-white" sub="+3.8%" />
         <Stat k="Entry" v="$73.04" />
         <Stat k="Take profit" v="$76.69" tone="text-[#3ecf8e]" />
         <Stat k="Liquidation" v="$69.39" tone="text-[#ff6b6b]" />
@@ -93,6 +96,7 @@ export function ProductWindow() {
             <text x={W - 6} y={y(GUARD) + 14} textAnchor="end" fontSize="10" fill="#ff6b6b" className="num">
               liquidation 69.39 · covered
             </text>
+            <g className="draw">
             {C.map((k, i) => {
               const up = k.c >= k.o;
               const col = up ? "#3ecf8e" : "#ff6b6b";
@@ -107,6 +111,7 @@ export function ProductWindow() {
             })}
             <circle cx={TOUCH * cw + cw / 2} cy={y(STRIKE)} r="5" fill="#ff6a3d" className="touch-pulse" />
             <circle cx={TOUCH * cw + cw / 2} cy={y(STRIKE)} r="4.5" fill="#ff6a3d" stroke="#09090b" strokeWidth="2" />
+            </g>
           </svg>
         </div>
 
@@ -167,7 +172,7 @@ export function ProductWindow() {
   );
 }
 
-function Stat({ k, v, tone = "text-white/85", sub }: { k: string; v: string; tone?: string; sub?: string }) {
+function Stat({ k, v, tone = "text-white/85", sub }: { k: string; v: ReactNode; tone?: string; sub?: string }) {
   return (
     <div className="shrink-0">
       <div>{k}</div>

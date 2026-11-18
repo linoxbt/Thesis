@@ -23,7 +23,7 @@ export function LiveLine() {
   return (
     <div className="num mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted" data-testid="live-stats">
       <span className="flex items-center gap-2 text-ink">
-        <span className="h-1.5 w-1.5 rounded-full bg-yes" /> Live on devnet
+        <span className="h-1.5 w-1.5 rounded-full bg-yes" /> Live activity
       </span>
       {items.map(([k, v]) => (
         <span key={k}>
