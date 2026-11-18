@@ -1,5 +1,5 @@
 import { setThesisText } from "@thesis/db";
-import { bad, db, json, pubkey } from "@/lib/server";
+import { bad, db, hasDb, json, pubkey } from "@/lib/server";
 
 /**
  * POST /api/theses/:pda/text {text} — store the thesis text. Accepted only if
@@ -9,6 +9,7 @@ import { bad, db, json, pubkey } from "@/lib/server";
 export async function POST(req: Request, { params }: { params: Promise<{ pda: string }> }) {
   const { pda } = await params;
   if (!pubkey(pda)) return bad("not a valid address");
+  if (!hasDb()) return bad("the indexer is not running yet", 503);
   const body = (await req.json().catch(() => null)) as { text?: unknown } | null;
   if (typeof body?.text !== "string" || body.text.length === 0 || body.text.length > 500) {
     return bad("text must be a string of 1-500 characters");

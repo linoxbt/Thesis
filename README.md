@@ -9,7 +9,7 @@ challenge, and a protection market that pays out if price touches the trader's
 liquidation level. Both settle from a Pyth-signed price that anyone can submit,
 with no admin.
 
-Status: **Phase 4** (frontend) done; devnet deploy pending devnet SOL. See [`docs/PLAN.md`](docs/PLAN.md).
+Status: web app live (preview) at https://thesis-calls.netlify.app — program deploy pending devnet SOL. See [`docs/DEPLOY.md`](docs/DEPLOY.md). See [`docs/PLAN.md`](docs/PLAN.md).
 
 ## Layout
 
