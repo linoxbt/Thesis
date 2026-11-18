@@ -27,8 +27,14 @@ fn expect_err(res: Result<impl std::fmt::Debug, String>, want: &str) {
 fn sponsored_market_create_trade_settle_no() {
     let mut env = setup();
     let strike = spot_plus_bps(-500);
+    let auth_before = env.svm.get_balance(&env.authority).unwrap();
+    let admin_before = env.svm.get_balance(&env.admin.pubkey()).unwrap();
     let c = create_market(&mut env, Create { strike, ..Default::default() }).expect("create");
     println!("[cu] create_touch_market (pricing + initialize_market + deposit_liquidity): {}", c.cu);
+    // The sponsor (admin) repays every lamport the Authority spent on pm-AMM rent,
+    // including the LP position it owns as the sponsored seeder.
+    assert_eq!(env.svm.get_balance(&env.authority).unwrap(), auth_before, "Authority float unchanged");
+    println!("[rent] sponsored market cost the creator {} lamports", admin_before - env.svm.get_balance(&env.admin.pubkey()).unwrap());
 
     // Opening price: computed onchain, identical to the host computation, and
     // the pm-AMM pool opens there.
@@ -86,11 +92,17 @@ fn creator_seeded_market() {
         "ConstraintTokenOwner",
     );
 
+    let auth_before = env.svm.get_balance(&env.authority).unwrap();
+    let creator_before = env.svm.get_balance(&creator.pubkey()).unwrap();
     let c = create_market(
         &mut env,
         Create { creator: Some(&creator), sponsored: false, creator_usdc: Some(creator_usdc), ..Default::default() },
     )
     .expect("creator-seeded create");
+    assert_eq!(env.svm.get_balance(&env.authority).unwrap(), auth_before, "creator repaid the Authority's rent");
+    let cost = creator_before - env.svm.get_balance(&creator.pubkey()).unwrap();
+    println!("[rent] creator-seeded market cost the creator {cost} lamports");
+    assert!(cost > 20_000_000, "the creator now pays the pm-AMM rent ({cost})");
     let tm: TouchMarket = env.read(c.touch_market);
     assert_eq!(tm.creator, creator.pubkey());
     assert_eq!(tm.seeded_by, creator.pubkey());

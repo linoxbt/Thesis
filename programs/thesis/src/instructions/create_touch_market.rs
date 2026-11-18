@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_lang::system_program::{transfer, Transfer};
 use anchor_spl::token::{Mint, Token, TokenAccount};
 
 use crate::constants::*;
@@ -30,7 +31,8 @@ pub struct CreateTouchMarketArgs {
 #[derive(Accounts)]
 #[instruction(args: CreateTouchMarketArgs)]
 pub struct CreateTouchMarket<'info> {
-    /// The creator. Pays the TouchMarket rent, and the seed unless sponsored.
+    /// The creator. Pays the TouchMarket rent, reimburses the Authority for the
+    /// pm-AMM accounts it pays for, and pays the seed unless sponsored.
     #[account(mut)]
     pub creator: Signer<'info>,
 
@@ -172,6 +174,10 @@ pub fn handler(ctx: Context<CreateTouchMarket>, args: CreateTouchMarketArgs) -> 
     let signer_seeds: &[&[&[u8]]] = &[&[AUTHORITY_SEED, &authority_bump]];
     let pm_program = ctx.accounts.pm_amm_program.key();
 
+    // The Authority PDA pays pm-AMM's rent (market, mints, vault, metadata, and
+    // the LP position when sponsored). Measure it so the creator can repay it.
+    let authority_before = ctx.accounts.authority.lamports();
+
     // 1. Create the pm-AMM market with the Authority PDA as its authority.
     pm_amm::cpi::initialize_market(
         CpiContext::new_with_signer(
@@ -230,6 +236,22 @@ pub fn handler(ctx: Context<CreateTouchMarket>, args: CreateTouchMarketArgs) -> 
         pm_amm::cpi::deposit_liquidity(CpiContext::new(pm_program, accounts), args.seed_amount)?;
         creator
     };
+
+    // 2b. The creator repays exactly what the Authority just spent, so creating
+    //     markets never draws down its float (and nobody can drain it).
+    let spent = authority_before.saturating_sub(ctx.accounts.authority.lamports());
+    if spent > 0 {
+        transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.key(),
+                Transfer {
+                    from: ctx.accounts.creator.to_account_info(),
+                    to: ctx.accounts.authority.to_account_info(),
+                },
+            ),
+            spent,
+        )?;
+    }
 
     if args.sponsored {
         let config = &mut ctx.accounts.config;

@@ -81,3 +81,20 @@ and pressing Start in Telegram links the chat. `/stop` unlinks. Alerts: take
 profit or liquidation touched, markets settled (called it / missed it / your
 side won / cover paid), and others backing or challenging your call. Each alert
 is recorded before it is sent, so a restart never repeats one.
+
+## Faucet SOL (devnet)
+
+The pm-AMM faucet gives test USDC but often no SOL, so the site tops up
+instant wallets itself from a devnet-only hot key: `FAUCET_SECRET_KEY` on
+Netlify (JSON byte array). Wallets under 0.05 SOL are topped up to 0.15 SOL
+(enough to trade and post a protected trade), once per wallet per 12h, and
+`FAUCET_DAILY_SOL` (default 3) per day overall, tracked in `faucet_claims`.
+Refill the key with devnet SOL when it runs low.
+
+## Market rent
+
+Creating a market costs its creator ~0.0375 SOL: pm-AMM's accounts (market,
+two mints, vault, two Metaplex metadata accounts, and the LP position when
+sponsored) are paid by the Authority PDA during the CPI, and the creator repays
+exactly that amount in the same instruction, so the Authority's float never
+drains. Posting a protected trade (two markets) needs ~0.085 SOL.
