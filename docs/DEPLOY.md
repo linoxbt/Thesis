@@ -1,5 +1,9 @@
 # Deploying
 
+Everything deploys from **`main`**: the Railway worker builds on every push to
+`main`, and the Netlify site is meant to as well (link step below). Work
+happens on feature branches and lands on `main` to go live.
+
 ## Web app — Netlify
 
 Live: **https://thesis-calls.netlify.app** (project `thesis-calls`, team `linoxbt`).
@@ -22,10 +26,12 @@ runtime moves Next's static assets there, and a `--no-build` deploy otherwise
 uploads `.next` and every `/_next/static` file 404s. (`netlify deploy --build
 --prod --filter @thesis/web` in one step handles this itself.)
 
-### Recommended: Git continuous deployment
+### Git continuous deployment from `main` (one-time link, in the Netlify UI)
 
-In the Netlify UI: *Project configuration → Build & deploy → Link repository*,
-repo `linoxbt/Thesis`, base directory `/`, package directory `apps/web`.
+*Project configuration → Build & deploy → Continuous deployment → Link
+repository* → GitHub → `linoxbt/Thesis`, **branch to deploy `main`**, base
+directory `/`, package directory `apps/web`. Environment variables are already
+set on the project.
 `netlify.toml` supplies the build command and publish directory.
 
 ### Environment variables (set in the Netlify UI, then redeploy)
@@ -51,7 +57,7 @@ data routes return empty results (`indexer: false`), `/api/config` answers 503.
 |---|---|---|
 | Program | Solana devnet `9yVcFaDEmBk1VU66tXxuvUujZXfiiT3ED1EpioVuug6h` | initialised by `scripts/init-devnet.ts`; keeper set by `scripts/set-keeper.ts` |
 | Postgres | Railway (project `thesis`, service `Postgres`) | public TCP proxy for Netlify; the worker uses the private `DATABASE_URL` reference |
-| Worker | Railway (service `worker`) | `services/worker/Dockerfile`, builds from this branch; vars: `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `RPC_URL`, `PRICE_SOURCE=onchain`, `PYTH_PRICE_ACCOUNT`, `TREASURY_BUY_USDC`, `VOL_KEEPER=on`, `KEEPER_SECRET_KEY` (JSON byte array) |
+| Worker | Railway (service `worker`) | `services/worker/Dockerfile`, builds on every push to `main`; vars: `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `RPC_URL`, `PRICE_SOURCE=onchain`, `PYTH_PRICE_ACCOUNT`, `TREASURY_BUY_USDC`, `VOL_KEEPER=on`, `KEEPER_SECRET_KEY` (JSON byte array) |
 | Web | Netlify `thesis-calls` | `DATABASE_URL` set to the Railway public URL |
 
 The worker image pins pnpm 10.28.0: Corepack otherwise fetches the newest pnpm,
