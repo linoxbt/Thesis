@@ -17,8 +17,24 @@ pub struct Config {
     pub grace_secs: u32,
     /// Max Pyth confidence as a share of price, in bps.
     pub max_conf_bps: u16,
+    pub min_seed_per_market: u64,
     pub max_seed_per_market: u64,
     pub max_cover_per_wallet: u64,
+    /// Treasury USDC still available for sponsored seeds (launch subsidy).
+    pub sponsor_budget: u64,
+    /// SOL annualised volatility in bps (6000 = 60%), set by the keeper.
+    pub sol_vol_bps: u32,
+    pub vol_updated_ts: i64,
+    /// Market creation fails if `sol_vol_bps` is older than this.
+    pub max_vol_age_secs: u32,
+    /// Market creation needs a spot price no older than this.
+    pub max_spot_age_secs: u32,
+    /// Strike distance from spot, in bps of spot (spec: 0.5%..50%).
+    pub min_strike_distance_bps: u16,
+    pub max_strike_distance_bps: u16,
+    /// Allowed opening probability, in bps (spec: 1%..99%).
+    pub min_open_bps: u16,
+    pub max_open_bps: u16,
     pub paused: bool,
     pub bump: u8,
     pub authority_bump: u8,
@@ -53,8 +69,12 @@ pub struct TouchMarket {
     /// 0 = unresolved, 1 = YES, 2 = NO (same encoding as pm-AMM).
     pub winning_side: u8,
     pub origin_thesis: Pubkey,
+    pub creator: Pubkey,
+    /// Authority PDA for sponsored markets, else the creator.
     pub seeded_by: Pubkey,
     pub seed_amount: u64,
+    /// Pyth spot the opening price was computed from.
+    pub spot_at_open: i64,
     pub bump: u8,
 }
 
@@ -62,12 +82,21 @@ pub struct TouchMarket {
 pub struct TouchMarketCreated {
     pub touch_market: Pubkey,
     pub pm_market: Pubkey,
+    pub creator: Pubkey,
     pub direction: Direction,
     pub strike: i64,
     pub expo: i32,
+    pub spot: i64,
     pub end_ts: i64,
     pub initial_price_bps: u16,
     pub seed_amount: u64,
+    pub sponsored: bool,
+}
+
+#[event]
+pub struct VolatilityUpdated {
+    pub sol_vol_bps: u32,
+    pub ts: i64,
 }
 
 #[event]
@@ -82,4 +111,38 @@ pub struct Touched {
 pub struct Settled {
     pub touch_market: Pubkey,
     pub winning_side: u8,
+}
+
+/// Bounds every config write must satisfy.
+pub const MIN_VOL_BPS: u32 = 500; // 5%
+pub const MAX_VOL_BPS: u32 = 50_000; // 500%
+
+impl Config {
+    pub fn validate(&self) -> Result<()> {
+        use crate::errors::ThesisError;
+        require!(self.creator_share_bps <= 10_000, ThesisError::InvalidConfig);
+        require!(self.lp_rebate_bps <= 10_000, ThesisError::InvalidConfig);
+        require!(self.max_conf_bps > 0 && self.max_conf_bps <= 10_000, ThesisError::InvalidConfig);
+        require!(
+            self.min_seed_per_market > 0 && self.min_seed_per_market <= self.max_seed_per_market,
+            ThesisError::InvalidConfig
+        );
+        require!(
+            (MIN_VOL_BPS..=MAX_VOL_BPS).contains(&self.sol_vol_bps),
+            ThesisError::InvalidVolatility
+        );
+        require!(self.max_vol_age_secs > 0 && self.max_spot_age_secs > 0, ThesisError::InvalidConfig);
+        require!(
+            self.min_strike_distance_bps > 0
+                && self.min_strike_distance_bps < self.max_strike_distance_bps
+                && self.max_strike_distance_bps < 10_000,
+            ThesisError::InvalidConfig
+        );
+        // pm-AMM accepts 100..=9900 as an explicit opening price.
+        require!(
+            self.min_open_bps >= 100 && self.min_open_bps < self.max_open_bps && self.max_open_bps <= 9_900,
+            ThesisError::InvalidConfig
+        );
+        Ok(())
+    }
 }

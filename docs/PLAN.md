@@ -94,14 +94,44 @@ new numbers for the demo.
 
 ## Phase 1 — Engine (Day 1–2)
 
-- Opening price onchain: `create_touch_market` takes a verified Pyth update for
-  spot, reads σ from `Config.sol_vol_bps`, computes `initialPriceBps` with a
-  fixed-point Φ, enforces the strike rules (0.5–50 % from spot, 1–99 %).
-- Collision-resistant `market_id` (hash of program, creator, nonce).
-- Resolver test matrix: valid proof, wrong feed, outside window, wide confidence,
-  partial verification, wrong exponent, already touched/settled, settle NO after
-  expiry, settle before grace.
-- Devnet script: near-spot 5-minute market proven and settled.
+- [x] Opening price onchain: `create_touch_market` reads a fully verified Pyth
+      spot (≤ `max_spot_age_secs` old) and `Config.sol_vol_bps` (≤ 3 days old),
+      computes `P = 2Φ(−|ln(K/S)|/σ√τ)` (`programs/thesis/src/pricing.rs`, f64
+      soft-float, A&S 7.1.26 Φ) and passes it to pm-AMM. Never a caller input.
+- [x] Strike rules: right side of spot, 0.5–50 % away, opening P within 1–99 %.
+- [x] Creation open to anyone, seeded from the creator's USDC; admin/keeper may
+      sponsor from the treasury within `sponsor_budget`.
+- [x] `update_config` (admin, every field optional, `Config::validate` bounds)
+      and `set_volatility` (keeper or admin).
+- [x] Market ids: client-random u64, retried on collision. Decided against a
+      program-derived id: anything the program derives is predictable, so
+      easier to squat in pm-AMM's shared id space.
+- [x] Resolver matrix: partial, wrong feed, before start, after end, wrong expo,
+      wide confidence, non-positive price, no cross, wrong owner, second proof,
+      proof after settle, settle before grace, late proof inside grace.
+- [ ] Devnet run of a near-spot market: still blocked on devnet SOL. Without a
+      Hermes key, the devnet config accepts a 1-hour-old spot so Pyth's
+      sponsored feed (updates ~every 30 min on devnet) can be the spot source.
+
+**Phase 1 results** (`pnpm test`: 7 unit + 12 LiteSVM tests)
+
+| Check | Result |
+|---|---|
+| Onchain opening price vs host vs Python `erfc` | Identical bps on every case (5.55 %, 2.15 %, 24.81 %, 52.00 %, 20.48 %, 34.66 %, 2.82 %) |
+| `create_touch_market` compute | 887k CU (pricing adds ~45k) |
+| Direct pm-AMM swap compute | 173–197k CU on a fresh market, **530–610k CU once time has passed** (pm-AMM accrues L_eff decay first) |
+| Short windows | At σ 60 %, a 10-min market 1 % from spot opens at 0.01 % and is refused; 0.5 % away opens at 5.55 % |
+
+Consequences for Phase 2:
+
+- One pm-AMM swap per transaction. The watcher's "prove + treasury YES buy"
+  fits (≈ 8k + 610k), but `trade` must request ~1M CU and can never batch two
+  swaps. Clients must always prepend a compute-budget instruction.
+- Demo markets (10 min) must sit 0.5–0.6 % from spot; anything farther is
+  refused by the 1 % floor.
+- Hermes needs an API key (401 without one; the Pyth docs don't say which
+  header). The watcher, the "Prove it" button and fresh mainnet spot depend on
+  it, so it is the first thing to settle in Phase 2.
 
 ## Phase 2 — Thesis layer + watcher (Day 3)
 

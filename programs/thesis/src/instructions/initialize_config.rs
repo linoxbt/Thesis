@@ -14,8 +14,17 @@ pub struct InitializeConfigArgs {
     pub creator_share_bps: u16,
     pub grace_secs: u32,
     pub max_conf_bps: u16,
+    pub min_seed_per_market: u64,
     pub max_seed_per_market: u64,
     pub max_cover_per_wallet: u64,
+    pub sponsor_budget: u64,
+    pub sol_vol_bps: u32,
+    pub max_vol_age_secs: u32,
+    pub max_spot_age_secs: u32,
+    pub min_strike_distance_bps: u16,
+    pub max_strike_distance_bps: u16,
+    pub min_open_bps: u16,
+    pub max_open_bps: u16,
     /// Lamports moved to the Authority PDA to pay pm-AMM rent.
     pub authority_funding: u64,
 }
@@ -55,6 +64,7 @@ pub struct InitializeConfig<'info> {
 }
 
 pub fn handler(ctx: Context<InitializeConfig>, args: InitializeConfigArgs) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
     let config = &mut ctx.accounts.config;
     config.admin = ctx.accounts.admin.key();
     config.keeper = args.keeper;
@@ -66,9 +76,20 @@ pub fn handler(ctx: Context<InitializeConfig>, args: InitializeConfigArgs) -> Re
     config.lp_rebate_bps = 0;
     config.grace_secs = args.grace_secs;
     config.max_conf_bps = args.max_conf_bps;
+    config.min_seed_per_market = args.min_seed_per_market;
     config.max_seed_per_market = args.max_seed_per_market;
     config.max_cover_per_wallet = args.max_cover_per_wallet;
+    config.sponsor_budget = args.sponsor_budget;
+    config.sol_vol_bps = args.sol_vol_bps;
+    config.vol_updated_ts = now;
+    config.max_vol_age_secs = args.max_vol_age_secs;
+    config.max_spot_age_secs = args.max_spot_age_secs;
+    config.min_strike_distance_bps = args.min_strike_distance_bps;
+    config.max_strike_distance_bps = args.max_strike_distance_bps;
+    config.min_open_bps = args.min_open_bps;
+    config.max_open_bps = args.max_open_bps;
     config.paused = false;
+    config.validate()?;
     config.bump = ctx.bumps.config;
     config.authority_bump = ctx.bumps.authority;
 

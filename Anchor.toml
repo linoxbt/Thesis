@@ -18,4 +18,4 @@ cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "cargo test -p thesis --test spike -- --nocapture"
+test = "cd tests/harness && cargo test --tests -- --test-threads=1"

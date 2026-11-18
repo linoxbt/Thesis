@@ -5,11 +5,13 @@
  *   authority, treasury seed) -> buy YES directly on pm-AMM -> watch Pyth ->
  *   prove_touch if the strike is crossed -> settle after end + grace.
  *
- * Proof source: Pyth's sponsored SOL/USD feed account on devnet is itself a
- * fully verified PriceUpdateV2, so prove_touch can read it directly. (The
- * production watcher posts the exact crossing update from Hermes instead.)
+ * Price source: Pyth's sponsored SOL/USD account on devnet is itself a fully
+ * verified PriceUpdateV2, used here both as the spot for the opening price and
+ * as the touch proof. It only updates about every 30 minutes on devnet, so the
+ * devnet config allows a 1-hour-old spot (mainnet: 60 s) and touches are only
+ * seen at those prints. Production posts fresh Hermes updates instead.
  *
- * Usage: pnpm devnet:spike [--distance-bps 15] [--window 330] [--seed 25]
+ * Usage: pnpm devnet:spike [--distance-bps 60] [--window 7200] [--seed 25]
  * Needs ~2.5 devnet SOL for the first run (program deploy is separate:
  * `anchor deploy --provider.cluster devnet`) and mUSDC from the pm-AMM faucet.
  */
@@ -73,8 +75,8 @@ function readPythPrice(data: Buffer) {
 }
 
 async function main() {
-  const distanceBps = arg("distance-bps", 15); // strike 0.15% below spot by default
-  const windowSecs = arg("window", 330);
+  const distanceBps = arg("distance-bps", 60); // strike 0.6% below spot by default
+  const windowSecs = arg("window", 7200);
   const seedUsdc = arg("seed", 25);
 
   const wallet = Keypair.fromSecretKey(
@@ -108,8 +110,17 @@ async function main() {
         creatorShareBps: 5000,
         graceSecs: 120,
         maxConfBps: 50,
+        minSeedPerMarket: new BN(USDC),
         maxSeedPerMarket: new BN(100 * USDC),
         maxCoverPerWallet: new BN(250 * USDC),
+        sponsorBudget: new BN(150 * USDC),
+        solVolBps: 6000,
+        maxVolAgeSecs: 3 * 86_400,
+        maxSpotAgeSecs: 3_600, // devnet sponsored feed cadence; mainnet uses 60
+        minStrikeDistanceBps: 50,
+        maxStrikeDistanceBps: 5_000,
+        minOpenBps: 100,
+        maxOpenBps: 9_900,
         authorityFunding: new BN(0.5e9),
       })
       .accountsPartial({ admin: wallet.publicKey, config, authority, usdcMint: MUSDC, treasury })
@@ -146,18 +157,19 @@ async function main() {
       marketId,
       direction: { below: {} },
       strike: new BN(strike.toString()),
-      expo: spotInfo.expo,
       endTs: new BN(endTs),
-      initialPriceBps: 5000,
       seedAmount: new BN(seedUsdc * USDC),
+      sponsored: true,
       name: `SOL <= ${fmt(strike)}`,
     })
     .accountsPartial({
-      payer: wallet.publicKey,
+      creator: wallet.publicKey,
       config,
       authority,
       treasury,
+      creatorUsdc: null,
       usdcMint: MUSDC,
+      priceUpdate: SOL_USD_PRICE_ACCOUNT,
       pmMarket,
       yesMint,
       noMint,
@@ -176,12 +188,14 @@ async function main() {
     .rpc();
   console.log("create_touch_market", explorer(createSig));
   console.log("pm-AMM market", pmMarket.toBase58());
+  const created = await thesis.account.touchMarket.fetch(touchMarket);
+  console.log(`opening price (computed onchain): ${(created.initialPriceBps / 100).toFixed(2)}%`);
 
   // 4. Buy 5 mUSDC of YES directly on the pm-AMM; creator fee goes to the treasury.
   const userYes = getAssociatedTokenAddressSync(yesMint, wallet.publicKey);
   const userNo = getAssociatedTokenAddressSync(noMint, wallet.publicKey);
   const before = Number((await getAccount(connection, treasury)).amount);
-  const swapSig = await pm.methods
+  const swapBuilder = pm.methods
     .swap({ usdcToYes: {} }, new BN(5 * USDC), new BN(0))
     .accountsPartial({
       signer: wallet.publicKey,
@@ -198,10 +212,19 @@ async function main() {
       tokenProgram: TOKEN_PROGRAM_ID,
     })
     .preInstructions([
+      // pm-AMM's solver needs far more compute near the price extremes.
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
       createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, userYes, wallet.publicKey, yesMint),
       createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, userNo, wallet.publicKey, noMint),
-    ])
-    .rpc();
+    ]);
+  let swapSig: string;
+  try {
+    swapSig = await swapBuilder.rpc();
+  } catch (e) {
+    const sim = await swapBuilder.simulate().catch((se: { simulationResponse?: { logs?: string[] }; logs?: string[] }) => se);
+    console.error("swap failed; simulation logs:\n", JSON.stringify(sim, null, 1).slice(0, 4000));
+    throw e;
+  }
   const after = Number((await getAccount(connection, treasury)).amount);
   console.log(`swap 5 mUSDC -> YES ${explorer(swapSig)}  treasury +${(after - before) / USDC} mUSDC`);
 
