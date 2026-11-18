@@ -233,11 +233,16 @@ pill buttons. Branding is our own (see "Brand" below).
 - **Colour roles**: vermilion (`#ff6a3d` / `#e2531f`) is brand only, never data;
   green = YES/backing; blue = protection; red = loss/error; ink = primary CTAs.
   Chart marks validated per theme with the dataviz checker.
-- **Type**: Instrument Serif (display), Inter (UI), JetBrains Mono (numbers).
-- **Landing** `/`: nav, hero with an example call touching its strike, built-on
-  strip, live stats (protocol facts until there's activity), how it works,
-  two-markets bento, trustless settlement (the five proof checks), principles,
-  FAQ, CTA, footer. The app lives under `/app` (route group `(app)`).
+- **Type**: Sora 600 with tight tracking (display, landing), Inter (app UI),
+  JetBrains Mono (numbers).
+- **Landing** `/`: layout after the **Tradeboard** Framer template
+  (https://www.framer.com/marketplace/templates/tradeboard/), adapted: a deep
+  vermilion colour field (`#c93d14`, white text at 5:1) with a dot-matrix
+  texture drawn as a price touching its strike, notched black nav tab, a dark
+  product window (an example Thesis market: candles, trades, quick-trade ticket)
+  overlapping the field, a stack marquee, three settlement cards with one
+  highlight card, a two-markets band, how it works, "prove it yourself" code
+  tabs, a bento, FAQ, CTA and footer. The app lives under `/app`.
 
 - [x] Feed `/app`: Hot / New / Ending soon; each card has the creator, the call in
       one line, live YES %, protection badge, 24h volume, time left, and Back /

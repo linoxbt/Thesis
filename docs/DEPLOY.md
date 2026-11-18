@@ -1,32 +1,49 @@
 # Deploying
 
-Everything deploys from **`main`**: on every push, Vercel builds the web app
-and Railway builds the worker. Work happens on feature branches and lands on
-`main` to go live.
+Everything deploys from **`main`**. The Railway worker builds on every push to
+`main`. The Netlify site is built from `main` (CLI steps below) until the
+repository is linked for continuous deployment (one-time step below).
 
-## Web app — Vercel
+## Web app — Netlify
 
-Live: **https://thesis-linoxbt1.vercel.app** (project `thesis`, team `linoxbt1`).
+Live: **https://thesis-calls.netlify.app** (project `thesis-calls`, team `linoxbt`).
 
-The project is linked to `linoxbt/Thesis` with production branch **`main`**:
-every push to `main` deploys to production, and other branches get preview
-deployments. Root directory `apps/web`; Vercel installs the pnpm workspace from
-the repository root. Node 22. Framework: Next.js.
+Next.js runs on Netlify's OpenNext runtime (`@netlify/plugin-nextjs`, installed
+automatically): pages and `/api/*` route handlers become one Netlify Function.
+Build config: `apps/web/netlify.toml` (pnpm workspace package `@thesis/web`).
 
-Deployment protection (Vercel Authentication) covers **preview deployments
-only**; production is public.
+### Redeploy from a machine (CLI)
 
-### Environment variables (Vercel project settings)
+```bash
+pnpm install
+netlify link --id ff1fa544-069c-4a0a-9458-8fc147f43227 --filter @thesis/web   # once
+netlify build --context production --filter @thesis/web
+netlify deploy --prod --no-build --filter @thesis/web --dir apps/web/.netlify/static
+```
 
-| Variable | Environments | Value |
+`--dir apps/web/.netlify/static` matters for a separate build + deploy: the
+runtime moves Next's static assets there, and a `--no-build` deploy otherwise
+uploads `.next` and every `/_next/static` file 404s. (`netlify deploy --build
+--prod --filter @thesis/web` in one step handles this itself.)
+
+### Git continuous deployment from `main` (one-time link, in the Netlify UI)
+
+*Project configuration → Build & deploy → Continuous deployment → Link
+repository* → GitHub → `linoxbt/Thesis`, **branch to deploy `main`**, base
+directory `/`, package directory `apps/web`. Environment variables are already
+set on the project.
+`netlify.toml` supplies the build command and publish directory.
+
+### Environment variables (set in the Netlify UI, then redeploy)
+
+| Variable | Scope | Value |
 |---|---|---|
-| `NEXT_PUBLIC_CLUSTER` | all | `devnet` or `mainnet-beta` |
-| `NEXT_TELEMETRY_DISABLED` | all | `1` |
-| `DATABASE_URL` | production, preview | Railway Postgres public URL (sensitive) |
-| `NEXT_PUBLIC_RPC_URL` | optional | defaults to the public RPC of the cluster |
-| `RPC_URL` | optional | server-side RPC |
-| `TEAM_WALLETS` | optional | comma-separated, excluded from `/stats` |
-| `PYTH_PRICE_ACCOUNT` / `NEXT_PUBLIC_PYTH_PRICE_ACCOUNT` | optional | override of the SOL/USD price account |
+| `NEXT_PUBLIC_CLUSTER` | build | `devnet` (set in `netlify.toml`) or `mainnet-beta` |
+| `NEXT_PUBLIC_RPC_URL` | build | optional; defaults to the public RPC of the cluster |
+| `RPC_URL` | functions | server-side RPC (OrbitFlare or similar) |
+| `DATABASE_URL` | functions | Postgres for the indexer's read cache (secret) |
+| `TEAM_WALLETS` | functions | comma-separated, excluded from `/stats` |
+| `PYTH_PRICE_ACCOUNT` / `NEXT_PUBLIC_PYTH_PRICE_ACCOUNT` | both | optional override of the SOL/USD price account |
 
 ### Preview mode
 
@@ -39,9 +56,9 @@ data routes return empty results (`indexer: false`), `/api/config` answers 503.
 | Piece | Where | Notes |
 |---|---|---|
 | Program | Solana devnet `9yVcFaDEmBk1VU66tXxuvUujZXfiiT3ED1EpioVuug6h` | initialised by `scripts/init-devnet.ts`; keeper set by `scripts/set-keeper.ts` |
-| Postgres | Railway (project `thesis`, service `Postgres`) | public TCP proxy for the web app; the worker uses the private `DATABASE_URL` reference |
+| Postgres | Railway (project `thesis`, service `Postgres`) | public TCP proxy for Netlify; the worker uses the private `DATABASE_URL` reference |
 | Worker | Railway (service `worker`) | `services/worker/Dockerfile`, builds on every push to `main`; vars: `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `RPC_URL`, `PRICE_SOURCE=onchain`, `PYTH_PRICE_ACCOUNT`, `TREASURY_BUY_USDC`, `VOL_KEEPER=on`, `KEEPER_SECRET_KEY` (JSON byte array) |
-| Web | Vercel `thesis` | `DATABASE_URL` set to the Railway public URL |
+| Web | Netlify `thesis-calls` | `DATABASE_URL` set to the Railway public URL |
 
 The worker image pins pnpm 10.28.0: Corepack otherwise fetches the newest pnpm,
 whose default `minimumReleaseAge` rejects packages published in the last day.

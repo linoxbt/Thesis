@@ -8,7 +8,9 @@
  *   Signal vermilion is the brand: it marks "the touch" (logo dot, section ticks).
  *     It never encodes data.
  *   Data colours: YES/backing = green, protection = blue, loss/error = red.
- *   Type: Instrument Serif for display, Inter for UI, JetBrains Mono for numbers.
+ *   Type: Sora (600, tight) for display and the landing page, Inter for app UI,
+ *   JetBrains Mono for numbers. Landing layout after the Tradeboard Framer
+ *   template: one saturated colour field with a dot-matrix texture, black body.
  *
  * Chart marks (*-mark) are validated per theme with the dataviz palette checker
  *   (lightness band, CVD + normal-vision separation, >=3:1 vs panel):
@@ -35,7 +37,11 @@
   --color-yes-mark: #1f9d63;
   --color-guard-mark: #3b74e0;
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-display: "Sora", "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* The hero field: a deep vermilion that holds white body text (>=4.5:1). */
+  --color-field: #c93d14;
+  --color-field-2: #e0521f;
+  --color-night: #050506;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
@@ -82,12 +88,11 @@ body {
 
 .display {
   font-family: var(--font-display);
-  font-weight: 400;
-  letter-spacing: -0.015em;
+  font-weight: 600;
+  letter-spacing: -0.035em;
 }
-.display em,
-em.display {
-  font-style: italic;
+.font-display {
+  font-family: var(--font-display);
 }
 
 /* Section label: mono caps with a vermilion tick. */
@@ -244,7 +249,37 @@ details[open] .faq-plus {
   font-family: var(--font-sans) !important;
 }
 
+/* Mono chip, as on terminal UIs: "FEED", "PROOF", "$ program …" */
+.chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 9999px;
+  padding: 3px 10px;
+  background: color-mix(in oklab, var(--color-ink) 8%, transparent);
+  color: var(--color-muted);
+}
+
+/* Notched nav tab: angled sides, rounded bottom. */
+.notch {
+  clip-path: polygon(0 0, 100% 0, calc(100% - 44px) 100%, 44px 100%);
+}
+
+.marquee {
+  display: flex;
+  width: max-content;
+}
+
 @media (prefers-reduced-motion: no-preference) {
+  .marquee {
+    animation: marquee 40s linear infinite;
+  }
+  @keyframes marquee {
+    to {
+      transform: translateX(-50%);
+    }
+  }
   .touch-pulse {
     animation: touch-pulse 2.4s ease-out infinite;
     transform-box: fill-box;

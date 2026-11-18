@@ -10,47 +10,26 @@ interface Stats {
   touches_proven: number;
 }
 
-/** Protocol constants, shown until there is live activity worth showing. */
-const FACTS: [string, string][] = [
-  ["Fee per trade", "2%"],
-  ["Max proof confidence", "0.5%"],
-  ["Settlement grace", "120 s"],
-  ["Admin overrides", "0"],
-];
-
-/** Live numbers from the indexer once calls exist; protocol facts before that. */
-export function LiveStats() {
+/** One live line from the indexer, shown only once there is activity. */
+export function LiveLine() {
   const { data } = usePoll<Stats>("/api/stats", 30_000);
-  const live = data && Number(data.theses) > 0;
-  const cells: [string, string][] = live
-    ? [
-        ["Volume traded", usdc(data.volume_usdc, 0)],
-        ["Trading wallets", data.wallets],
-        ["Calls posted", data.theses],
-        ["Touches proven", String(data.touches_proven)],
-      ]
-    : FACTS;
+  if (!data || Number(data.theses) === 0) return null;
+  const items: [string, string][] = [
+    ["calls", data.theses],
+    ["traded", usdc(data.volume_usdc, 0)],
+    ["wallets", data.wallets],
+    ["touches proven", String(data.touches_proven)],
+  ];
   return (
-    <div className="border-y border-line" data-testid="live-stats">
-      <div className="mx-auto grid max-w-6xl grid-cols-2 md:grid-cols-4">
-        {cells.map(([k, v], i) => (
-          <div
-            key={k}
-            className={
-              "px-5 py-8 lg:px-8 " +
-              (i % 2 ? "border-l border-line " : "") +
-              (i === 2 ? "md:border-l " : "") +
-              (i > 1 ? "border-t border-line md:border-t-0" : "")
-            }
-          >
-            <div className="num text-3xl tracking-tight text-ink sm:text-4xl">{v}</div>
-            <div className="mt-2 flex items-center gap-2 text-sm text-faint">
-              {k}
-              {live && i === 0 && <span className="num rounded-full bg-panel-3 px-1.5 text-[10px] uppercase">live</span>}
-            </div>
-          </div>
-        ))}
-      </div>
+    <div className="num mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted" data-testid="live-stats">
+      <span className="flex items-center gap-2 text-ink">
+        <span className="h-1.5 w-1.5 rounded-full bg-yes" /> Live on devnet
+      </span>
+      {items.map(([k, v]) => (
+        <span key={k}>
+          <span className="text-ink">{v}</span> {k}
+        </span>
+      ))}
     </div>
   );
 }

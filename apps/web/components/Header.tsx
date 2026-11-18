@@ -192,7 +192,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 lg:px-8">
             <div className="flex items-center gap-4">
               <span className="lg:hidden">
-                <Logo href="/app" size={22} text="text-[22px]" />
+                <Logo href="/app" size={20} text="text-[19px]" />
               </span>
               <span className="hidden text-sm text-ink lg:inline">{title}</span>
               <span className="hidden sm:inline">

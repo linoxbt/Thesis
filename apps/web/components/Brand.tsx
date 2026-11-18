@@ -28,11 +28,11 @@ export function LogoMark({ size = 28, className = "", pulse = false }: { size?: 
 }
 
 export function Wordmark({ className = "" }: { className?: string }) {
-  return <span className={"display leading-none tracking-[-0.02em] " + className}>Thesis</span>;
+  return <span className={"font-display font-semibold leading-none tracking-[-0.035em] " + className}>Thesis</span>;
 }
 
 /** Mark + wordmark lockup, linking home. */
-export function Logo({ href = "/", size = 26, text = "text-[26px]" }: { href?: string; size?: number; text?: string }) {
+export function Logo({ href = "/", size = 24, text = "text-[21px]" }: { href?: string; size?: number; text?: string }) {
   return (
     <Link href={href} className="flex items-center gap-2 text-ink" aria-label="Thesis home">
       <LogoMark size={size} />

@@ -9,7 +9,7 @@ challenge, and a protection market that pays out if price touches the trader's
 liquidation level. Both settle from a Pyth-signed price that anyone can submit,
 with no admin.
 
-Status: live on devnet. Web: https://thesis-linoxbt1.vercel.app (landing at `/`, app at `/app`), deployed from `main`. Program `9yVcFaDE…` on devnet; worker and Postgres on Railway. See [`docs/DEPLOY.md`](docs/DEPLOY.md). See [`docs/PLAN.md`](docs/PLAN.md).
+Status: live on devnet. Web: https://thesis-calls.netlify.app (landing at `/`, app at `/app`), deployed from `main`. Program `9yVcFaDE…` on devnet; worker and Postgres on Railway. See [`docs/DEPLOY.md`](docs/DEPLOY.md). See [`docs/PLAN.md`](docs/PLAN.md).
 
 ## Layout
 
