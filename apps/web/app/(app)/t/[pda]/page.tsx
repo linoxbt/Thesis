@@ -130,7 +130,7 @@ export default function ThesisPage({ params }: { params: Promise<{ pda: string }
             Share on X ↗
           </a>
           {isCreator && claimable > 0n && (
-            <button onClick={() => void claimFees()} className="btn btn-yes px-3 py-1.5 text-xs">
+            <button onClick={() => void claimFees()} className="btn btn-primary px-3 py-1.5 text-xs">
               Claim {usdc(claimable)} creator fees
             </button>
           )}

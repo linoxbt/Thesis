@@ -160,7 +160,7 @@ export function MarketPanel({
                 Settled: <span className="text-ink">{m.winning_side === 1 ? "YES — touched" : "NO — not touched"}</span>
               </div>
               {wallet && winning > 0n ? (
-                <button onClick={() => void claim()} className="btn btn-yes mt-3 w-full">
+                <button onClick={() => void claim()} className="btn btn-primary mt-3 w-full">
                   Claim {usdc(winning)}
                 </button>
               ) : (
@@ -178,7 +178,7 @@ export function MarketPanel({
                 settlement, never at the moment of the touch.
               </div>
               {m.proof_tx && (
-                <a href={explorerTx(m.proof_tx)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-yes underline">
+                <a href={explorerTx(m.proof_tx)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-ink underline decoration-brand underline-offset-4">
                   Proof transaction ↗
                 </a>
               )}

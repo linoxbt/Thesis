@@ -91,7 +91,7 @@ export default function ProfilePage({ params }: { params: Promise<{ wallet: stri
               {data.history.map((h) => (
                 <tr key={h.pda} className="border-t border-line">
                   <td className="py-1.5">
-                    <Link href={`/t/${h.pda}`} className="hover:text-yes">
+                    <Link href={`/t/${h.pda}`} className="hover:underline decoration-brand underline-offset-4">
                       {callLine(h.direction, h.strike, h.expo, Number(h.end_ts))}
                     </Link>
                   </td>

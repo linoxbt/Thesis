@@ -2,33 +2,24 @@
 
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
-import { Activity, BarChart3, LayoutGrid, PenLine, Shield, User, Zap } from "lucide-react";
+import { ArrowUpRight, BarChart3, LayoutGrid, PenLine, Shield, User, Zap } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { IS_DEVNET } from "@/lib/client/config";
+import { Logo } from "./Brand";
 import { StatusBanner } from "./StatusBanner";
+import { ThemeToggle } from "./ThemeToggle";
 import { ago, pythToNumber, shortAddr, usd } from "@/lib/client/format";
 import { useSpot } from "@/lib/client/useConfig";
 import { useActiveWallet, useBurner } from "@/lib/client/wallet";
 
 const NAV = [
-  { href: "/", label: "Feed", icon: LayoutGrid },
+  { href: "/app", label: "Markets", icon: LayoutGrid },
   { href: "/new", label: "Post a call", icon: PenLine },
   { href: "/protect", label: "Protect", icon: Shield },
   { href: "/stats", label: "Stats", icon: BarChart3 },
 ];
-
-function Logo() {
-  return (
-    <Link href="/" className="flex items-center gap-2">
-      <span className="grid h-7 w-7 place-items-center rounded-lg bg-yes text-yes-ink">
-        <Activity size={16} strokeWidth={2.5} />
-      </span>
-      <span className="display text-xl text-ink">Thesis</span>
-    </Link>
-  );
-}
 
 /** Devnet/mainnet is always visible and clearly coloured (spec 8). */
 function ClusterBadge() {
@@ -50,7 +41,7 @@ function SpotTicker() {
   if (!data) return <span className="num text-xs text-faint">SOL …</span>;
   return (
     <span className="num flex items-center gap-2 text-xs text-muted" title="Latest Pyth SOL/USD print onchain">
-      <span className="h-1.5 w-1.5 rounded-full bg-yes shadow-[0_0_8px_var(--color-yes)]" />
+      <span className="h-1.5 w-1.5 rounded-full bg-brand" />
       SOL <span className="text-ink">{usd(pythToNumber(data.price, data.expo))}</span>
       <span className="hidden text-faint md:inline">· Pyth · {ago(data.publishTime)}</span>
     </span>
@@ -68,7 +59,7 @@ export function WalletButton() {
     return (
       <div className="flex items-center gap-2">
         {IS_DEVNET && (
-          <button onClick={() => void createBurner()} className="btn btn-yes whitespace-nowrap text-sm" data-testid="burner-start">
+          <button onClick={() => void createBurner()} className="btn btn-primary whitespace-nowrap text-sm" data-testid="burner-start">
             <Zap size={14} className="-mt-0.5 mr-1 inline" />
             Try it<span className="hidden sm:inline"> free</span>
           </button>
@@ -135,7 +126,7 @@ function NavLink({ href, label, icon: Icon, active }: { href: string; label: str
         (active ? "bg-panel-2 text-ink" : "text-muted hover:bg-panel-2/60 hover:text-ink")
       }
     >
-      <Icon size={16} className={active ? "text-yes" : ""} />
+      <Icon size={16} className={active ? "text-brand" : ""} />
       {label}
     </Link>
   );
@@ -143,7 +134,7 @@ function NavLink({ href, label, icon: Icon, active }: { href: string; label: str
 
 /** Dashboard shell: sidebar on desktop, top bar + bottom tabs on phones. */
 const TITLES: [RegExp, string][] = [
-  [/^\/$/, "Live calls"],
+  [/^\/app$/, "Markets"],
   [/^\/new/, "Post a call"],
   [/^\/protect/, "Protect a position"],
   [/^\/stats/, "Traction"],
@@ -156,12 +147,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const title = TITLES.find(([r]) => r.test(path))?.[1];
   const active = useActiveWallet();
   const { createBurner } = useBurner();
-  const isActive = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
+  const isActive = (href: string) => path === href || path.startsWith(href + "/");
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[232px_1fr]">
       <div className="hidden border-r border-line lg:block">
       <aside className="sticky top-0 flex h-screen flex-col px-4 py-5">
-        <Logo />
+        <Logo href="/app" />
         <nav className="mt-8 space-y-1">
           {NAV.map((n) => (
             <NavLink key={n.href} {...n} active={isActive(n.href)} />
@@ -179,16 +170,19 @@ export function AppShell({ children }: { children: ReactNode }) {
           {IS_DEVNET && (
             <div className="rounded-xl border border-line bg-panel p-3">
               <div className="flex items-center gap-2 text-sm text-ink">
-                <Zap size={14} className="text-yes" /> Test money
+                <Zap size={14} className="text-brand" /> Test money
               </div>
               <p className="mt-1 text-xs text-faint">Devnet: an instant wallet with free USDC. Nothing here has real value.</p>
               {!active && (
-                <button onClick={() => void createBurner()} className="btn btn-yes mt-3 w-full text-xs">
+                <button onClick={() => void createBurner()} className="btn btn-primary mt-3 w-full text-xs">
                   Get an instant wallet
                 </button>
               )}
             </div>
           )}
+          <Link href="/" className="mt-3 flex items-center gap-1 px-1 text-xs text-faint hover:text-ink">
+            About Thesis <ArrowUpRight size={12} />
+          </Link>
         </div>
       </aside>
       </div>
@@ -198,7 +192,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 lg:px-8">
             <div className="flex items-center gap-4">
               <span className="lg:hidden">
-                <Logo />
+                <Logo href="/app" size={22} text="text-[22px]" />
               </span>
               <span className="hidden text-sm text-ink lg:inline">{title}</span>
               <span className="hidden sm:inline">
@@ -206,7 +200,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <ClusterBadge />
+              <span className="hidden sm:inline">
+                <ClusterBadge />
+              </span>
+              <ThemeToggle />
               <WalletButton />
             </div>
           </div>
@@ -219,7 +216,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <nav className="fixed inset-x-0 bottom-0 z-20 flex justify-around border-t border-line bg-bg/95 py-2 backdrop-blur lg:hidden">
         {NAV.map((n) => (
-          <Link key={n.href} href={n.href} className={"flex flex-col items-center gap-0.5 text-[11px] " + (isActive(n.href) ? "text-yes" : "text-muted")}>
+          <Link key={n.href} href={n.href} className={"flex flex-col items-center gap-0.5 text-[11px] " + (isActive(n.href) ? "text-ink" : "text-faint")}>
             <n.icon size={18} />
             {n.label.replace(" a call", "")}
           </Link>

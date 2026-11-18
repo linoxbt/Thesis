@@ -105,7 +105,7 @@ export function TradeBox({ market, kind, initialSide = "buy_yes", compact, onDon
     return (
       <div className="rounded-2xl border border-line bg-panel-2 p-3 text-sm">
         {IS_DEVNET ? (
-          <button onClick={() => void createBurner()} className="btn btn-yes w-full">
+          <button onClick={() => void createBurner()} className="btn btn-primary w-full">
             Get an instant wallet to trade (free test USDC)
           </button>
         ) : (

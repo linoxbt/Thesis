@@ -45,12 +45,14 @@ Until the program is deployed and a database is attached, `/api/health`
 reports what's missing and every page shows a banner instead of failing:
 data routes return empty results (`indexer: false`), `/api/config` answers 503.
 
-## Still to deploy
+## Deployed
 
-1. **Program on devnet** — needs ~3 devnet SOL in the deployer wallet
-   (`anchor deploy --provider.cluster devnet`), then `initialize_config`.
-2. **Postgres** — Supabase or Netlify DB; set `DATABASE_URL` on Netlify and on
-   the worker.
-3. **Worker** (watcher + keeper + indexer + volatility keeper) — a long-running
-   Node process: Railway or any VM (`pnpm worker`, env as in
-   `services/worker/src/index.ts`). Netlify Functions can't host it.
+| Piece | Where | Notes |
+|---|---|---|
+| Program | Solana devnet `9yVcFaDEmBk1VU66tXxuvUujZXfiiT3ED1EpioVuug6h` | initialised by `scripts/init-devnet.ts`; keeper set by `scripts/set-keeper.ts` |
+| Postgres | Railway (project `thesis`, service `Postgres`) | public TCP proxy for Netlify; the worker uses the private `DATABASE_URL` reference |
+| Worker | Railway (service `worker`) | `services/worker/Dockerfile`, builds from this branch; vars: `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `RPC_URL`, `PRICE_SOURCE=onchain`, `PYTH_PRICE_ACCOUNT`, `TREASURY_BUY_USDC`, `VOL_KEEPER=on`, `KEEPER_SECRET_KEY` (JSON byte array) |
+| Web | Netlify `thesis-calls` | `DATABASE_URL` set to the Railway public URL |
+
+The worker image pins pnpm 10.28.0: Corepack otherwise fetches the newest pnpm,
+whose default `minimumReleaseAge` rejects packages published in the last day.

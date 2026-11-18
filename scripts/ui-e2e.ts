@@ -29,8 +29,20 @@ async function main() {
   });
   page.on("pageerror", (e: Error) => consoleErrors.push(String(e)));
 
-  // 1. Feed
+  // 0. Landing: renders, theme toggles and persists, "Launch app" opens the feed
   await page.goto(BASE + "/");
+  await page.waitForSelector('[data-testid="launch-app"]');
+  const before = await page.evaluate(() => document.documentElement.dataset.theme);
+  await page.click('[data-testid="theme-toggle"]');
+  const after = await page.evaluate(() => document.documentElement.dataset.theme);
+  await page.reload();
+  const kept = await page.evaluate(() => document.documentElement.dataset.theme);
+  check("landing: theme toggles and persists", !!before && before !== after && kept === after, `${before} -> ${after}, after reload ${kept}`);
+  await page.screenshot({ path: `${OUT}/landing-desktop.png`, fullPage: true });
+  await page.click('[data-testid="launch-app"]');
+  await page.waitForURL(/\/app$/);
+
+  // 1. Feed
   await page.waitForSelector('[data-testid="thesis-card"]', { timeout: 30_000 });
   const cards = await page.locator('[data-testid="thesis-card"]').count();
   check("feed shows thesis cards", cards >= 3, `${cards} cards`);
@@ -108,6 +120,8 @@ async function main() {
     const mobile = await browser.newContext({ ...devices["iPhone 13"] });
     const m = await mobile.newPage();
     await m.goto(BASE + "/");
+    await m.screenshot({ path: `${OUT}/landing-mobile.png`, fullPage: true });
+    await m.goto(BASE + "/app");
     await m.waitForSelector('[data-testid="thesis-card"]');
     await m.screenshot({ path: `${OUT}/feed-mobile.png`, fullPage: true });
     await m.goto(thesisUrl);

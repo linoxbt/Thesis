@@ -34,7 +34,7 @@ export interface FeedThesis {
 export function Avatar({ addr, size = 28 }: { addr: string; size?: number }) {
   return (
     <span
-      className="num grid shrink-0 place-items-center rounded-full bg-yes/10 text-[10px] uppercase text-yes ring-1 ring-yes/25"
+      className="num grid shrink-0 place-items-center rounded-full bg-panel-3 text-[10px] uppercase text-muted ring-1 ring-line-2"
       style={{ width: size, height: size }}
     >
       {addr.slice(0, 2)}
@@ -51,7 +51,7 @@ export function StateBadge({ touched, settled, outcome, winning }: { touched: bo
   if (touched) return <span className={base + "bg-yes/10 text-yes ring-1 ring-yes/30"}>Touched · settles at end</span>;
   return (
     <span className={base + "bg-panel-3 text-muted"}>
-      <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-yes align-middle" />
+      <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-brand align-middle" />
       Live
     </span>
   );

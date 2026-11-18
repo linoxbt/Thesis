@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@anchor-lang/core": "^1.2.2",
-    "@fontsource/instrument-sans": "^5.3.0",
+    "@fontsource/instrument-serif": "^5.3.0",
     "@fontsource/inter": "^5.3.0",
     "@fontsource/jetbrains-mono": "^5.3.0",
     "@solana/spl-token": "^0.4.15",
