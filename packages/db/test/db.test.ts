@@ -2,8 +2,8 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { Pool } from "pg";
 import {
-  claimAlert, consumeLinkCode, createLinkCode, feed, insertCrossing, insertTrade, migrate, profile, saveSignedProfile, setMarketPrice,
-  telegramLink, unlinkChat, setMarketTx, setThesisText, sha256Hex,
+  claimAlert, consumeLinkCode, createLinkCode, faucetAllowance, feed, insertCrossing, insertTrade, migrate, profile, saveSignedProfile, setMarketPrice,
+  recordFaucetClaim, telegramLink, unlinkChat, setMarketTx, setThesisText, sha256Hex,
   stats, thesisDetail, upsertMarket, upsertProfile, upsertThesis, type MarketRow, type TradeRow,
 } from "../src";
 
@@ -27,7 +27,7 @@ const trade = (over: Partial<TradeRow>): TradeRow => ({
 
 before(async () => {
   await db.query("drop schema public cascade; create schema public;");
-  assert.deepEqual(await migrate(db), ["001_init.sql", "002_telegram.sql"]);
+  assert.deepEqual(await migrate(db), ["001_init.sql", "002_telegram.sql", "003_faucet.sql"]);
   assert.deepEqual(await migrate(db), [], "migrations are idempotent");
 
   // Alice: thesis T1 (conviction C1 above, protection P1 below), and T2 (missed, old).
@@ -150,4 +150,15 @@ test("telegram: one-time link codes, links, unlink, alert de-duplication", async
   assert.equal(await claimAlert(db, "k1"), false, "an alert is claimed once");
   assert.deepEqual(await unlinkChat(db, 42), ["Alice"]);
   assert.equal(await telegramLink(db, "Alice"), null);
+});
+
+test("faucet: one SOL drip per wallet per window, and a daily cap", async () => {
+  const opts = { perWalletHours: 12, dailyLamports: 300_000_000n };
+  assert.deepEqual(await faucetAllowance(db, "W1", 150_000_000n, opts), { ok: true });
+  await recordFaucetClaim(db, "W1", 150_000_000n);
+  assert.equal((await faucetAllowance(db, "W1", 150_000_000n, opts)).ok, false, "same wallet waits");
+  assert.equal((await faucetAllowance(db, "W2", 150_000_000n, opts)).ok, true);
+  await recordFaucetClaim(db, "W2", 150_000_000n);
+  const capped = await faucetAllowance(db, "W3", 150_000_000n, opts);
+  assert.equal(capped.ok, false, "daily cap reached");
 });

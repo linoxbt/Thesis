@@ -107,12 +107,15 @@ export default function CreatePage() {
       : null;
   const total = seedMicro * (protect ? 2n : 1n) + (protect ? coverMicro : 0n);
   const [balance, setBalance] = useState<bigint | null>(null);
+  const [solBalance, setSolBalance] = useState<number | null>(null);
   useEffect(() => {
     if (!wallet || !usdcMint) return setBalance(null);
     const ata = getAssociatedTokenAddressSync(usdcMint, wallet.publicKey);
     let live = true;
-    const load = () =>
-      connection.getTokenAccountBalance(ata).then((b) => live && setBalance(BigInt(b.value.amount))).catch(() => live && setBalance(0n));
+    const load = () => {
+      connection.getBalance(wallet.publicKey).then((l) => live && setSolBalance(l / 1e9)).catch(() => {});
+      return connection.getTokenAccountBalance(ata).then((b) => live && setBalance(BigInt(b.value.amount))).catch(() => live && setBalance(0n));
+    };
     void load();
     const t = setInterval(load, 15_000);
     return () => {
@@ -122,7 +125,10 @@ export default function CreatePage() {
   }, [wallet, usdcMint, connection]);
   const resuming = steps?.some((s) => s.status === "done");
   const shortBy = !resuming && balance !== null && balance < total ? total - balance : 0n;
-  const blocked = !preview || !!preview.err || !!preview.pErr || !!seedErr || !usdcMint || config?.paused || shortBy > 0n;
+  // Each market's pm-AMM accounts cost ~0.0375 SOL of rent (paid by the creator), plus fees.
+  const solNeeded = (protect ? 2 : 1) * 0.0375 + 0.01;
+  const solShort = !resuming && solBalance !== null && solBalance < solNeeded;
+  const blocked = !preview || !!preview.err || !!preview.pErr || !!seedErr || !usdcMint || config?.paused || shortBy > 0n || solShort;
 
   const setStep = (key: StepKey, patch: Partial<Step>) =>
     setSteps((xs) => xs?.map((s) => (s.key === key ? { ...s, ...patch } : s)) ?? null);
@@ -420,11 +426,17 @@ export default function CreatePage() {
           </div>
         )}
         <div className="num mb-3 text-sm text-muted">
-          Total: <span className="text-ink">{usdc(total)}</span> USDC + ~{protect ? "0.1" : "0.05"} SOL rent
+          Total: <span className="text-ink">{usdc(total)}</span> USDC + ~{solNeeded.toFixed(2)} SOL rent
           {balance !== null && (
             <span className="block text-xs text-faint">
               wallet: {usdc(balance)} USDC
               {shortBy > 0n && <span className="text-bad"> · {usdc(shortBy)} short{IS_DEVNET ? ": top up from the wallet menu" : ""}</span>}
+              {solBalance !== null && <span> · {solBalance.toFixed(3)} SOL</span>}
+              {solShort && (
+                <span className="text-bad" data-testid="sol-short">
+                  {" "}· needs ~{solNeeded.toFixed(2)} SOL{IS_DEVNET ? ": top up from the wallet menu" : ""}
+                </span>
+              )}
             </span>
           )}
         </div>
