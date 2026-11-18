@@ -124,7 +124,7 @@ export default function ProtectPage() {
             <button
               key={s}
               onClick={() => (setSide(s), setLiq(""))}
-              className={"rounded-full py-1.5 text-sm font-medium " + (side === s ? "bg-guard text-guard-ink" : "text-muted hover:text-ink")}
+              className={"rounded-full py-1.5 text-sm font-medium " + (side === s ? "bg-ink text-bg" : "text-muted hover:text-ink")}
             >
               I'm {s} SOL
             </button>
@@ -175,7 +175,7 @@ export default function ProtectPage() {
         <p className="text-[11px] text-faint">Price-touch protection, paid at window end. Not a liquidation guarantee.</p>
         {!wallet ? (
           IS_DEVNET ? (
-            <button onClick={() => void createBurner()} className="btn btn-guard w-full py-2.5">
+            <button onClick={() => void createBurner()} className="btn btn-primary w-full py-2.5">
               Get an instant wallet (free test USDC)
             </button>
           ) : (
@@ -185,7 +185,7 @@ export default function ProtectPage() {
           <button
             onClick={() => void go()}
             disabled={busy || !view || !!view.err || !usdcMint}
-            className="btn btn-guard w-full py-2.5 disabled:opacity-40"
+            className="btn btn-primary w-full py-2.5 disabled:opacity-40"
           >
             {busy ? "Working…" : "Protect me"}
           </button>

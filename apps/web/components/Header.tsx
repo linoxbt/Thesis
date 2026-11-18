@@ -27,7 +27,7 @@ function ClusterBadge() {
     <span
       className={
         "num whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] uppercase tracking-wide " +
-        (IS_DEVNET ? "bg-guard/10 text-guard ring-1 ring-guard/30" : "bg-bad/10 text-bad ring-1 ring-bad/40")
+        (IS_DEVNET ? "bg-panel-3 text-muted ring-1 ring-line-2" : "bg-bad/10 text-bad ring-1 ring-bad/40")
       }
       title={IS_DEVNET ? "Devnet: test money, nothing has real value" : "Mainnet: real USDC"}
     >
