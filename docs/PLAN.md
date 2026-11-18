@@ -258,7 +258,13 @@ pill buttons. Branding is our own (see "Brand" below).
       failed step.
 - [x] Protect `/protect`: long/short, liquidation price, window, spend; "pays $X
       if SOL touches $K before T, costs $Y"; creates the market and buys cover.
-- [x] Profile `/u/:wallet` and Stats `/stats` (proof transaction links).
+- [x] Public profile `/u/:wallet` and Stats `/stats` (proof transaction links).
+- [x] Profile `/profile` (your own; in the nav and the wallet menu): display
+      name and X handle saved with a wallet-signed message (ed25519, verified
+      server-side; each edit must be recent and newer than the stored one, so a
+      signature can't be replayed; names can't include "Thesis"), SOL and USDC
+      balances, instant-wallet top-up / forget or disconnect, then the same
+      stats and history as the public page. The logo links home (`/`).
 - [x] Wallets: instant burner on devnet (localStorage key, funded through
       `/api/faucet`) plus any Wallet Standard wallet.
 - [x] Exact quotes by simulating the real transaction (no pm-AMM maths copied);

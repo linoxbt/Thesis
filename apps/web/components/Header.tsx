@@ -19,6 +19,7 @@ const NAV = [
   { href: "/new", label: "Post a call", icon: PenLine },
   { href: "/protect", label: "Protect", icon: Shield },
   { href: "/stats", label: "Stats", icon: BarChart3 },
+  { href: "/profile", label: "Profile", icon: User },
 ];
 
 /** Devnet/mainnet is always visible and clearly coloured (spec 8). */
@@ -81,11 +82,12 @@ export function WalletButton() {
       {open && (
         <div className="panel absolute right-0 z-30 mt-2 w-64 p-2 text-sm shadow-2xl">
           <Link
-            href={`/u/${active.publicKey.toBase58()}`}
+            href="/profile"
             className="block rounded-lg px-3 py-2 hover:bg-panel-2"
             onClick={() => setOpen(false)}
+            data-testid="wallet-menu-profile"
           >
-            My profile
+            Profile
           </Link>
           {active.kind === "burner" ? (
             <>
@@ -140,6 +142,7 @@ const TITLES: [RegExp, string][] = [
   [/^\/stats/, "Traction"],
   [/^\/t\//, "Thesis"],
   [/^\/u\//, "Profile"],
+  [/^\/profile/, "Profile"],
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -152,19 +155,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="min-h-screen lg:grid lg:grid-cols-[232px_1fr]">
       <div className="hidden border-r border-line lg:block">
       <aside className="sticky top-0 flex h-screen flex-col px-4 py-5">
-        <Logo href="/app" />
+        <Logo href="/" />
         <nav className="mt-8 space-y-1">
           {NAV.map((n) => (
             <NavLink key={n.href} {...n} active={isActive(n.href)} />
           ))}
-          {active && (
-            <NavLink
-              href={`/u/${active.publicKey.toBase58()}`}
-              label="My profile"
-              icon={User}
-              active={path.startsWith("/u/")}
-            />
-          )}
         </nav>
         <div className="mt-auto">
           {IS_DEVNET && (
@@ -192,7 +187,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 lg:px-8">
             <div className="flex items-center gap-4">
               <span className="lg:hidden">
-                <Logo href="/app" size={20} text="text-[19px]" />
+                <Logo href="/" size={20} text="text-[19px]" />
               </span>
               <span className="hidden text-sm text-ink lg:inline">{title}</span>
               <span className="hidden sm:inline">
