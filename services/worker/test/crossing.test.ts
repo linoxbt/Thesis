@@ -2,8 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { provable, settleable, type MarketView } from "../src/crossing";
-import { decodePriceUpdateV2, type PriceTick } from "../src/pyth";
+import { provable, settleable, type MarketView } from "@thesis/chain";
+import { decodePriceUpdateV2, type PriceTick } from "@thesis/chain";
 
 const FEED = Buffer.from("ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d", "hex");
 const STRIKE = 7_400_000_000n; // $74.00

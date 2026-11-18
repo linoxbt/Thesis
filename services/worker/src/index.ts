@@ -1,6 +1,7 @@
 /**
- * Thesis worker: the watcher (proves touches) and the keeper (settles), in one
- * process. Phase 3 adds the indexer loop here.
+ * Thesis worker, one process: the watcher (proves touches), the keeper
+ * (settles), and, when DATABASE_URL is set, the indexer (chain -> Postgres)
+ * and the volatility keeper (posts 7-day realised vol).
  *
  * Env:
  *   RPC_URL             default https://api.devnet.solana.com
@@ -9,13 +10,19 @@
  *   PYTH_PRICE_ACCOUNT  default 7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE (sponsored SOL/USD)
  *   TREASURY_BUY_USDC   USDC the treasury buys right after a proven touch (default 0 = off)
  *   KEEPER_INTERVAL_MS  default 30000
+ *   DATABASE_URL        Postgres (Supabase) for the indexer; unset = no indexer
+ *   INDEXER_INTERVAL_MS default 15000
+ *   VOL_KEEPER          "on" (default when DATABASE_URL is set) | "off"
  */
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { connect, migrate } from "@thesis/db";
 import { log, makeCtx } from "./client";
+import { Indexer } from "./indexer";
 import { Keeper } from "./keeper";
 import { OnchainFeedSource } from "./sources";
+import { VolatilityKeeper } from "./volkeeper";
 import { Watcher } from "./watcher";
 
 async function main() {
@@ -39,10 +46,32 @@ async function main() {
   await watcher.start();
   await keeperLoop.start();
 
+  let indexer: Indexer | undefined;
+  let volKeeper: VolatilityKeeper | undefined;
+  if (process.env.DATABASE_URL) {
+    const db = connect();
+    const applied = await migrate(db);
+    if (applied.length) log("worker", `migrations applied: ${applied.join(", ")}`);
+    indexer = new Indexer(ctx, db, {
+      intervalMs: Number(process.env.INDEXER_INTERVAL_MS ?? "15000"),
+      priceSampleSecs: 30,
+      spotAccount: account,
+    });
+    await indexer.start();
+    if ((process.env.VOL_KEEPER ?? "on") !== "off") {
+      volKeeper = new VolatilityKeeper(ctx, db);
+      await volKeeper.start();
+    }
+  } else {
+    log("worker", "DATABASE_URL not set: indexer and volatility keeper are off");
+  }
+
   const shutdown = async () => {
     log("worker", "shutting down");
     await watcher.stop();
     await keeperLoop.stop();
+    await indexer?.stop();
+    await volKeeper?.stop();
     process.exit(0);
   };
   process.on("SIGINT", shutdown);

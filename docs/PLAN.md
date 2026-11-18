@@ -177,12 +177,42 @@ Worker (`services/worker`, TypeScript):
 
 ## Phase 3 — Offchain (Day 4)
 
-- `services/worker`: add the indexer loop next to the watcher and keeper.
-- Keeper: post `set_volatility` daily (7-day realised vol needs a price
-  history source; without Hermes, sample the onchain feed or set it by hand).
-- `claim_seed_residuals` for sponsored markets (cut first if behind).
-- Postgres (Supabase) schema from spec §7; OrbitFlare stream + backfill.
-- API routes: feed, thesis, profile, stats, prove, OG card, faucet.
+Workspace: `packages/chain` (IDLs, Pyth decoding, `provable()`, pm-AMM price),
+`packages/db` (schema, writes, API queries), `services/worker`, `apps/web`.
+
+- [x] Postgres schema (spec section 7): markets, theses, trades, crossings,
+      price_points, spot_samples, profiles, fee_claims, indexer cursors,
+      `creator_stats` view. Plain SQL migrations (`pnpm --filter @thesis/db migrate`).
+- [x] Indexer loop in the worker: account snapshots (state), Thesis program
+      transactions (Anchor events: created/proof/settle txs, trades via
+      Thesis, treasury buys, fee claims, crossings), direct pm-AMM swaps on our
+      markets (decoded from instructions + token balance changes, including
+      the treasury's 1 %), pool price points every 30 s, spot samples.
+      Idempotent: clear the cursors to rebuild. Works over any RPC (OrbitFlare
+      or public); Yellowstone gRPC can replace polling later.
+- [x] Volatility keeper: 7-day realised vol from spot samples, posted when it
+      moves >10 % or is a day old; re-posts the current value if data is thin.
+- [x] API (Next.js route handlers in `apps/web`): `GET /api/theses?sort=`,
+      `GET /api/theses/:pda`, `POST /api/theses/:pda/text` (accepted only if it
+      hashes to the onchain `text_hash`), `GET /api/profiles/:wallet`,
+      `GET /api/stats` (team wallets and treasury excluded),
+      `POST /api/prove/:market` (Hermes-free: unsigned `prove_touch` tx from the
+      onchain Pyth account, or 409 with the reason), `GET /api/og/thesis/:pda`
+      (share card), `POST /api/faucet` (devnet only).
+- [ ] `POST /api/profiles/:wallet` (display name / X handle) needs a signed
+      message check; deferred to Phase 4 with the wallet UI.
+- [ ] `claim_seed_residuals` for sponsored markets: cut (spec cut line).
+- [ ] Supabase project + Railway service: not created yet; both take
+      `DATABASE_URL` / env only.
+
+**Phase 3 results**
+
+| Check | Result |
+|---|---|
+| DB tests (real Postgres 16) | 5 pass: migrations idempotent, feed sorts, detail, text hash check, profile, stats exclusions |
+| Worker tests | 8 pass incl. realised vol within 12 % on simulated paths (σ 30/60/120 %) |
+| Local end-to-end (validator cloning devnet pm-AMM + Postgres) | see below |
+| API smoke test against that data | every route correct, bad inputs 400/404/409 |
 
 ## Phase 4 — Frontend (Day 5)
 

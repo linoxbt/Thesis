@@ -1,0 +1,38 @@
+import "server-only";
+import { PublicKey } from "@solana/web3.js";
+import { connect } from "@thesis/db";
+import type { Pool } from "pg";
+
+const g = globalThis as unknown as { __thesisDb?: Pool };
+/** One pool per server process (survives dev hot reloads). */
+export function db(): Pool {
+  g.__thesisDb ??= connect();
+  return g.__thesisDb;
+}
+
+export const env = {
+  cluster: (process.env.NEXT_PUBLIC_CLUSTER ?? "devnet") as "devnet" | "mainnet-beta",
+  rpcUrl: process.env.RPC_URL ?? process.env.NEXT_PUBLIC_RPC_URL ?? "https://api.devnet.solana.com",
+  teamWallets: (process.env.TEAM_WALLETS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+  creatorShareBps: Number(process.env.CREATOR_SHARE_BPS ?? "5000"),
+  pythPriceAccount: process.env.PYTH_PRICE_ACCOUNT,
+  faucetUrl: process.env.FAUCET_URL ?? "https://pm-amm-devnet.vercel.app/api/faucet",
+};
+
+/** A base58 public key or null. */
+export function pubkey(s: string | null | undefined): PublicKey | null {
+  if (!s) return null;
+  try {
+    return new PublicKey(s);
+  } catch {
+    return null;
+  }
+}
+
+export const json = (data: unknown, status = 200, cacheSecs = 0) =>
+  Response.json(data, {
+    status,
+    headers: cacheSecs ? { "cache-control": `public, s-maxage=${cacheSecs}, stale-while-revalidate=${cacheSecs * 4}` } : {},
+  });
+
+export const bad = (message: string, status = 400) => json({ error: message }, status);

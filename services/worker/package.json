@@ -1,0 +1,14 @@
+{
+  "name": "@thesis/worker",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@thesis/db": "workspace:*",
+    "@thesis/chain": "workspace:*"
+  }
+}

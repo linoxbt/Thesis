@@ -1,10 +1,10 @@
 import { ComputeBudgetProgram, PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { BN } from "@anchor-lang/core";
 import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { provable } from "./crossing";
+import { provable } from "@thesis/chain";
 import { daoUsdc, log, openMarkets, pmAccounts, toView, type Ctx, type TouchMarketAccount } from "./client";
 import type { PriceSource } from "./sources";
-import type { PriceTick } from "./pyth";
+import type { PriceTick } from "@thesis/chain";
 
 export interface WatcherOptions {
   /** USDC (6 dp) the treasury spends on YES right after proving a touch on a

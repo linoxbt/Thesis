@@ -8,7 +8,7 @@
  */
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { writeFileSync } from "node:fs";
-import { decodePriceUpdateV2, PYTH_RECEIVER } from "../services/worker/src/pyth";
+import { decodePriceUpdateV2, PYTH_RECEIVER } from "@thesis/chain";
 
 const SOL_USD = new PublicKey("7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE");
 

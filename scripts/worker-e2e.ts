@@ -3,19 +3,26 @@
  * pm-AMM from devnet: create a sponsored TouchBelow market + thesis, run the
  * watcher (on a crafted price account that crosses the strike) and the keeper,
  * and assert the market was proven, bought into by the treasury, settled YES,
- * and recorded as a hit.
+ * and recorded as a hit. With DATABASE_URL set, also runs the indexer and
+ * checks every row it should have written (trades via Thesis and direct).
  *
  *   PRICE_ACCOUNT=<crafted> RPC_URL=http://127.0.0.1:8899 tsx scripts/worker-e2e.ts
  */
 import { BN } from "@anchor-lang/core";
+import { connect, migrate } from "@thesis/db";
+import { Indexer } from "../services/worker/src/indexer";
 import { ComputeBudgetProgram, Keypair, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY, Transaction } from "@solana/web3.js";
-import { createTransferInstruction, getAccount, getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import {
+  createAssociatedTokenAccountIdempotentInstruction, createTransferInstruction, getAccount, getAssociatedTokenAddressSync,
+  TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
+import { daoUsdc } from "../services/worker/src/client";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { creatorStatsPda, log, makeCtx, PM_AMM, pmAccounts, pmPda } from "../services/worker/src/client";
 import { Keeper } from "../services/worker/src/keeper";
-import { decodePriceUpdateV2 } from "../services/worker/src/pyth";
+import { decodePriceUpdateV2 } from "@thesis/chain";
 import { OnchainFeedSource } from "../services/worker/src/sources";
 import { Watcher } from "../services/worker/src/watcher";
 
@@ -132,6 +139,46 @@ async function main() {
     .rpc();
   const hitsBefore = (await program.account.creatorStats.fetch(stats)).hit;
 
+  // One trade through Thesis (the creator's own: flagged as self-volume) and
+  // one direct pm-AMM swap, so the indexer sees both kinds.
+  const walletUsdc = getAssociatedTokenAddressSync(MUSDC, wallet.publicKey);
+  const userYes = getAssociatedTokenAddressSync(yesMint, wallet.publicKey);
+  const userNo = getAssociatedTokenAddressSync(noMint, wallet.publicKey);
+  const atas = [
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+    createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, userYes, wallet.publicKey, yesMint),
+    createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, userNo, wallet.publicKey, noMint),
+  ];
+  const tradeSig = await program.methods
+    .trade({ buyNo: {} }, new BN(3 * USDC), new BN(0))
+    .accountsPartial({
+      trader: wallet.publicKey, config, authority, treasury, thesis, creatorStats: stats, touchMarket, pmMarket,
+      usdcMint: MUSDC, yesMint, noMint, vault, traderUsdc: walletUsdc, traderYes: userYes, traderNo: userNo,
+      daoUsdc: daoUsdc(MUSDC), pmAmmProgram: PM_AMM, tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .preInstructions(atas)
+    .rpc();
+  const pmIdl = JSON.parse(readFileSync("idls/pm_amm.json", "utf8"));
+  const pm = new (await import("@anchor-lang/core")).Program(pmIdl, program.provider);
+  const directSig = await pm.methods
+    .swap({ usdcToYes: {} }, new BN(2 * USDC), new BN(0))
+    .accountsPartial({
+      signer: wallet.publicKey, market: pmMarket, collateralMint: MUSDC, yesMint, noMint, vault,
+      userCollateral: walletUsdc, userYes, userNo, daoUsdc: daoUsdc(MUSDC), creatorUsdc: treasury, tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
+    .rpc();
+  log("e2e", `trade via Thesis ${tradeSig.slice(0, 12)}..., direct swap ${directSig.slice(0, 12)}...`);
+
+  const db = process.env.DATABASE_URL ? connect() : undefined;
+  let indexer: Indexer | undefined;
+  if (db) {
+    await db.query("drop schema public cascade; create schema public;");
+    await migrate(db);
+    indexer = new Indexer(ctx, db, { intervalMs: 10_000, priceSampleSecs: 20, spotAccount: SPOT_ACCOUNT });
+    await indexer.start();
+  }
+
   // Worker: watcher on the crafted feed + keeper.
   const watcher = new Watcher(ctx, new OnchainFeedSource(connection, crafted, 3_000), {
     treasuryBuyMicroUsdc: 2 * USDC,
@@ -151,6 +198,10 @@ async function main() {
   }
   await watcher.stop();
   await keeper.stop();
+  if (indexer) {
+    await indexer.tick(); // catch the settle
+    await indexer.stop();
+  }
 
   const th = await program.account.thesis.fetch(thesis);
   const st = await program.account.creatorStats.fetch(stats);
@@ -161,6 +212,27 @@ async function main() {
   check(tm.settled && tm.winningSide === 1, "keeper settled YES");
   check(th.outcome === 1, "thesis outcome = hit");
   check(st.hit === hitsBefore + 1, "creator stats hit +1");
+  if (db) {
+    const q = async (sql: string, p: unknown[] = []) => (await db.query(sql, p)).rows;
+    const [mk] = await q("select * from markets where touch_market = $1", [touchMarket.toBase58()]);
+    check(!!mk?.created_tx && !!mk?.proof_tx && !!mk?.settle_tx, "indexer: market has created, proof and settle txs");
+    check(mk?.touched === true && mk?.winning_side === 1, "indexer: market touched, settled YES");
+    const [th2] = await q("select * from theses where pda = $1", [thesis.toBase58()]);
+    check(th2?.outcome === 1 && !!th2?.created_tx, "indexer: thesis hit, created tx recorded");
+    const trades = await q("select * from trades where touch_market = $1 order by ts", [touchMarket.toBase58()]);
+    const via = trades.find((t) => t.signature === tradeSig);
+    const direct = trades.find((t) => t.signature === directSig);
+    check(via?.via_thesis === true && via?.side === "buy_no" && via?.is_creator === true && via?.usdc_amount === String(3 * USDC),
+      "indexer: Thesis trade recorded exactly (side, amount, self-trade flag)");
+    check(direct?.via_thesis === false && direct?.side === "buy_yes" && direct?.usdc_amount === String(2 * USDC) && direct?.fee_to_treasury === "20000",
+      "indexer: direct pm-AMM swap recorded (amount, 1% treasury fee)");
+    check(trades.some((t) => t.is_treasury), "indexer: treasury buy recorded");
+    const crossings = await q("select * from crossings where touch_market = $1", [touchMarket.toBase58()]);
+    check(crossings.length === 1, "indexer: one crossing");
+    const points = await q("select * from price_points where touch_market = $1", [touchMarket.toBase58()]);
+    check(points.length >= 1, `indexer: ${points.length} price points sampled`);
+    await (db as unknown as { end(): Promise<void> }).end();
+  }
   console.log("watcher crossings:", JSON.stringify(watcher.crossings, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
   console.log("keeper settles:", JSON.stringify(keeper.settled));
 }
