@@ -110,6 +110,9 @@ export default function LandingPage() {
             <Link href="/app" className="inline-flex items-center gap-1.5 rounded-lg bg-white px-5 py-3 text-[15px] font-medium text-black transition-colors hover:bg-white/90">
               Launch app <ArrowUpRight size={16} />
             </Link>
+            <Link href="/protect" className="inline-flex items-center gap-2 rounded-lg bg-black/20 px-5 py-3 text-[15px] font-medium text-white transition-colors hover:bg-black/30" data-testid="hero-protect">
+              <Shield size={16} /> Protect a position
+            </Link>
           </div>
         </div>
       </section>
