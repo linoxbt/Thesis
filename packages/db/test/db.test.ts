@@ -2,7 +2,7 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { Pool } from "pg";
 import {
-  feed, insertCrossing, insertTrade, migrate, profile, setMarketPrice, setMarketTx, setThesisText, sha256Hex,
+  feed, insertCrossing, insertTrade, migrate, profile, saveSignedProfile, setMarketPrice, setMarketTx, setThesisText, sha256Hex,
   stats, thesisDetail, upsertMarket, upsertProfile, upsertThesis, type MarketRow, type TradeRow,
 } from "../src";
 
@@ -123,4 +123,15 @@ test("stats exclude team wallets and the treasury, and list proofs", async () =>
   assert.equal(s.cover_bought_usdc, "6000000");
   assert.equal(s.touches_proven, 1);
   assert.equal(s.touches[0].proof_tx, "proofSig", "first proof tx kept");
+});
+
+test("signed profile edits apply only when newer than the stored one", async () => {
+  const w = "Signer";
+  const save = (name: string, at: number) => saveSignedProfile(db, { wallet: w, display_name: name, x_handle: null, issued_at: at });
+  assert.equal(await save("first", NOW), true, "first edit stored");
+  assert.equal(await save("replayed", NOW), false, "same issued_at is a replay");
+  assert.equal(await save("older", NOW - 10), false, "older edit refused");
+  assert.equal(await save("newer", NOW + 10), true, "newer edit applied");
+  const p = (await profile(db, w)).profile as { display_name: string };
+  assert.equal(p.display_name, "newer");
 });

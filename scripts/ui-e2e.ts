@@ -105,12 +105,27 @@ async function main() {
     // 6. Profile and stats
     const wallet = (await page.evaluate(() => JSON.parse(localStorage.getItem("thesis-burner-v1") ?? "null"))) ? "burner" : "";
     await page.click('[data-testid="wallet-chip"]');
-    await page.click("text=My profile");
+    await page.click('[data-testid="wallet-menu-profile"]');
+    await page.waitForURL(/\/profile$/);
     await page.waitForSelector("text=Thesis history");
     await page.waitForTimeout(1500);
     const posted = await page.locator("text=Theses posted").locator("..").textContent();
     check("profile shows the new thesis", !!posted && /1/.test(posted), `${wallet} ${posted}`);
+    const sol = await page.textContent('[data-testid="balance-sol"]');
+    check("profile shows wallet balances", !!sol && /\d+\.\d{3}/.test(sol), `SOL ${sol}`);
+
+    // 6b. Name signed by the wallet, then shown on the profile
+    await page.fill('[data-testid="profile-display-name"]', "e2e trader");
+    await page.click('[data-testid="profile-save"]');
+    await page.waitForSelector('[data-testid="profile-saved"]', { timeout: 20_000 });
+    await page.waitForFunction(() => /e2e trader/.test(document.querySelector('[data-testid="profile-name"]')?.textContent ?? ""), null, { timeout: 15_000 });
+    check("profile: wallet-signed display name saved", true);
     await page.screenshot({ path: `${OUT}/profile.png`, fullPage: true });
+
+    // 6c. The logo goes to the home page
+    await page.click('aside a[aria-label="Thesis home"]');
+    await page.waitForURL(BASE + "/");
+    check("logo goes to the home page", (await page.locator('[data-testid="launch-app"]').count()) > 0);
     await page.goto(BASE + "/stats");
     await page.waitForSelector("text=Trading wallets");
     await page.screenshot({ path: `${OUT}/stats.png`, fullPage: true });

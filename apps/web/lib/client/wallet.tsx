@@ -1,6 +1,7 @@
 "use client";
 
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { ed25519 } from "@noble/curves/ed25519";
 import { Keypair, PublicKey, type Transaction } from "@solana/web3.js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { IS_DEVNET } from "./config";
@@ -9,7 +10,11 @@ import { IS_DEVNET } from "./config";
 export interface ActiveWallet {
   publicKey: PublicKey;
   kind: "burner" | "adapter";
+  /** The wallet's name, e.g. "Phantom", or "Instant wallet" for the burner. */
+  name: string;
   signTransaction(tx: Transaction): Promise<Transaction>;
+  /** Signs arbitrary bytes (ed25519); absent if the wallet can't. */
+  signMessage?(message: Uint8Array): Promise<Uint8Array>;
 }
 
 const KEY = "thesis-burner-v1";
@@ -101,20 +106,29 @@ export function useActiveWallet(): ActiveWallet | null {
   return useMemo(() => {
     if (adapter.publicKey && adapter.signTransaction) {
       const sign = adapter.signTransaction;
-      return { publicKey: adapter.publicKey, kind: "adapter", signTransaction: (tx) => sign(tx) };
+      const signMsg = adapter.signMessage;
+      return {
+        publicKey: adapter.publicKey,
+        kind: "adapter",
+        name: adapter.wallet?.adapter.name ?? "Wallet",
+        signTransaction: (tx) => sign(tx),
+        signMessage: signMsg ? (m) => signMsg(m) : undefined,
+      };
     }
     if (burner) {
       return {
         publicKey: burner.publicKey,
         kind: "burner",
+        name: "Instant wallet",
         signTransaction: async (tx) => {
           tx.partialSign(burner);
           return tx;
         },
+        signMessage: async (m) => ed25519.sign(m, burner.secretKey.slice(0, 32)),
       };
     }
     return null;
-  }, [adapter.publicKey, adapter.signTransaction, burner]);
+  }, [adapter.publicKey, adapter.signTransaction, adapter.signMessage, adapter.wallet, burner]);
 }
 
 export { useConnection };

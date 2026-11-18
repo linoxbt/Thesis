@@ -191,3 +191,23 @@ export async function upsertProfile(db: Db, p: { wallet: string; display_name?: 
     [p.wallet, p.display_name ?? null, p.x_handle ?? null],
   );
 }
+
+/**
+ * Stores a wallet-signed profile edit. `issuedAt` (unix seconds, from the
+ * signed message) becomes `updated_at`, and an edit is applied only if it is
+ * newer than the stored one, so replaying an old signature changes nothing.
+ * Returns whether the row was written.
+ */
+export async function saveSignedProfile(
+  db: Db,
+  p: { wallet: string; display_name: string; x_handle: string | null; issued_at: number },
+): Promise<boolean> {
+  const r = await db.query(
+    `insert into profiles (wallet, display_name, x_handle, updated_at) values ($1, $2, $3, to_timestamp($4))
+     on conflict (wallet) do update set display_name = excluded.display_name, x_handle = excluded.x_handle, updated_at = excluded.updated_at
+       where profiles.updated_at < excluded.updated_at
+     returning wallet`,
+    [p.wallet, p.display_name, p.x_handle, p.issued_at],
+  );
+  return r.rows.length > 0;
+}
