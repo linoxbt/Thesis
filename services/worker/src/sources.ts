@@ -1,5 +1,5 @@
 import { Connection, PublicKey } from "@solana/web3.js";
-import { decodePriceUpdateV2, type PriceTick } from "./pyth";
+import { decodePriceUpdateV2, type PriceTick } from "@thesis/chain";
 
 /** Where the watcher gets prices from. */
 export interface PriceSource {

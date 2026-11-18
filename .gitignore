@@ -12,3 +12,8 @@ devnet-wallet.json
 
 # dumped from devnet by scripts/fetch-fixtures.sh
 tests/fixtures/*.so
+
+# Next.js
+.next/
+next-env.d.ts
+*.tsbuildinfo

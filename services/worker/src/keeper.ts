@@ -1,5 +1,5 @@
 import { PublicKey } from "@solana/web3.js";
-import { settleable } from "./crossing";
+import { settleable } from "@thesis/chain";
 import { creatorStatsPda, log, openMarkets, PM_AMM, toView, type Ctx } from "./client";
 
 /**

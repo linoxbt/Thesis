@@ -3,12 +3,11 @@ import { Program } from "@anchor-lang/core";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import type { Thesis } from "../../../target/types/thesis";
-import type { MarketView } from "./crossing";
+import { THESIS_IDL, type MarketView, type ThesisIdl as Thesis } from "@thesis/chain";
 
-export const PM_AMM = new PublicKey("GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y");
-export const PROTOCOL_DAO = new PublicKey("4qXyczAr5DuBVaHUwmZT5Xt6hgQ6RwqBYcFGtrv8QEph");
+import { PM_AMM_PROGRAM_ID, PROTOCOL_DAO } from "@thesis/chain";
+export const PM_AMM = PM_AMM_PROGRAM_ID;
+export { PROTOCOL_DAO };
 
 export interface Ctx {
   connection: Connection;
@@ -21,7 +20,7 @@ export interface Ctx {
 export function makeCtx(rpcUrl: string, keeper: Keypair, idlPath?: string): Ctx {
   const connection = new Connection(rpcUrl, "confirmed");
   const provider = new anchor.AnchorProvider(connection, new anchor.Wallet(keeper), { commitment: "confirmed" });
-  const idl = JSON.parse(readFileSync(idlPath ?? resolve(__dirname, "../../../target/idl/thesis.json"), "utf8"));
+  const idl = idlPath ? JSON.parse(readFileSync(idlPath, "utf8")) : THESIS_IDL;
   const program = new Program<Thesis>(idl, provider);
   const pda = (seed: string) => PublicKey.findProgramAddressSync([Buffer.from(seed)], program.programId)[0];
   return { connection, keeper, program, config: pda("config"), authority: pda("authority") };
