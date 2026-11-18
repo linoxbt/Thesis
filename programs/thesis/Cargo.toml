@@ -1,0 +1,24 @@
+[package]
+name = "thesis"
+version = "0.1.0"
+description = "Thesis: touch markets on the pm-AMM, resolved by Pyth proofs"
+edition = "2021"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "thesis"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang = { version = "=1.0.1", features = ["init-if-needed"] }
+anchor-spl = { version = "=1.0.1", features = ["token", "associated_token"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))', 'cfg(feature, values("anchor-debug", "custom-heap", "custom-panic"))'] }
