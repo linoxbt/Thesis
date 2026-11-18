@@ -49,6 +49,9 @@ export async function POST(req: Request) {
   const sol = await solDrip(wallet).catch((e) => ({ sol: 0, solError: (e as Error).message.split("\n")[0] }));
   // Succeed if either half delivered: USDC from pm-AMM or SOL from us.
   const ok = r.ok || sol.sol > 0;
+  // pm-AMM's own SOL fields describe its drip, not ours.
+  delete data.sol;
+  delete data.solSkipped;
   return json({ ...data, ...sol, ok }, ok ? 200 : r.status);
 }
 
