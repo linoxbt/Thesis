@@ -6,11 +6,11 @@ import Link from "next/link";
 import { use } from "react";
 import { LineChart } from "@/components/LineChart";
 import { MarketPanel, type MarketRow } from "@/components/MarketPanel";
-import { StateBadge } from "@/components/ThesisCard";
+import { Avatar, StateBadge } from "@/components/ThesisCard";
 import { claimCreatorFeesInstructions, toTx } from "@/lib/client/actions";
 import { usePoll } from "@/lib/client/api";
 import { explorerTx } from "@/lib/client/config";
-import { ago, callLine, pythToNumber, shortAddr, usd, usdc } from "@/lib/client/format";
+import { ago, callLine, pythToNumber, shortAddr, usd, usdc, when } from "@/lib/client/format";
 import { useTx } from "@/lib/client/tx";
 import { useConfig, useSpot } from "@/lib/client/useConfig";
 import { useActiveWallet } from "@/lib/client/wallet";
@@ -85,108 +85,137 @@ export default function ThesisPage({ params }: { params: Promise<{ pda: string }
   };
 
   return (
-    <div className="space-y-4">
-      <section className="rounded-xl bg-panel p-4 ring-1 ring-line">
-        <div className="flex items-center justify-between text-xs text-muted">
-          <Link href={`/u/${t.creator}`} className="hover:text-ink">
-            {name}
-            {s && (
-              <span className="num">
-                {" "}
-                · {s.posted} posted · {s.hit} hit · {s.missed} missed
+    <div className="space-y-5">
+      <section className="glow relative overflow-hidden rounded-3xl border border-line px-6 py-7 sm:px-8">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link href={`/u/${t.creator}`} className="flex items-center gap-2 text-sm text-muted hover:text-ink">
+            <Avatar addr={t.creator} size={32} />
+            <span>
+              <span className="text-ink">{name}</span>
+              {s && (
+                <span className="num block text-[11px] text-faint">
+                  {s.posted} posted · {s.hit} hit · {s.missed} missed
+                </span>
+              )}
+            </span>
+          </Link>
+          <div className="flex items-center gap-2">
+            <StateBadge touched={c.touched} settled={c.settled} outcome={t.outcome} winning={c.winning_side} />
+            {p && (
+              <span className="num rounded-full bg-guard/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-guard ring-1 ring-guard/30">
+                Protected
               </span>
             )}
-          </Link>
-          <StateBadge touched={c.touched} settled={c.settled} outcome={t.outcome} winning={c.winning_side} />
+          </div>
         </div>
-        <h1 className="num mt-2 text-xl font-bold">{callLine(c.direction, c.strike, c.expo, endTs)}</h1>
-        {t.text && <p className="mt-1 text-muted">{t.text}</p>}
-        <div className="num mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
-          <span>
+        <span className="label mt-6">The call</span>
+        <h1 className="display mt-2 text-3xl leading-tight sm:text-4xl">
+          SOL {c.direction === "above" ? "rises to" : "falls to"} <span className="num tracking-normal">{usd(pythToNumber(c.strike, c.expo))}</span>{" "}
+          <span className="text-muted">by {when(endTs)}</span>
+        </h1>
+        {t.text && <p className="mt-3 max-w-2xl text-muted">{t.text}</p>}
+        <div className="num mt-5 flex flex-wrap items-center gap-2 text-xs">
+          <span className="rounded-full border border-line px-3 py-1.5 text-faint">
             volume <span className="text-ink">{usdc(t.volume_usdc)}</span>
           </span>
-          {Number(t.self_volume_usdc) > 0 && <span>creator's own trades {usdc(t.self_volume_usdc)}</span>}
+          {Number(t.self_volume_usdc) > 0 && (
+            <span className="rounded-full border border-line px-3 py-1.5 text-faint">creator's own trades {usdc(t.self_volume_usdc)}</span>
+          )}
           <a
-            className="rounded bg-panel-2 px-2 py-1 text-ink ring-1 ring-line hover:bg-line"
+            className="btn btn-ghost px-3 py-1.5 text-xs"
             href={`https://x.com/intent/post?text=${encodeURIComponent(tweet)}&url=${encodeURIComponent(url)}`}
             target="_blank"
             rel="noreferrer"
           >
-            Share on X
+            Share on X ↗
           </a>
-        </div>
-        {isCreator && claimable > 0n && (
-          <button onClick={() => void claimFees()} className="mt-3 rounded-md bg-yes px-3 py-1.5 text-sm font-semibold text-yes-ink">
-            Claim {usdc(claimable)} creator fees
-          </button>
-        )}
-      </section>
-
-      <section className="rounded-xl bg-panel p-4 ring-1 ring-line">
-        <div className="mb-2 flex items-baseline justify-between">
-          <h2 className="text-sm font-semibold">SOL / USD (Pyth)</h2>
-          {spot && (
-            <span className="num text-xs text-muted">
-              <span className="text-ink">{usd(pythToNumber(spot.price, spot.expo))}</span> · read {ago(spot.publishTime)}
-            </span>
+          {isCreator && claimable > 0n && (
+            <button onClick={() => void claimFees()} className="btn btn-yes px-3 py-1.5 text-xs">
+              Claim {usdc(claimable)} creator fees
+            </button>
           )}
         </div>
-        <LineChart label="SOL price" color="var(--color-ink)" points={spotPts} refs={refs} yFormat={(v) => usd(v)} height={150} />
+        <div className="glow-line absolute inset-x-0 bottom-0" />
       </section>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <MarketPanel
+        kind="conviction"
+        m={c}
+        prices={data.prices.filter((x) => x.touch_market === c.touch_market)}
+        thesis={t.pda}
+        creator={t.creator}
+        onChange={reload}
+      />
+      {p && (
         <MarketPanel
-          kind="conviction"
-          m={c}
-          prices={data.prices.filter((x) => x.touch_market === c.touch_market)}
+          kind="protection"
+          m={p}
+          prices={data.prices.filter((x) => x.touch_market === p.touch_market)}
           thesis={t.pda}
           creator={t.creator}
           onChange={reload}
         />
-        {p && (
-          <MarketPanel
-            kind="protection"
-            m={p}
-            prices={data.prices.filter((x) => x.touch_market === p.touch_market)}
-            thesis={t.pda}
-            creator={t.creator}
-            onChange={reload}
-          />
-        )}
-      </div>
+      )}
 
-      <section className="rounded-xl bg-panel p-4 ring-1 ring-line">
-        <h2 className="mb-2 text-sm font-semibold">Recent trades</h2>
-        {data.trades.length === 0 ? (
-          <p className="text-sm text-muted">No trades yet. Be the first to back or challenge it.</p>
-        ) : (
-          <table className="num w-full text-xs">
-            <tbody>
-              {data.trades.map((tr) => (
-                <tr key={tr.signature + tr.touch_market} className="border-t border-line">
-                  <td className="py-1.5">
-                    <Link href={`/u/${tr.wallet}`} className="hover:text-ink">
-                      {shortAddr(tr.wallet)}
-                    </Link>
-                    {tr.is_creator && <span className="ml-1 text-guard">creator</span>}
-                  </td>
-                  <td className="text-muted">
-                    {SIDE[tr.side] ?? tr.side}
-                    {tr.touch_market === p?.touch_market ? " · cover" : ""}
-                    {!tr.via_thesis ? " · direct" : ""}
-                  </td>
-                  <td className="text-right">{usdc(tr.usdc_amount)}</td>
-                  <td className="text-right text-muted">
-                    <a href={explorerTx(tr.signature)} target="_blank" rel="noreferrer" className="hover:text-ink">
-                      {ago(Number(tr.ts))}
-                    </a>
-                  </td>
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <section className="panel min-w-0 p-5">
+          <div className="mb-3 flex items-baseline justify-between">
+            <div>
+              <span className="label">Price feed</span>
+              <h2 className="display mt-2 text-xl">SOL / USD · Pyth</h2>
+            </div>
+            {spot && (
+              <span className="num text-right text-xs text-faint">
+                <span className="block text-lg text-ink">{usd(pythToNumber(spot.price, spot.expo))}</span>
+                read {ago(spot.publishTime)}
+              </span>
+            )}
+          </div>
+          <LineChart label="SOL price" color="var(--color-ink)" points={spotPts} refs={refs} yFormat={(v) => usd(v)} height={170} />
+        </section>
+
+        <section className="panel min-w-0 p-5">
+          <span className="label">Activity</span>
+          <h2 className="display mb-3 mt-2 text-xl">Recent trades</h2>
+          {data.trades.length === 0 ? (
+            <p className="text-sm text-muted">No trades yet. Be the first to back or challenge it.</p>
+          ) : (
+            <table className="num w-full text-xs">
+              <thead className="text-left text-faint">
+                <tr>
+                  <th className="pb-2 font-normal">Trader</th>
+                  <th className="pb-2 font-normal">Side</th>
+                  <th className="pb-2 text-right font-normal">Amount</th>
+                  <th className="pb-2 text-right font-normal">When</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+              </thead>
+              <tbody>
+                {data.trades.slice(0, 12).map((tr) => (
+                  <tr key={tr.signature + tr.touch_market} className="border-t border-line">
+                    <td className="py-2">
+                      <Link href={`/u/${tr.wallet}`} className="text-muted hover:text-ink">
+                        {shortAddr(tr.wallet)}
+                      </Link>
+                      {tr.is_creator && <span className="ml-1 text-guard">creator</span>}
+                    </td>
+                    <td className={tr.side.endsWith("yes") ? (tr.touch_market === p?.touch_market ? "text-guard" : "text-yes") : "text-ink"}>
+                      {SIDE[tr.side] ?? tr.side}
+                      {tr.touch_market === p?.touch_market ? " · cover" : ""}
+                      {!tr.via_thesis ? <span className="text-faint"> · direct</span> : ""}
+                    </td>
+                    <td className="text-right">{usdc(tr.usdc_amount)}</td>
+                    <td className="text-right">
+                      <a href={explorerTx(tr.signature)} target="_blank" rel="noreferrer" className="text-faint hover:text-ink">
+                        {ago(Number(tr.ts))}
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      </div>
     </div>
   );
 }

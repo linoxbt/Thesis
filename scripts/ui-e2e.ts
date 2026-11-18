@@ -45,9 +45,15 @@ async function main() {
 
   // 3. Back a thesis from the feed
   await page.locator('[data-testid="thesis-card"] button:has-text("Back")').first().click();
-  await page.waitForFunction(() => document.querySelector('[data-testid="quote"]')?.textContent?.includes("You get"), null, { timeout: 30_000 });
-  const quote = await page.textContent('[data-testid="quote"]');
-  check("exact quote by simulation", !!quote?.includes("You get"), quote?.replace(/\s+/g, " ").trim());
+  const quoted = () => {
+    const t = document.querySelector('[data-testid="quote"]')?.textContent ?? "";
+    const m = t.match(/(\d+\.\d{2})/);
+    return !!m && Number(m[1]) > 0;
+  };
+  await page.waitForFunction(quoted, null, { timeout: 30_000 });
+  const quote = (await page.textContent('[data-testid="quote"]')) ?? "";
+  const details = (await page.locator('[data-testid="quote"] ~ div').first().textContent()) ?? "";
+  check("exact quote by simulation", /\d+\.\d{2}/.test(quote) && /pays/.test(details), (quote + " | " + details).replace(/\s+/g, " ").trim());
   await page.screenshot({ path: `${OUT}/feed-trade.png` });
   await page.click('[data-testid="trade-submit"]');
   const backed = await page.waitForSelector('[data-testid="tx-confirmed"], [data-testid="tx-failed"]', { timeout: 90_000 });

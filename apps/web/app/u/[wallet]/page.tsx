@@ -36,9 +36,9 @@ interface Profile {
 
 function Tile({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-lg bg-panel p-3 ring-1 ring-line">
+    <div className="bg-panel px-5 py-4">
       <div className="text-xs text-muted">{label}</div>
-      <div className="mt-1 text-xl font-semibold">{value}</div>
+      <div className="num mt-1 text-xl text-ink">{value}</div>
       {sub && <div className="text-[11px] text-faint">{sub}</div>}
     </div>
   );
@@ -58,12 +58,13 @@ export default function ProfilePage({ params }: { params: Promise<{ wallet: stri
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold">{data.profile?.display_name ?? shortAddr(wallet)}</h1>
+        <span className="label">Trader</span>
+        <h1 className="display mt-2 text-4xl">{data.profile?.display_name ?? shortAddr(wallet)}</h1>
         <a href={explorerAccount(wallet)} target="_blank" rel="noreferrer" className="num text-xs text-muted underline">
           {wallet}
         </a>
       </div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-3">
         <Tile label="Theses posted" value={s?.posted ?? "0"} />
         <Tile label="Hit / missed" value={`${s?.hit ?? 0} / ${s?.missed ?? 0}`} sub={s ? `avg opening odds ${pct(s.avg_opening_bps, 0)}` : undefined} />
         <Tile label="Volume generated" value={usdc(s?.volume_usdc ?? 0, 0)} sub={s && Number(s.self_volume_usdc) > 0 ? `${usdc(s.self_volume_usdc, 0)} own trades` : undefined} />
@@ -71,8 +72,9 @@ export default function ProfilePage({ params }: { params: Promise<{ wallet: stri
         <Tile label="Protection bought" value={usdc(data.protection_bought_usdc)} />
         <Tile label="Protection paid out" value={usdc(data.protection_paid_out_usdc)} />
       </div>
-      <section className="rounded-xl bg-panel p-4 ring-1 ring-line">
-        <h2 className="mb-2 text-sm font-semibold">Thesis history</h2>
+      <section className="panel p-5">
+        <span className="label">History</span>
+        <h2 className="display mb-3 mt-2 text-xl">Thesis history</h2>
         {data.history.length === 0 ? (
           <p className="text-sm text-muted">No theses yet.</p>
         ) : (

@@ -216,8 +216,14 @@ Workspace: `packages/chain` (IDLs, Pyth decoding, `provable()`, pm-AMM price),
 
 ## Phase 4 — Frontend (Day 5)
 
-`apps/web` (Next.js 16, Tailwind 4, JetBrains Mono for numbers, teal = YES/back,
-gold = protection; chart-mark colours validated with the dataviz palette checker).
+`apps/web` (Next.js 16, Tailwind 4). Visual language after the **Cryptix** Framer
+template (a crypto-trading dashboard: https://www.framer.com/marketplace/templates/cryptix/),
+adapted, not copied: near-black `#08070e`, one neon-mint accent `#00FFB2` for
+YES/back and calls to action, amber for protection, Instrument Sans display
+type, Inter body, JetBrains Mono for every number and section label, mono
+"▍ LABEL" headers, hairline panels, mint glow behind charts, pill buttons, a
+dashboard sidebar, "Quick trade" panels shaped like a swap box. Chart-mark
+colours (`#00ad78`, `#bf8620`) validated with the dataviz palette checker.
 
 - [x] Feed `/`: Hot / New / Ending soon; each card has the creator, the call in
       one line, live YES %, protection badge, 24h volume, time left, and Back /
