@@ -58,7 +58,8 @@ crossed(price, strike, direction)             // at or past the line`,
 ];
 
 const FAQ: [string, ReactNode][] = [
-  ["What exactly is a thesis?", "A public trade call with a market attached. You say where SOL is going and by when; Thesis turns that into a touch market the crowd can trade, and records the outcome against your profile."],
+  ["What exactly is a thesis?", "Your perp trade, made public and tradable. You post the position (long or short, leverage, take profit, liquidation); Thesis turns the take profit into a market the crowd can back or challenge, the liquidation into cover you can buy, and records the outcome against your profile."],
+  ["Is this a perp exchange?", "No. You keep trading perps wherever you trade them. Thesis is the layer on top: it prices your call with a prediction market and protects your liquidation with a touch market, both settled by Pyth. Leverage on Thesis is read from your liquidation distance, not lent to you."],
   ["What is a touch market?", "A market that asks whether price reaches a level at any moment before the deadline, not only at the close. If SOL prints at or past your strike once, the market resolves YES, even if price falls back later."],
   ["Who decides whether a call hit?", "Nobody decides. Resolution needs a signed Pyth price that passes the checks onchain. Our watcher submits proofs automatically, but the instruction is permissionless: anyone holding a valid price update can resolve the market."],
   [
@@ -94,17 +95,14 @@ export default function LandingPage() {
       <section className="relative overflow-hidden bg-field text-white">
         <DotField className="pointer-events-none absolute -right-10 top-16 hidden h-[560px] w-auto md:block" />
         <div className="relative mx-auto max-w-[1160px] px-5 pb-16 pt-32 sm:pt-36 lg:px-8">
-          <span className="num inline-flex items-center gap-2 rounded-lg bg-black/85 px-3 py-1.5 text-[11px] uppercase tracking-[0.08em] text-white/80">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#ff6a3d]" /> Live on Solana devnet
-          </span>
-          <h1 className="mt-7 text-[54px] font-semibold leading-[0.98] tracking-[-0.045em] sm:text-[76px] lg:text-[88px]">
+          <h1 className="text-[54px] font-semibold leading-[0.98] tracking-[-0.045em] sm:text-[76px] lg:text-[88px]">
             Calls, made
             <br />
             tradable.
           </h1>
           <p className="mt-7 max-w-[560px] text-[17px] font-medium leading-relaxed text-white/90">
-            Post a SOL price call and it becomes a live market. The crowd backs it or challenges it, protection covers the
-            wick, and a Pyth price anyone can submit settles it.
+            Post your SOL position: side, leverage, take profit, liquidation. It becomes a live market the crowd backs or
+            challenges, your liquidation gets cover, and a Pyth price anyone can submit settles both.
           </p>
           <div className="mt-9 flex flex-wrap items-center gap-3">
             <Link href="/app" className="inline-flex items-center gap-1.5 rounded-lg bg-white px-5 py-3 text-[15px] font-medium text-black transition-colors hover:bg-white/90">
@@ -168,17 +166,17 @@ export default function LandingPage() {
           <div>
             <H2>Every call is two markets</H2>
             <p className="mt-5 max-w-md text-[17px] font-medium leading-relaxed text-white/90">
-              A conviction market for the crowd to back or challenge, and a protection market that pays if price touches the
-              trader&apos;s liquidation level. Same AMM, same proof.
+              Your take profit becomes a conviction market the crowd backs or challenges. Your liquidation becomes a protection
+              market that pays if a wick touches it. Same AMM, same proof.
             </p>
             <Link href="/new" className="mt-8 inline-flex items-center gap-1.5 rounded-lg bg-black px-5 py-3 text-[15px] font-medium text-white hover:bg-black/80">
-              Post a call <ArrowRight size={16} />
+              Post a trade <ArrowRight size={16} />
             </Link>
           </div>
           <div className="relative h-[440px]">
-            <MiniCard className="left-0 top-0 -rotate-[8deg] sm:left-[2%]" title="Conviction" tone="#3ecf8e" lines={[["SOL ↑", "$260.00"], ["YES", "64.0%"], ["vol 24h", "$18,240"]]} />
-            <MiniCard className="left-[19%] top-[132px] -rotate-[8deg] sm:left-[26%]" title="Protection" tone="#7aa2ff" lines={[["pays if SOL ↓", "$198.00"], ["YES", "12.1%"], ["cover bought", "$2,410"]]} />
-            <MiniCard className="left-[38%] top-[264px] -rotate-[8deg] sm:left-[50%]" title="Touch proven" tone="#ff6a3d" lines={[["print", "$260.07"], ["confidence", "0.03%"], ["settles in", "02:00"]]} />
+            <MiniCard className="left-0 top-0 -rotate-[8deg] sm:left-[2%]" title="Long SOL 20x" tone="#3ecf8e" lines={[["entry", "$73.04"], ["take profit", "$76.69"], ["liquidation", "$69.39"]]} />
+            <MiniCard className="left-[19%] top-[132px] -rotate-[8deg] sm:left-[26%]" title="Conviction · TP" tone="#ff6a3d" lines={[["SOL touches", "$76.69"], ["crowd YES", "64.0%"], ["vol 24h", "$18,240"]]} />
+            <MiniCard className="left-[38%] top-[264px] -rotate-[8deg] sm:left-[50%]" title="Liquidation cover" tone="#7aa2ff" lines={[["pays if SOL", "$69.39"], ["cover YES", "24.8%"], ["cover bought", "$2,410"]]} />
           </div>
         </div>
       </section>
@@ -187,21 +185,23 @@ export default function LandingPage() {
       <Container id="how" className="py-28 lg:py-32">
         <div className="text-center">
           <span className="chip">How it works</span>
-          <H2 className="mt-5">From hot take to settled market</H2>
+          <H2 className="mt-5">From open position to settled market</H2>
           <p className="mx-auto mt-4 max-w-xl text-[17px] text-muted">Three steps, all onchain. Nothing to sign up for.</p>
         </div>
         <div className="mt-14 grid gap-4 md:grid-cols-3">
-          <StepCard n="01" title="Post the call" body="Pick a level and a deadline and say why in a line. The market opens at fair odds computed onchain from volatility.">
-            <div className="grid grid-cols-2 rounded-full bg-panel-3 p-1 text-xs">
-              <span className="rounded-full bg-ink py-1.5 text-center text-bg">SOL goes up to…</span>
-              <span className="py-1.5 text-center text-muted">down to…</span>
+          <StepCard n="01" title="Post your trade" body="Side, leverage, take profit and liquidation, plus a line on why. The market opens at fair odds computed onchain from volatility.">
+            <div className="grid grid-cols-2 gap-1 text-xs">
+              <span className="rounded-lg bg-yes py-1.5 text-center font-semibold text-yes-ink">Long</span>
+              <span className="rounded-lg border border-line py-1.5 text-center text-muted">Short</span>
             </div>
-            <div className="num mt-2 flex justify-between rounded-xl border border-line px-3 py-2 text-sm">
-              260.00 <span className="text-faint">7d</span>
+            <div className="num mt-2 grid grid-cols-3 gap-1 text-[11px] text-muted">
+              <span className="rounded-lg border border-line px-2 py-1.5">20x</span>
+              <span className="rounded-lg border border-line px-2 py-1.5 text-yes">TP 76.69</span>
+              <span className="rounded-lg border border-line px-2 py-1.5 text-bad">liq 69.39</span>
             </div>
-            <div className="num mt-2 text-xs text-muted">opening odds 40.4%</div>
+            <div className="num mt-2 text-xs text-muted">opening odds 40.4% · +100% ROE at TP</div>
           </StepCard>
-          <StepCard n="02" title="The crowd prices it" body="Backers buy YES, challengers buy NO. The price is the crowd's live probability, and you earn on every trade.">
+          <StepCard n="02" title="The crowd prices it" body="Backers buy YES on your take profit, challengers buy NO. The price is the crowd's live probability, and you earn on every trade.">
             <div className="num flex justify-between text-xs">
               <span className="text-yes">YES 64¢</span>
               <span className="text-muted">NO 36¢</span>
@@ -214,7 +214,7 @@ export default function LandingPage() {
               <path d="M0 32 L20 30 L40 31 L60 26 L80 27 L100 20 L120 22 L140 15 L160 16 L180 10 L200 8" fill="none" stroke="var(--color-yes-mark)" strokeWidth="2" />
             </svg>
           </StepCard>
-          <StepCard n="03" title="Price proves it" body="The first verified Pyth print at or past the strike resolves the market. Anyone can submit it; our watcher usually does.">
+          <StepCard n="03" title="Price proves it" body="The first verified Pyth print at your take profit or liquidation resolves that market. Anyone can submit it; our watcher usually does.">
             <ul className="num space-y-1.5 text-xs">
               {["signed update", "SOL/USD feed", "conf 0.03%", "inside window", "past the strike"].map((k) => (
                 <li key={k} className="flex items-center gap-2 text-muted">
@@ -247,12 +247,13 @@ export default function LandingPage() {
       {/* Bento */}
       <Container className="py-28 lg:py-32">
         <div className="text-center">
-          <H2>Built for traders who keep score</H2>
+          <H2>Built for perp traders who keep score</H2>
           <p className="mx-auto mt-4 max-w-xl text-[17px] text-muted">Hedge the downside, start at a fair price, and let the record speak.</p>
         </div>
         <div className="mt-14 grid gap-4 lg:grid-cols-3">
           <Bento className="lg:col-span-2" icon={<Shield size={18} />} title="Hedge the wick" tone="guard">
-            Buy protection at your liquidation level. If SOL wicks through it, each share pays 1 USDC, whatever happens next.
+            Your perp venue liquidates on one wick. Buy cover at your liquidation price: if SOL touches it, each share pays 1
+            USDC, whatever happens next.
             <WickArt />
           </Bento>
           <Bento icon={<Sigma size={18} />} title="Fair from the first trade">
@@ -339,7 +340,7 @@ export default function LandingPage() {
             </Link>
             <p className="mt-4 max-w-xs font-sans text-sm leading-relaxed text-muted">Trade calls as markets, settled by a price anyone can prove.</p>
           </div>
-          <FooterCol title="Product" links={[["Markets", "/app"], ["Post a call", "/new"], ["Protect a position", "/protect"], ["Traction", "/stats"]]} />
+          <FooterCol title="Product" links={[["Markets", "/app"], ["Post a trade", "/new"], ["Protect a position", "/protect"], ["Traction", "/stats"]]} />
           <FooterCol title="Protocol" links={[["Thesis program", EXPLORER], ["pm-AMM", "https://predict-pm-amm.dev"], ["Pyth price feeds", "https://www.pyth.network/price-feeds"]]} />
         </Container>
         <Container className="num flex flex-wrap justify-between gap-3 border-t border-line py-6 text-xs text-faint">
@@ -412,7 +413,7 @@ function WickArt() {
     <svg viewBox="0 0 480 110" className="h-auto w-full rounded-xl border border-line bg-bg" aria-hidden="true">
       <line x1="0" x2="480" y1="74" y2="74" stroke="var(--color-guard-mark)" strokeWidth="1.25" strokeDasharray="4 4" />
       <text x="472" y="92" textAnchor="end" fontSize="11" fill="var(--color-guard)" className="num">
-        protection $198
+        liquidation $69.39
       </text>
       <path d="M0 30 L40 36 L80 26 L120 40 L160 32 L200 44 L240 38 L280 50 L296 96 L312 48 L352 40 L392 30 L432 34 L480 26" fill="none" stroke="var(--color-ink)" strokeWidth="1.75" strokeLinejoin="round" />
       <circle cx="289" cy="74" r="5" fill="var(--color-guard-mark)" stroke="var(--color-bg)" strokeWidth="2" />

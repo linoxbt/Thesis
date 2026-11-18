@@ -6,11 +6,14 @@ import Link from "next/link";
 import { use } from "react";
 import { LineChart } from "@/components/LineChart";
 import { MarketPanel, type MarketRow } from "@/components/MarketPanel";
+import { PositionLevels, SidePill } from "@/components/Position";
+import { ShareButton } from "@/components/ShareButton";
+import { positionOf } from "@/lib/position";
 import { Avatar, StateBadge } from "@/components/ThesisCard";
 import { claimCreatorFeesInstructions, toTx } from "@/lib/client/actions";
 import { usePoll } from "@/lib/client/api";
 import { explorerTx } from "@/lib/client/config";
-import { ago, callLine, pythToNumber, shortAddr, usd, usdc, when } from "@/lib/client/format";
+import { ago, pythToNumber, shortAddr, usd, usdc, when } from "@/lib/client/format";
 import { useTx } from "@/lib/client/tx";
 import { useConfig, useSpot } from "@/lib/client/useConfig";
 import { useActiveWallet } from "@/lib/client/wallet";
@@ -61,16 +64,23 @@ export default function ThesisPage({ params }: { params: Promise<{ pda: string }
   const claimable = (BigInt(t.fees_attributed) * BigInt(share)) / 10_000n - BigInt(t.fees_claimed);
   const isCreator = wallet?.publicKey.toBase58() === t.creator;
 
+  const pos = positionOf(
+    c.direction,
+    pythToNumber(c.spot_at_open, c.expo),
+    pythToNumber(c.strike, c.expo),
+    p ? pythToNumber(p.strike, p.expo) : null,
+  );
+  const mark = spot ? pythToNumber(spot.price, spot.expo) : null;
+
   const spotPts = [
     ...data.spot.map((x) => ({ t: Number(x.publish_time), v: pythToNumber(x.price, x.expo) })),
     ...(spot ? [{ t: spot.publishTime, v: pythToNumber(spot.price, spot.expo) }] : []),
   ].filter((x, i, a) => a.findIndex((y) => y.t === x.t) === i);
   const refs = [
-    { v: pythToNumber(c.strike, c.expo), label: `target ${usd(pythToNumber(c.strike, c.expo))}` },
-    ...(p ? [{ v: pythToNumber(p.strike, p.expo), label: `cover ${usd(pythToNumber(p.strike, p.expo))}` }] : []),
+    { v: pos.tp, label: `take profit ${usd(pos.tp)}` },
+    { v: pos.entry, label: `entry ${usd(pos.entry)}` },
+    ...(pos.liq !== null ? [{ v: pos.liq, label: `liquidation ${usd(pos.liq)}` }] : []),
   ];
-  const url = typeof window !== "undefined" ? window.location.href : "";
-  const tweet = `${callLine(c.direction, c.strike, c.expo, endTs)}${t.text ? ` — ${t.text}` : ""}\nBack it or challenge it:`;
 
   const claimFees = async () => {
     if (!wallet || !usdcMint) return;
@@ -108,12 +118,16 @@ export default function ThesisPage({ params }: { params: Promise<{ pda: string }
             )}
           </div>
         </div>
-        <span className="label mt-6">The call</span>
-        <h1 className="display mt-2 text-3xl leading-tight sm:text-4xl">
-          SOL {c.direction === "above" ? "rises to" : "falls to"} <span className="num tracking-normal">{usd(pythToNumber(c.strike, c.expo))}</span>{" "}
-          <span className="text-muted">by {when(endTs)}</span>
-        </h1>
-        {t.text && <p className="mt-3 max-w-2xl text-muted">{t.text}</p>}
+        <span className="label mt-6">The trade</span>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <SidePill p={pos} size="lg" />
+          <h1 className="display text-3xl leading-tight sm:text-4xl">SOL / USD</h1>
+          <span className="num text-sm text-faint">until {when(endTs)}</span>
+        </div>
+        <div className="mt-5 max-w-2xl">
+          <PositionLevels p={pos} mark={mark} />
+        </div>
+        {t.text && <p className="mt-4 max-w-2xl text-muted">{t.text}</p>}
         <div className="num mt-5 flex flex-wrap items-center gap-2 text-xs">
           <span className="rounded-full border border-line px-3 py-1.5 text-faint">
             volume <span className="text-ink">{usdc(t.volume_usdc)}</span>
@@ -121,14 +135,7 @@ export default function ThesisPage({ params }: { params: Promise<{ pda: string }
           {Number(t.self_volume_usdc) > 0 && (
             <span className="rounded-full border border-line px-3 py-1.5 text-faint">creator's own trades {usdc(t.self_volume_usdc)}</span>
           )}
-          <a
-            className="btn btn-ghost px-3 py-1.5 text-xs"
-            href={`https://x.com/intent/post?text=${encodeURIComponent(tweet)}&url=${encodeURIComponent(url)}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Share on X ↗
-          </a>
+          <ShareButton pda={t.pda} text={`${pos.side === "long" ? "Long" : "Short"} SOL${pos.lev !== null ? ` ${Math.round(pos.lev)}x` : ""}: take profit ${usd(pos.tp)} by ${when(endTs)}${pos.liq !== null ? `, liquidation ${usd(pos.liq)} covered` : ""}.${t.text ? ` ${t.text}` : ""}\nBack it or challenge it:`} />
           {isCreator && claimable > 0n && (
             <button onClick={() => void claimFees()} className="btn btn-primary px-3 py-1.5 text-xs">
               Claim {usdc(claimable)} creator fees

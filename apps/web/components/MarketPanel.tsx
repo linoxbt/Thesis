@@ -16,6 +16,8 @@ import { TradeBox } from "./TradeBox";
 
 export interface MarketRow {
   touch_market: string;
+  /** SOL spot when the market opened: the position's entry. */
+  spot_at_open: string;
   pm_market: string;
   direction: "above" | "below";
   strike: string;
@@ -114,8 +116,8 @@ export function MarketPanel({
   const open = !m.touched && !m.settled && endTs > now;
   const title =
     kind === "protection"
-      ? `Pays if SOL ${m.direction === "below" ? "falls to" : "rises to"} ${usd(strike)}`
-      : `SOL ${m.direction === "below" ? "falls to" : "rises to"} ${usd(strike)}`;
+      ? `Liquidation cover: pays if SOL touches ${usd(strike)}`
+      : `Take profit: SOL touches ${usd(strike)}`;
 
   return (
     <section className={"panel glow min-w-0 p-5 " + (kind === "protection" ? "border-guard/25" : "")} data-testid={`panel-${kind}`}>
@@ -124,7 +126,7 @@ export function MarketPanel({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <span className={"label " + (kind === "protection" ? "label-guard" : "")}>
-                {kind === "protection" ? "Protection" : "Conviction"}
+                {kind === "protection" ? "Protection" : "Conviction · back or challenge"}
               </span>
               <h3 className="display mt-2 text-xl">{title}</h3>
             </div>

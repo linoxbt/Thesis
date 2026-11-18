@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useState } from "react";
 import { useNow } from "@/lib/client/api";
 import { pct, pythToNumber, shortAddr, timeLeft, usd, usdc, when } from "@/lib/client/format";
+import { positionOf } from "@/lib/position";
+import { PositionLevels, SidePill } from "./Position";
 import { Sparkline } from "./Sparkline";
 import { TradeBox } from "./TradeBox";
 
@@ -28,6 +30,10 @@ export interface FeedThesis {
   touched: boolean;
   settled: boolean;
   spark?: number[];
+  /** Entry: SOL spot when the conviction market opened (Pyth units). */
+  spot_at_open: string;
+  /** Liquidation: the protection market's strike, if any. */
+  liq_strike: string | null;
 }
 
 /** Address avatar: two letters on a mint-tinted disc. */
@@ -68,12 +74,13 @@ export function Delta({ now, open }: { now: number; open: number }) {
   );
 }
 
-export function ThesisCard({ t }: { t: FeedThesis }) {
+export function ThesisCard({ t, mark }: { t: FeedThesis; mark?: number | null }) {
   const now = useNow(1000);
   const [open, setOpen] = useState<null | "buy_yes" | "buy_no">(null);
   const endTs = Number(t.end_ts);
   const live = !t.touched && !t.settled && endTs > now;
   const strike = pythToNumber(t.strike, t.expo);
+  const pos = positionOf(t.direction, pythToNumber(t.spot_at_open, t.expo), strike, t.liq_strike ? pythToNumber(t.liq_strike, t.expo) : null);
   return (
     <article className="panel min-w-0 p-5 transition-colors hover:border-line-2" data-testid="thesis-card">
       <div className="flex items-center justify-between gap-2">
@@ -91,21 +98,24 @@ export function ThesisCard({ t }: { t: FeedThesis }) {
         </div>
       </div>
 
-      <Link href={`/t/${t.pda}`} className="mt-4 block">
-        <h2 className="display text-2xl leading-tight">
-          SOL {t.direction === "above" ? "↑" : "↓"} <span className="num tracking-normal">{usd(strike)}</span>
-        </h2>
-        <div className="num mt-1 text-xs text-faint">by {when(endTs)}</div>
-        {t.text && <p className="mt-2 line-clamp-2 text-sm text-muted">{t.text}</p>}
+      <Link href={`/t/${t.pda}`} className="mt-4 block" data-testid="card-link">
+        <div className="flex items-center gap-2">
+          <SidePill p={pos} />
+          <span className="num whitespace-nowrap text-sm text-ink">SOL / USD</span>
+        </div>
+        <div className="mt-3">
+          <PositionLevels p={pos} mark={mark} dense />
+        </div>
+        {t.text && <p className="mt-3 line-clamp-2 text-sm text-muted">{t.text}</p>}
       </Link>
 
-      <div className="mt-5 flex items-end justify-between gap-3">
+      <div className="mt-4 flex items-end justify-between gap-3 rounded-xl bg-panel-2 px-3 py-2.5">
         <div>
           <div className="flex items-baseline gap-2">
-            <span className="num text-[32px] leading-none text-ink">{pct(t.yes_price_bps, 1)}</span>
+            <span className="num text-[26px] leading-none text-ink">{pct(t.yes_price_bps, 1)}</span>
             <Delta now={t.yes_price_bps} open={t.initial_price_bps} />
           </div>
-          <div className="mt-1 text-[11px] text-faint">YES · crowd odds it hits</div>
+          <div className="mt-1 text-[11px] text-faint">crowd odds TP is hit in time</div>
         </div>
         <Sparkline values={t.spark ?? []} />
       </div>

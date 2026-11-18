@@ -2,9 +2,9 @@
 
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
-import { ArrowUpRight, BarChart3, LayoutGrid, PenLine, Shield, User, Zap } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, BarChart3, LayoutGrid, PenLine, Shield, User, Zap } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { IS_DEVNET } from "@/lib/client/config";
 import { Logo } from "./Brand";
@@ -16,7 +16,7 @@ import { useActiveWallet, useBurner } from "@/lib/client/wallet";
 
 const NAV = [
   { href: "/app", label: "Markets", icon: LayoutGrid },
-  { href: "/new", label: "Post a call", icon: PenLine },
+  { href: "/new", label: "Post a trade", icon: PenLine },
   { href: "/protect", label: "Protect", icon: Shield },
   { href: "/stats", label: "Stats", icon: BarChart3 },
   { href: "/profile", label: "Profile", icon: User },
@@ -137,10 +137,10 @@ function NavLink({ href, label, icon: Icon, active }: { href: string; label: str
 /** Dashboard shell: sidebar on desktop, top bar + bottom tabs on phones. */
 const TITLES: [RegExp, string][] = [
   [/^\/app$/, "Markets"],
-  [/^\/new/, "Post a call"],
+  [/^\/new/, "Post a trade"],
   [/^\/protect/, "Protect a position"],
   [/^\/stats/, "Traction"],
-  [/^\/t\//, "Thesis"],
+  [/^\/t\//, "Trade"],
   [/^\/u\//, "Profile"],
   [/^\/profile/, "Profile"],
 ];
@@ -151,6 +151,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const active = useActiveWallet();
   const { createBurner } = useBurner();
   const isActive = (href: string) => path === href || path.startsWith(href + "/");
+  // Detail pages (a trade, someone's profile) are full-screen on phones: no
+  // tab bar, a back button instead.
+  const detail = /^\/(t|u)\//.test(path);
+  const router = useRouter();
+  const back = () => (window.history.length > 1 ? router.back() : router.push("/app"));
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[232px_1fr]">
       <div className="hidden border-r border-line lg:block">
@@ -186,9 +191,15 @@ export function AppShell({ children }: { children: ReactNode }) {
         <header className="sticky top-0 z-20 border-b border-line bg-bg/85 backdrop-blur">
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 lg:px-8">
             <div className="flex items-center gap-4">
-              <span className="lg:hidden">
+              {detail && (
+                <button onClick={back} className="-ml-1 grid h-9 w-9 place-items-center rounded-full text-ink hover:bg-panel-2 lg:hidden" aria-label="Back" data-testid="mobile-back">
+                  <ArrowLeft size={18} />
+                </button>
+              )}
+              <span className={detail ? "hidden sm:inline lg:hidden" : "lg:hidden"}>
                 <Logo href="/" size={20} text="text-[19px]" />
               </span>
+              {detail && <span className="text-sm font-medium text-ink sm:hidden">{title}</span>}
               <span className="hidden text-sm text-ink lg:inline">{title}</span>
               <span className="hidden sm:inline">
                 <SpotTicker />
@@ -203,17 +214,17 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
         </header>
-        <main className="mx-auto max-w-6xl px-4 pb-28 pt-6 lg:px-8">
+        <main className={"mx-auto max-w-6xl px-4 pt-6 lg:px-8 " + (detail ? "pb-12" : "pb-28")}>
           <StatusBanner />
           {children}
         </main>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-20 flex justify-around border-t border-line bg-bg/95 py-2 backdrop-blur lg:hidden">
+      <nav className={"fixed inset-x-0 bottom-0 z-20 justify-around border-t border-line bg-bg/95 py-2 backdrop-blur lg:hidden " + (detail ? "hidden" : "flex")} data-testid="tab-bar">
         {NAV.map((n) => (
           <Link key={n.href} href={n.href} className={"flex flex-col items-center gap-0.5 text-[11px] " + (isActive(n.href) ? "text-ink" : "text-faint")}>
             <n.icon size={18} />
-            {n.label.replace(" a call", "")}
+            {n.label.replace(" a trade", "")}
           </Link>
         ))}
       </nav>

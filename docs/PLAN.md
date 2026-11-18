@@ -221,6 +221,28 @@ template (https://www.framer.com/marketplace/templates/cryptix/): dashboard
 sidebar, "Quick trade" swap-box panels, mono section labels, hairline panels,
 pill buttons. Branding is our own (see "Brand" below).
 
+### Perp framing (Phase 4c)
+
+The spec pitches Thesis as "prediction markets as the product, protection for
+perp traders as the use case" and opens the demo on "a real perp position: 20x
+long SOL, liquidation price shown". The UI now reads every thesis as the
+position behind it, derived from onchain data only (`lib/position.ts`):
+
+- side from the call's direction (touch above = long, below = short); entry =
+  `spot_at_open`; take profit = conviction strike; liquidation = protection
+  strike; leverage implied as entry / |entry − liquidation|.
+- Feed cards and the trade page show a LONG/SHORT pill with leverage, entry /
+  take profit / liquidation with % moves, a liquidation ← entry → TP bar with
+  the live mark, and ROE at take profit; the crowd's odds sit below.
+- Create is an order ticket: Long/Short, entry at market, leverage (presets or
+  typed) that sets the liquidation price, take profit with ROE, cover on by
+  default, and an order summary with reward:risk.
+- Share: `/api/og/thesis/:pda` renders the position card; the Share button uses
+  the Web Share API with the PNG attached on phones, and on desktop opens a
+  dialog with the card, "Post on X" (the link unfurls via og:image), "Download
+  image" and "Copy link". `/t/:pda` sets og/twitter large-image metadata.
+- On phones, detail pages (`/t/`, `/u/`) hide the tab bar and show a back button.
+
 ### Brand (Phase 4b)
 
 - **Mark**: a T drawn as a market event. The crossbar is the strike line, the

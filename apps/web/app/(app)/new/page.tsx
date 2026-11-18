@@ -15,6 +15,9 @@ import { pct, pythToNumber, usd, usdc } from "@/lib/client/format";
 import { explainError, useTx } from "@/lib/client/tx";
 import { useConfig, useSpot } from "@/lib/client/useConfig";
 import { useActiveWallet, useBurner } from "@/lib/client/wallet";
+import { fmtLev, fmtPct, liqFromLeverage, positionOf } from "@/lib/position";
+
+const LEVERAGES = [2, 5, 10, 20, 50];
 
 const WINDOWS = [
   ...(IS_DEVNET ? [{ label: "10 min (demo)", secs: 600 }] : []),
@@ -46,7 +49,8 @@ export default function CreatePage() {
   const [window, setWindow] = useState(WINDOWS[IS_DEVNET ? 2 : 1].secs);
   const [text, setText] = useState("");
   const [seed, setSeed] = useState("25");
-  const [protect, setProtect] = useState(false);
+  const [protect, setProtect] = useState(true);
+  const [lev, setLev] = useState("20");
   const [liq, setLiq] = useState("");
   const [cover, setCover] = useState("2");
   const [steps, setSteps] = useState<Step[] | null>(null);
@@ -54,12 +58,20 @@ export default function CreatePage() {
 
   const spotUsd = spot ? pythToNumber(spot.price, spot.expo) : null;
   const expo = spot?.expo ?? -8;
-  // Prefill: +3% for the call, -5% for the cover, on the right sides.
+  const side = dir === "above" ? "long" : "short";
+  // Prefill: take profit 3% in the position's favour; liquidation from leverage.
   useEffect(() => {
     if (!spotUsd || target) return;
     setTarget((spotUsd * (dir === "above" ? 1.03 : 0.97)).toFixed(2));
-    setLiq((spotUsd * (dir === "above" ? 0.95 : 1.05)).toFixed(2));
-  }, [spotUsd, dir, target]);
+    const l = Number(lev);
+    if (l >= 1.5) setLiq(liqFromLeverage(side, spotUsd, l).toFixed(2));
+  }, [spotUsd, dir, target, lev, side]);
+  const pickLev = (l: string) => {
+    setLev(l);
+    const n = Number(l);
+    if (spotUsd && n >= 1.5) setLiq(liqFromLeverage(side, spotUsd, n).toFixed(2));
+  };
+  const position = spotUsd && Number(target) > 0 ? positionOf(dir, spotUsd, Number(target), protect && Number(liq) > 0 ? Number(liq) : null) : null;
 
   const toPyth = (usdStr: string) => {
     const n = Number(usdStr);
@@ -210,33 +222,85 @@ export default function CreatePage() {
   return (
     <div className="mx-auto max-w-xl space-y-4">
       <div>
-        <span className="label">New call</span>
+        <span className="label">New trade</span>
         <h1 className="display mt-2 text-4xl">Post your trade</h1>
-        <p className="mt-2 text-sm text-muted">Your call becomes a market the crowd can back or challenge. Add cover in the same step.</p>
+        <p className="mt-2 text-sm text-muted">
+          Your position becomes a market: the crowd backs or challenges your take profit, and your liquidation gets cover. One
+          confirm.
+        </p>
       </div>
       <section className="space-y-3 panel p-5">
-        <div className="num text-xs text-muted">
-          SOL now: <span className="text-ink">{spotUsd ? usd(spotUsd) : "…"}</span> (Pyth)
+        <div className="flex items-center justify-between">
+          <span className="num text-sm text-ink">SOL / USD</span>
+          <span className="num text-xs text-muted">
+            mark <span className="text-ink">{spotUsd ? usd(spotUsd) : "…"}</span> · Pyth
+          </span>
         </div>
-        <div className="grid grid-cols-2 gap-1 rounded-full border border-line bg-bg p-1">
+        <div className="grid grid-cols-2 gap-2">
           {(["above", "below"] as const).map((d) => (
             <button
               key={d}
               onClick={() => (setDir(d), setTarget(""))}
-              className={"rounded-full py-1.5 text-sm font-medium " + (dir === d ? "bg-ink text-bg" : "text-muted hover:text-ink")}
+              data-testid={d === "above" ? "side-long" : "side-short"}
+              className={
+                "rounded-xl py-2.5 text-sm font-semibold transition-colors " +
+                (dir === d
+                  ? d === "above"
+                    ? "bg-yes text-yes-ink"
+                    : "bg-bad text-white"
+                  : "border border-line text-muted hover:text-ink")
+              }
             >
-              {d === "above" ? "SOL goes up to…" : "SOL goes down to…"}
+              {d === "above" ? "Long" : "Short"}
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="text-sm">
+            <span className="text-muted">Entry</span>
+            <div className="num field mt-1 px-3 py-2.5 text-muted">{spotUsd ? usd(spotUsd) : "…"} <span className="text-xs">market</span></div>
+          </div>
+          <label className="block text-sm">
+            <span className="text-muted">Leverage</span>
+            <div className="field mt-1 flex items-center px-3 py-2.5">
+              <input
+                value={lev}
+                onChange={(e) => pickLev(e.target.value.replace(/[^0-9.]/g, ""))}
+                inputMode="decimal"
+                className="num w-full bg-transparent outline-none"
+                aria-label="Leverage"
+              />
+              <span className="num text-muted">x</span>
+            </div>
+          </label>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {LEVERAGES.map((l) => (
+            <button
+              key={l}
+              onClick={() => pickLev(String(l))}
+              className={"num rounded-full px-3 py-1 text-xs " + (Number(lev) === l ? "bg-ink text-bg" : "border border-line text-muted hover:text-ink")}
+            >
+              {l}x
             </button>
           ))}
         </div>
         <label className="block text-sm">
-          <span className="text-muted">Target price</span>
+          <span className="text-muted">
+            Take profit{" "}
+            {position && (
+              <span className="num text-yes">
+                {fmtPct(position.tpMovePct)}
+                {position.roeAtTp !== null ? ` · ${fmtPct(position.roeAtTp, 0)} ROE` : ""}
+              </span>
+            )}
+          </span>
           <input
             value={target}
             onChange={(e) => setTarget(e.target.value.replace(/[^0-9.]/g, ""))}
             inputMode="decimal"
             className="num field mt-1 w-full px-3 py-2.5 outline-none"
-            aria-label="Target price in USD"
+            aria-label="Take profit price in USD"
           />
         </label>
         <div>
@@ -275,7 +339,7 @@ export default function CreatePage() {
         </label>
         <div className="num rounded-xl border border-line bg-panel-2 p-3 text-sm">
           Opening odds: <strong>{preview?.open !== null && preview?.open !== undefined ? pct(preview.open, 2) : "…"}</strong>
-          <span className="text-muted"> that SOL touches {target ? usd(Number(target)) : "…"} in time</span>
+          <span className="text-muted"> that SOL touches your take profit {target ? usd(Number(target)) : "…"} in time</span>
           {preview?.err && <div className="mt-1 text-xs text-bad">{preview.err}</div>}
         </div>
       </section>
@@ -283,17 +347,28 @@ export default function CreatePage() {
       <section className="space-y-3 panel border-guard/25 p-5">
         <label className="flex items-center justify-between text-sm font-semibold">
           <span>
-            Protect me <span className="font-normal text-muted">(cover if SOL touches your liquidation price)</span>
+            Cover my liquidation <span className="font-normal text-muted">(pays if SOL touches your liquidation price)</span>
           </span>
           <input type="checkbox" checked={protect} onChange={(e) => setProtect(e.target.checked)} className="h-5 w-5 accent-[var(--color-guard)]" />
         </label>
         {protect && (
           <>
             <label className="block text-sm">
-              <span className="text-muted">Liquidation price (SOL {protDir === "below" ? "falls to" : "rises to"})</span>
+              <span className="text-muted">
+                Liquidation price{" "}
+                {position?.lev != null && (
+                  <span className="num text-bad">
+                    {fmtPct(position.liqMovePct ?? 0)} · {fmtLev(position.lev)}
+                  </span>
+                )}
+              </span>
               <input
                 value={liq}
-                onChange={(e) => setLiq(e.target.value.replace(/[^0-9.]/g, ""))}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/[^0-9.]/g, "");
+                  setLiq(v);
+                  if (spotUsd && Number(v) > 0 && Number(v) !== spotUsd) setLev((spotUsd / Math.abs(spotUsd - Number(v))).toFixed(1));
+                }}
                 inputMode="decimal"
                 className="num field mt-1 w-full px-3 py-2.5 outline-none"
               />
@@ -323,6 +398,27 @@ export default function CreatePage() {
       </section>
 
       <section className="panel p-5">
+        {position && (
+          <div className="num mb-4 rounded-xl border border-line bg-bg p-3 text-xs" data-testid="order-summary">
+            <div className="flex items-center justify-between">
+              <span className={"font-semibold uppercase " + (position.side === "long" ? "text-yes" : "text-bad")}>
+                {position.side} SOL{position.lev !== null && <span className="normal-case"> {fmtLev(position.lev)}</span>}
+              </span>
+              {position.rr !== null && <span className="text-muted">reward : risk {position.rr.toFixed(2)}</span>}
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-2 text-muted">
+              <span>
+                entry <span className="block text-ink">{usd(position.entry)}</span>
+              </span>
+              <span>
+                take profit <span className="block text-yes">{usd(position.tp)}</span>
+              </span>
+              <span>
+                liquidation <span className="block text-bad">{position.liq !== null ? usd(position.liq) : "—"}</span>
+              </span>
+            </div>
+          </div>
+        )}
         <div className="num mb-3 text-sm text-muted">
           Total: <span className="text-ink">{usdc(total)}</span> USDC + ~{protect ? "0.1" : "0.05"} SOL rent
           {balance !== null && (
@@ -347,7 +443,7 @@ export default function CreatePage() {
             className="btn btn-primary w-full py-2.5 disabled:opacity-40"
             data-testid="create-submit"
           >
-            {steps?.some((s) => s.status === "failed") ? "Retry from the failed step" : "Post thesis"}
+            {steps?.some((s) => s.status === "failed") ? "Retry from the failed step" : "Post trade"}
           </button>
         )}
         {steps && (
@@ -377,7 +473,7 @@ export default function CreatePage() {
             className="btn btn-ghost mt-4 block w-full text-center text-sm"
             data-testid="view-thesis"
           >
-            View your thesis →
+            View your trade →
           </Link>
         )}
       </section>
