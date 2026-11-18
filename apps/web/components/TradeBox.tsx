@@ -116,7 +116,7 @@ export function TradeBox({ market, kind, initialSide = "buy_yes", compact, onDon
   }
 
   const tokenLabel = side.endsWith("yes") ? "YES" : "NO";
-  const btnClass = kind === "protection" ? "btn-guard" : side === "buy_yes" ? "btn-yes" : "bg-ink text-bg";
+  const btnClass = kind === "protection" ? "btn-primary" : side === "buy_yes" ? "btn-yes" : "bg-ink text-bg";
   return (
     <div className={"rounded-2xl border border-line bg-panel-2 text-sm " + (compact ? "p-2.5" : "p-3")}>
       {kind === "conviction" && (

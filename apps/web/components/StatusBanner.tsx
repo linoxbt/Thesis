@@ -25,8 +25,8 @@ export function StatusBanner() {
   }
   if (!msg) return null;
   return (
-    <div className="mb-6 flex items-start gap-3 rounded-2xl border border-guard/30 bg-guard/5 px-4 py-3 text-sm text-ink" data-testid="status-banner">
-      <Info size={16} className="mt-0.5 shrink-0 text-guard" />
+    <div className="mb-6 flex items-start gap-3 rounded-2xl border border-line bg-panel px-4 py-3 text-sm text-ink" data-testid="status-banner">
+      <Info size={16} className="mt-0.5 shrink-0 text-muted" />
       <span>{msg}</span>
     </div>
   );

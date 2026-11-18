@@ -275,8 +275,26 @@ stats, no console errors. All six screens fit a 390 px phone viewport.
 
 ## Phase 5 — Mainnet + traction (Day 6)
 
-- Deploy with caps and pause flag; budget a few SOL for program rent plus SOL
-  for the watcher's Pyth posts; seed sponsored theses within the subsidy budget.
+- [x] Caps and pause flag: already in `Config` (`paused` stops new markets,
+      theses and trades; proofs and settlement always run so users can exit;
+      seed min/max, per-wallet cover cap, sponsor budget, strike and odds bounds).
+- [x] `scripts/mainnet-preflight.ts` (read-only): every dependency is live on
+      mainnet. pm-AMM, Pyth receiver, Metaplex, USDC and the pm-AMM DAO's USDC
+      account (fee recipient) all exist. The sponsored SOL/USD account was 18 s old
+      with 6 bps confidence, so no Hermes key is needed on mainnet either.
+- [x] Mainnet cost: 2.24 SOL program data (locked), 2.24 SOL deploy buffer
+      (refunded), 0.5 SOL authority PDA funding, ~0.05 SOL fees; **peak ≈ 5.0 SOL,
+      ≈ 2.8 SOL stays locked**, plus USDC for the treasury and sponsored seeds.
+- [x] Sponsored seeding from the client (`createMarketInstructions({ sponsored })`).
+- [x] Devnet house calls: `scripts/devnet-seed.ts` posted three calls (one
+      protected), 20 mUSDC each from the sponsor budget (300 → 220), labelled
+      "House call (Thesis team)" in their text. No synthetic traders or trades;
+      `TEAM_WALLETS` excludes the house wallet from `/stats`.
+- [ ] Mainnet deploy. Needs from the owner: a deployer / upgrade-authority key
+      they control (not the container's devnet key), ~5 SOL on it, USDC for
+      the treasury, and mainnet caps (e.g. max seed 25, max cover per wallet
+      100, sponsor budget 100, `max_spot_age_secs` 60).
+- [ ] Traction: real traders posting calls (the 10–15 from Phase 0).
 
 ## Phase 6 — Demo + submission (Day 7)
 

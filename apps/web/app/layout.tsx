@@ -15,7 +15,7 @@ import { THEME_SCRIPT } from "@/components/ThemeToggle";
 import { TxToasts } from "@/components/TxToasts";
 
 export const metadata: Metadata = {
-  title: { default: "Thesis — put a price on your conviction", template: "%s · Thesis" },
+  title: { default: "Thesis — calls, made tradable", template: "%s · Thesis" },
   description:
     "Post a trade call on SOL. The crowd backs it or challenges it on a live market, and protection pays out if price touches your level. Settled by a Pyth price anyone can prove.",
   applicationName: "Thesis",

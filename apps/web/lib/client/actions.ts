@@ -198,7 +198,17 @@ export function randomMarketId(): BN {
 
 export async function createMarketInstructions(
   connection: Connection,
-  a: { creator: PublicKey; usdcMint: PublicKey; direction: "above" | "below"; strike: bigint; endTs: number; seed: bigint; name: string },
+  a: {
+    creator: PublicKey;
+    usdcMint: PublicKey;
+    direction: "above" | "below";
+    strike: bigint;
+    endTs: number;
+    seed: bigint;
+    name: string;
+    /** Seed from the treasury (admin or keeper only, within the sponsor budget). */
+    sponsored?: boolean;
+  },
 ): Promise<{ ixs: TransactionInstruction[]; touchMarket: PublicKey; pmMarket: PublicKey }> {
   const { thesis } = programs(connection);
   const ids = pdas(thesis.programId);
@@ -214,7 +224,7 @@ export async function createMarketInstructions(
       strike: new BN(a.strike.toString()),
       endTs: new BN(a.endTs),
       seedAmount: new BN(a.seed.toString()),
-      sponsored: false,
+      sponsored: !!a.sponsored,
       name: a.name.slice(0, 60),
     } as never)
     .accountsPartial({
@@ -222,7 +232,7 @@ export async function createMarketInstructions(
       config: ids.config,
       authority: ids.authority,
       treasury: ata(a.usdcMint, ids.authority),
-      creatorUsdc: ata(a.usdcMint, a.creator),
+      creatorUsdc: a.sponsored ? null : ata(a.usdcMint, a.creator),
       usdcMint: a.usdcMint,
       priceUpdate: PRICE_ACCOUNT,
       pmMarket,
@@ -231,7 +241,8 @@ export async function createMarketInstructions(
       vault,
       yesMetadata: meta(yesMint),
       noMetadata: meta(noMint),
-      lpPosition: pmPda([seed("lp"), pmMarket.toBuffer(), a.creator.toBuffer()]),
+      // The seeder's LP position: the treasury authority when sponsored.
+      lpPosition: pmPda([seed("lp"), pmMarket.toBuffer(), (a.sponsored ? ids.authority : a.creator).toBuffer()]),
       touchMarket,
       pmAmmProgram: PM_AMM_PROGRAM_ID,
       tokenMetadataProgram: MPL,

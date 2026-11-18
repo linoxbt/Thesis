@@ -110,9 +110,6 @@ export default function LandingPage() {
             <Link href="/app" className="inline-flex items-center gap-1.5 rounded-lg bg-white px-5 py-3 text-[15px] font-medium text-black transition-colors hover:bg-white/90">
               Launch app <ArrowUpRight size={16} />
             </Link>
-            <a href={EXPLORER} target="_blank" rel="noreferrer" className="num inline-flex items-center gap-2 rounded-lg bg-black/20 px-4 py-3 text-[13px] text-white/90 transition-colors hover:bg-black/30">
-              <span className="text-white/60">$</span> program {PROGRAM_ID.slice(0, 4)}…{PROGRAM_ID.slice(-4)}
-            </a>
           </div>
         </div>
       </section>
