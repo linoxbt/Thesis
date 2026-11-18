@@ -251,6 +251,7 @@ fn prove_touch_rules_then_settle_yes() {
     let c = create_market(&mut env, Create { strike, window: 600, ..Default::default() }).unwrap();
     let tm: TouchMarket = env.read(c.touch_market);
     let inside = START_TS + 60;
+    env.set_clock(inside + 2);
 
     let cases: Vec<(&str, PriceUpdate)> = vec![
         ("NotFullyVerified", PriceUpdate { fully_verified: false, ..good_update(inside, strike - 1) }),
@@ -261,6 +262,7 @@ fn prove_touch_rules_then_settle_yes() {
         ("ConfTooWide", PriceUpdate { conf: ((strike - 1) / 100) as u64, ..good_update(inside, strike - 1) }),
         ("NonPositivePrice", good_update(inside, 0)),
         ("NoTouch", good_update(inside, strike + 1)),
+        ("FuturePrice", good_update(START_TS + 120, strike - 1)), // clock is still START_TS
     ];
     for (want, u) in cases {
         let key = env.put_price(u);

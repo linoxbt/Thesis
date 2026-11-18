@@ -10,5 +10,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["scripts/**/*.ts", "target/types/*.ts"]
+  "include": ["scripts/**/*.ts", "services/**/*.ts", "target/types/*.ts"]
 }

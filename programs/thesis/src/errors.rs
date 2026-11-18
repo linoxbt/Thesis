@@ -60,4 +60,28 @@ pub enum ThesisError {
     InvalidVolatility,
     #[msg("Invalid config value")]
     InvalidConfig,
+    #[msg("Market was not created by this creator")]
+    NotMarketCreator,
+    #[msg("Market already belongs to a thesis")]
+    MarketAlreadyLinked,
+    #[msg("Protection market must point the opposite way from the conviction market")]
+    ProtectionSameDirection,
+    #[msg("Markets must share feed and end time")]
+    MarketsMismatch,
+    #[msg("Market is not part of this thesis")]
+    MarketNotInThesis,
+    #[msg("Market is touched or settled; trading through Thesis is closed")]
+    MarketClosed,
+    #[msg("Amount must be positive")]
+    ZeroAmount,
+    #[msg("Cover above the per-wallet cap")]
+    CoverCapExceeded,
+    #[msg("Nothing to claim")]
+    NothingToClaim,
+    #[msg("Thesis accounts are required to settle a thesis market")]
+    MissingThesisAccounts,
+    #[msg("Market must be touched first")]
+    NotTouched,
+    #[msg("Price publish time is in the future")]
+    FuturePrice,
 }

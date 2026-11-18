@@ -135,17 +135,52 @@ Consequences for Phase 2:
 
 ## Phase 2 — Thesis layer + watcher (Day 3)
 
-- `Thesis`, `CreatorStats`, `create_thesis`, `trade` (fee = treasury balance
-  delta around the swap CPI; rejects touched markets), `claim_creator_fees`.
-- Watcher: Hermes SSE → post update → `prove_touch` + treasury YES buy.
-- Keep near-spot devnet markets running from here on, so a real touch is
-  recorded for the demo (a market can't accept a price older than its creation).
-- Checkpoint: resolver not working end to end tonight → ship protection-only
-  touch markets.
+Onchain (`programs/thesis`):
+
+- [x] `Thesis` (`["thesis", creator, id]`) and `CreatorStats` (`["creator", creator]`).
+- [x] `create_thesis`: links the creator's own unlinked, open conviction market
+      and an optional protection market (opposite direction, same feed and end).
+- [x] `trade`: buy/sell YES/NO through pm-AMM. Fee attribution = treasury
+      balance change around the swap CPI; creator self-trades flagged; closed
+      once touched; protection cover capped by the wallet's YES balance.
+- [x] `claim_creator_fees`: pays `fees_attributed × share − fees_claimed`; a
+      second call with nothing new is refused.
+- [x] `treasury_buy_yes`: keeper only, only after a proven touch.
+- [x] `settle` records the thesis outcome and the creator's hit/miss; thesis
+      accounts are required for thesis markets, so stats can't be skipped.
+- [x] `prove_touch` also refuses a future-dated price (defence in depth).
+
+Worker (`services/worker`, TypeScript):
+
+- [x] One process: watcher (proves touches, bundles the treasury buy for
+      sponsored markets, retries the proof alone if the bundle fails) and
+      keeper (settles after `end + grace`, passing thesis accounts).
+- [x] Pluggable `PriceSource`. Default `onchain`: subscribes to a Pyth price
+      feed account, which is itself a verified `PriceUpdateV2`, so it doubles
+      as the proof. **No Hermes needed.** Limitation: only prints that land in
+      that account can prove a touch (on devnet, about every 30 min).
+- [x] `provable()` mirrors every `prove_touch` check; unit-tested.
+- [ ] Hermes source (exact crossing print, posted through the receiver): needs
+      an API key; deferred. The interface is ready for it.
+- [ ] Keep near-spot devnet markets running so a real touch is recorded for
+      the demo: needs the devnet deploy (devnet SOL).
+
+**Phase 2 results**
+
+| Check | Result |
+|---|---|
+| `trade` compute | 226k CU fresh market, 509k after time passes |
+| Watcher bundle (`prove_touch` + `treasury_buy_yes`) | 658k CU, one transaction |
+| Treasury buy right after a touch | Paid 4.95 USDC for 22.4 YES (each pays $1 at settle) |
+| Fee attribution | Equals the treasury's fee income exactly, buys and sells |
+| Tests | 7 unit + 12 program + 7 thesis (LiteSVM) + 4 worker unit |
 
 ## Phase 3 — Offchain (Day 4)
 
-- `services/worker`: one process, three loops (watcher, keeper, indexer).
+- `services/worker`: add the indexer loop next to the watcher and keeper.
+- Keeper: post `set_volatility` daily (7-day realised vol needs a price
+  history source; without Hermes, sample the onchain feed or set it by hand).
+- `claim_seed_residuals` for sponsored markets (cut first if behind).
 - Postgres (Supabase) schema from spec §7; OrbitFlare stream + backfill.
 - API routes: feed, thesis, profile, stats, prove, OG card, faucet.
 

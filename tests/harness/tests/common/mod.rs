@@ -462,6 +462,11 @@ pub fn prove(env: &mut Env, touch_market: Pubkey, price_update: Pubkey) -> Resul
 }
 
 pub fn settle(env: &mut Env, c: &Created) -> Result<u64, String> {
+    settle_with(env, c, None)
+}
+
+/// Settle, passing the thesis and its creator's stats (thesis markets).
+pub fn settle_with(env: &mut Env, c: &Created, thesis: Option<(Pubkey, Pubkey)>) -> Result<u64, String> {
     let cranker = env.funded_keypair(100_000_000);
     let ix = Instruction {
         program_id: thesis::ID,
@@ -472,9 +477,163 @@ pub fn settle(env: &mut Env, c: &Created) -> Result<u64, String> {
             touch_market: c.touch_market,
             pm_market: c.pm_market,
             pm_amm_program: pm_amm::ID,
+            thesis: thesis.map(|t| t.0),
+            creator_stats: thesis.map(|t| t.1),
         }
         .to_account_metas(None),
         data: thesis::instruction::Settle {}.data(),
     };
     env.send(&[ix], &cranker, &[])
+}
+
+// ---------------------------------------------------------------- thesis layer
+
+pub fn creator_stats_pda(creator: &Pubkey) -> Pubkey {
+    pda(&[CREATOR_SEED, creator.as_ref()], &thesis::ID)
+}
+
+pub fn thesis_pda(creator: &Pubkey, id: u64) -> Pubkey {
+    pda(&[THESIS_SEED, creator.as_ref(), &id.to_le_bytes()], &thesis::ID)
+}
+
+pub fn next_thesis_id(env: &Env, creator: &Pubkey) -> u64 {
+    let key = creator_stats_pda(creator);
+    match env.svm.get_account(&key) {
+        Some(a) if !a.data.is_empty() => env.read::<thesis::state::CreatorStats>(key).next_thesis_id,
+        _ => 0,
+    }
+}
+
+/// Returns the thesis PDA.
+pub fn create_thesis(env: &mut Env, creator: &Keypair, conviction: Pubkey, protection: Option<Pubkey>) -> Result<Pubkey, String> {
+    let id = next_thesis_id(env, &creator.pubkey());
+    let thesis = thesis_pda(&creator.pubkey(), id);
+    let ix = Instruction {
+        program_id: thesis::ID,
+        accounts: thesis::accounts::CreateThesis {
+            creator: creator.pubkey(),
+            config: env.config,
+            creator_stats: creator_stats_pda(&creator.pubkey()),
+            thesis,
+            conviction_market: conviction,
+            protection_market: protection,
+            system_program: anchor_lang::system_program::ID,
+        }
+        .to_account_metas(None),
+        data: thesis::instruction::CreateThesis { text_hash: [7u8; 32] }.data(),
+    };
+    env.send(&[ix], creator, &[])?;
+    Ok(thesis)
+}
+
+/// Routes a trade through Thesis. Returns compute units used.
+pub fn trade(
+    env: &mut Env,
+    t: &Trader,
+    thesis: Pubkey,
+    c: &Created,
+    side: thesis::state::TradeSide,
+    amount_in: u64,
+) -> Result<u64, String> {
+    let th: thesis::state::Thesis = env.read(thesis);
+    let dao = env.dao_usdc();
+    let ix = Instruction {
+        program_id: thesis::ID,
+        accounts: thesis::accounts::Trade {
+            trader: t.kp.pubkey(),
+            config: env.config,
+            authority: env.authority,
+            treasury: env.treasury,
+            thesis,
+            creator_stats: creator_stats_pda(&th.creator),
+            touch_market: c.touch_market,
+            pm_market: c.pm_market,
+            usdc_mint: env.usdc_mint,
+            yes_mint: pda(&[PM_YES_MINT_SEED, c.pm_market.as_ref()], &pm_amm::ID),
+            no_mint: pda(&[PM_NO_MINT_SEED, c.pm_market.as_ref()], &pm_amm::ID),
+            vault: pda(&[PM_VAULT_SEED, c.pm_market.as_ref()], &pm_amm::ID),
+            trader_usdc: t.usdc,
+            trader_yes: t.yes,
+            trader_no: t.no,
+            dao_usdc: dao,
+            pm_amm_program: pm_amm::ID,
+            token_program: TOKEN_ID,
+        }
+        .to_account_metas(None),
+        data: thesis::instruction::Trade { side, amount_in, min_output: 0 }.data(),
+    };
+    let kp = t.kp.insecure_clone();
+    env.send(&[compute_budget(1_400_000), ix], &kp, &[])
+}
+
+pub fn claim_creator_fees(env: &mut Env, creator: &Keypair, thesis: Pubkey, to: Pubkey) -> Result<u64, String> {
+    let ix = Instruction {
+        program_id: thesis::ID,
+        accounts: thesis::accounts::ClaimCreatorFees {
+            creator: creator.pubkey(),
+            config: env.config,
+            authority: env.authority,
+            treasury: env.treasury,
+            thesis,
+            creator_stats: creator_stats_pda(&creator.pubkey()),
+            creator_usdc: to,
+            usdc_mint: env.usdc_mint,
+            token_program: TOKEN_ID,
+        }
+        .to_account_metas(None),
+        data: thesis::instruction::ClaimCreatorFees {}.data(),
+    };
+    env.send(&[ix], creator, &[])
+}
+
+/// The Authority's YES/NO token accounts for a market (created on demand).
+pub fn treasury_outcome_accounts(env: &mut Env, pm_market: Pubkey) -> (Pubkey, Pubkey) {
+    let yes_mint = pda(&[PM_YES_MINT_SEED, pm_market.as_ref()], &pm_amm::ID);
+    let no_mint = pda(&[PM_NO_MINT_SEED, pm_market.as_ref()], &pm_amm::ID);
+    let yes = get_associated_token_address(&env.authority, &yes_mint);
+    let no = get_associated_token_address(&env.authority, &no_mint);
+    let a = env.authority;
+    if env.svm.get_account(&yes).is_none() {
+        env.put_token(yes, yes_mint, a, 0);
+    }
+    if env.svm.get_account(&no).is_none() {
+        env.put_token(no, no_mint, a, 0);
+    }
+    (yes, no)
+}
+
+pub fn treasury_buy_yes_ix(env: &mut Env, keeper: &Pubkey, c: &Created, amount_in: u64) -> Instruction {
+    let (yes, no) = treasury_outcome_accounts(env, c.pm_market);
+    let dao = env.dao_usdc();
+    Instruction {
+        program_id: thesis::ID,
+        accounts: thesis::accounts::TreasuryBuyYes {
+            keeper: *keeper,
+            config: env.config,
+            authority: env.authority,
+            treasury: env.treasury,
+            touch_market: c.touch_market,
+            pm_market: c.pm_market,
+            usdc_mint: env.usdc_mint,
+            yes_mint: pda(&[PM_YES_MINT_SEED, c.pm_market.as_ref()], &pm_amm::ID),
+            no_mint: pda(&[PM_NO_MINT_SEED, c.pm_market.as_ref()], &pm_amm::ID),
+            vault: pda(&[PM_VAULT_SEED, c.pm_market.as_ref()], &pm_amm::ID),
+            treasury_yes: yes,
+            treasury_no: no,
+            dao_usdc: dao,
+            pm_amm_program: pm_amm::ID,
+            token_program: TOKEN_ID,
+        }
+        .to_account_metas(None),
+        data: thesis::instruction::TreasuryBuyYes { amount_in, min_output: 0 }.data(),
+    }
+}
+
+pub fn prove_ix(env: &Env, prover: &Pubkey, touch_market: Pubkey, price_update: Pubkey) -> Instruction {
+    Instruction {
+        program_id: thesis::ID,
+        accounts: thesis::accounts::ProveTouch { prover: *prover, config: env.config, touch_market, price_update }
+            .to_account_metas(None),
+        data: thesis::instruction::ProveTouch {}.data(),
+    }
 }
