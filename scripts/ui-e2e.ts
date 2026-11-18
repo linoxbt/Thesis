@@ -46,6 +46,8 @@ async function main() {
   await page.waitForSelector('[data-testid="thesis-card"]', { timeout: 30_000 });
   const cards = await page.locator('[data-testid="thesis-card"]').count();
   check("feed shows thesis cards", cards >= 3, `${cards} cards`);
+  const pill = await page.locator('[data-testid="side-pill"]').first().textContent();
+  check("cards read as positions (side, leverage)", !!pill && /long|short/i.test(pill), pill ?? "");
   await page.screenshot({ path: `${OUT}/feed-desktop.png`, fullPage: true });
 
   // 2. Instant wallet
@@ -101,6 +103,15 @@ async function main() {
     await page.waitForSelector('[data-testid="panel-conviction"]');
     await page.screenshot({ path: `${OUT}/thesis-desktop.png`, fullPage: true });
     const thesisUrl = page.url();
+    const pda = thesisUrl.split("/t/")[1];
+    const og = await page.request.get(`${BASE}/api/og/thesis/${pda}`);
+    const ogBytes = (await og.body()).length;
+    check("share card image renders", og.ok() && (og.headers()["content-type"] ?? "").includes("image/png") && ogBytes > 10_000, `${og.status()} ${ogBytes} bytes`);
+    await page.click('[data-testid="share-button"]');
+    await page.waitForSelector('[data-testid="share-menu"] img');
+    check("share menu offers the image", (await page.locator('[data-testid="share-download"]').count()) === 1);
+    await page.screenshot({ path: `${OUT}/share-menu.png` });
+    await page.keyboard.press("Escape");
 
     // 6. Profile and stats
     const wallet = (await page.evaluate(() => JSON.parse(localStorage.getItem("thesis-burner-v1") ?? "null"))) ? "burner" : "";
@@ -141,8 +152,14 @@ async function main() {
     await m.screenshot({ path: `${OUT}/feed-mobile.png`, fullPage: true });
     await m.goto(thesisUrl);
     await m.waitForSelector('[data-testid="panel-conviction"]');
+    const tabsHidden = !(await m.locator('[data-testid="tab-bar"]').isVisible());
+    const backShown = await m.locator('[data-testid="mobile-back"]').isVisible();
+    check("detail page on mobile: no tab bar, back button", tabsHidden && backShown, `tabs hidden ${tabsHidden}, back ${backShown}`);
     await m.waitForTimeout(1500);
     await m.screenshot({ path: `${OUT}/thesis-mobile.png`, fullPage: true });
+    await m.click('[data-testid="mobile-back"]');
+    await m.waitForURL(/\/app$/, { timeout: 10_000 }).catch(() => {});
+    check("mobile back button returns to the feed", /\/app$/.test(m.url()), m.url());
     await mobile.close();
   }
 

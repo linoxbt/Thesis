@@ -4,27 +4,31 @@
  */
 const W = 640;
 const H = 250;
-const LO = 188;
-const HI = 266;
-const STRIKE = 260;
-const GUARD = 198;
+// An example long: entry 73.04, 20x (liquidation 5% below), take profit +5%.
+const ENTRY = 73.04;
+const LO = 68.6;
+const HI = 77.3;
+const STRIKE = 76.69;
+const GUARD = 69.39;
 const N = 54;
 const TOUCH = 41;
+const R = (HI - LO) / 78; // noise scale
 
 function candles() {
   let s = 5;
   const r = () => ((s = (s * 16807) % 2147483647) / 2147483647) - 0.5;
   const out: { o: number; c: number; h: number; l: number; v: number }[] = [];
-  let p = 206;
+  const start = 71.2;
+  let p = start;
   for (let i = 0; i < N; i++) {
-    const target = i <= TOUCH ? 206 + (STRIKE - 206) * Math.pow(i / TOUCH, 1.3) : STRIKE - (i - TOUCH) * 0.9;
+    const target = i <= TOUCH ? start + (STRIKE - start) * Math.pow(i / TOUCH, 1.3) : STRIKE - (i - TOUCH) * 0.9 * R;
     const o = p;
-    let c = o + (target - o) * 0.45 + r() * 5;
-    let h = Math.max(o, c) + Math.abs(r()) * 3.2;
-    const l = Math.min(o, c) - Math.abs(r()) * 3.2;
+    let c = o + (target - o) * 0.45 + r() * 5 * R;
+    let h = Math.max(o, c) + Math.abs(r()) * 3.2 * R;
+    const l = Math.min(o, c) - Math.abs(r()) * 3.2 * R;
     if (i === TOUCH) h = STRIKE;
-    if (i !== TOUCH) h = Math.min(h, STRIKE - 0.6);
-    c = Math.min(c, STRIKE - 0.8);
+    if (i !== TOUCH) h = Math.min(h, STRIKE - 0.6 * R);
+    c = Math.min(c, STRIKE - 0.8 * R);
     out.push({ o, c, h, l, v: 0.3 + Math.abs(r()) * 1.4 + (i > TOUCH - 4 && i < TOUCH + 3 ? 0.8 : 0) });
     p = c;
   }
@@ -52,16 +56,17 @@ export function ProductWindow() {
         <span className="h-3 w-3 rounded-full bg-[#ff5f57]" />
         <span className="h-3 w-3 rounded-full bg-[#febc2e]" />
         <span className="h-3 w-3 rounded-full bg-[#28c840]" />
-        <span className="num ml-3 truncate text-[11px] text-white/45">thesis · SOL ↑ $260.00 by Dec 31 · example market</span>
+        <span className="num ml-3 truncate text-[11px] text-white/45">thesis · Long SOL 20x · example position</span>
       </div>
 
       <div className="num flex gap-7 overflow-hidden border-b border-white/[0.07] px-4 py-2.5 text-[10px] uppercase tracking-wide text-white/40">
-        <Stat k="SOL / USD" v="$248.72" tone="text-white" />
-        <Stat k="Strike" v="$260.00" />
-        <Stat k="YES" v="64.0%" tone="text-[#3ecf8e]" sub="+23.6" />
-        <Stat k="Vol 24h" v="$18,240" />
-        <Stat k="Protection" v="$198.00" tone="text-[#7aa2ff]" />
-        <Stat k="Ends in" v="12d 04h" />
+        <Stat k="Position" v="Long 20x" tone="text-[#3ecf8e]" />
+        <Stat k="Mark" v="$75.82" tone="text-white" sub="+3.8%" />
+        <Stat k="Entry" v="$73.04" />
+        <Stat k="Take profit" v="$76.69" tone="text-[#3ecf8e]" />
+        <Stat k="Liquidation" v="$69.39" tone="text-[#ff6b6b]" />
+        <Stat k="Crowd YES" v="64.0%" />
+        <Stat k="Ends in" v="1d 22h" />
       </div>
 
       <div className="grid md:grid-cols-[1.7fr_0.95fr_0.95fr]">
@@ -75,14 +80,18 @@ export function ProductWindow() {
               <span>1h</span>
             </span>
           </div>
-          <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full" aria-label="Example: SOL candles rising until a wick touches the $260 strike">
+          <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full" aria-label="Example: a 20x long on SOL; candles rise until a wick touches the $76.69 take profit">
             <line x1="0" x2={W} y1={y(STRIKE)} y2={y(STRIKE)} stroke="#fff" strokeOpacity="0.5" strokeDasharray="4 4" />
-            <text x={W - 6} y={y(STRIKE) - 6} textAnchor="end" fontSize="10" fill="#fff" fillOpacity="0.6" className="num">
-              strike 260.00
+            <text x={W - 6} y={y(STRIKE) - 6} textAnchor="end" fontSize="10" fill="#3ecf8e" className="num">
+              take profit 76.69
             </text>
-            <line x1="0" x2={W} y1={y(GUARD)} y2={y(GUARD)} stroke="#7aa2ff" strokeOpacity="0.6" strokeDasharray="4 4" />
-            <text x={W - 6} y={y(GUARD) + 14} textAnchor="end" fontSize="10" fill="#7aa2ff" className="num">
-              protection 198.00
+            <line x1="0" x2={W} y1={y(ENTRY)} y2={y(ENTRY)} stroke="#fff" strokeOpacity="0.35" strokeDasharray="2 4" />
+            <text x={6} y={y(ENTRY) - 6} fontSize="10" fill="#fff" fillOpacity="0.55" className="num">
+              entry 73.04
+            </text>
+            <line x1="0" x2={W} y1={y(GUARD)} y2={y(GUARD)} stroke="#ff6b6b" strokeOpacity="0.7" strokeDasharray="4 4" />
+            <text x={W - 6} y={y(GUARD) + 14} textAnchor="end" fontSize="10" fill="#ff6b6b" className="num">
+              liquidation 69.39 · covered
             </text>
             {C.map((k, i) => {
               const up = k.c >= k.o;

@@ -19,13 +19,15 @@ export async function feed(db: Db, opts: { sort: FeedSort; limit?: number; now?:
             t.volume_usdc, (t.protection_market is not null) as has_protection,
             c.touch_market as conviction_market, c.pm_market, c.direction, c.strike, c.expo,
             c.initial_price_bps, coalesce(c.yes_price_bps, c.initial_price_bps) as yes_price_bps,
-            c.touched, c.settled,
+            c.touched, c.settled, c.spot_at_open,
+            pr.strike as liq_strike, coalesce(pr.yes_price_bps, pr.initial_price_bps) as liq_yes_bps,
             (coalesce(vc.v, 0) + coalesce(vp.v, 0))::bigint as volume_24h,
             (select coalesce(array_agg(s.yes_price_bps order by s.ts), '{}') from (
                select yes_price_bps, ts from price_points pp
                 where pp.touch_market = c.touch_market order by ts desc limit 40) s) as spark
        from theses t
        join markets c on c.touch_market = t.conviction_market
+       left join markets pr on pr.touch_market = t.protection_market
        left join profiles p on p.wallet = t.creator
        left join vol vc on vc.touch_market = t.conviction_market
        left join vol vp on vp.touch_market = t.protection_market

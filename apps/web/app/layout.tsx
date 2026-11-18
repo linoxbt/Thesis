@@ -15,6 +15,7 @@ import { THEME_SCRIPT } from "@/components/ThemeToggle";
 import { TxToasts } from "@/components/TxToasts";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? process.env.URL ?? "https://thesis-calls.netlify.app"),
   title: { default: "Thesis — calls, made tradable", template: "%s · Thesis" },
   description:
     "Post a trade call on SOL. The crowd backs it or challenges it on a live market, and protection pays out if price touches your level. Settled by a Pyth price anyone can prove.",
