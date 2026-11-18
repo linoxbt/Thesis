@@ -5,5 +5,5 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 cp target/idl/thesis.json packages/chain/idl/thesis.json
 cp target/types/thesis.ts packages/chain/idl/thesis.ts
-cp idls/pm_amm.json packages/chain/idl/pm_amm.json
+cp idls/full/pm_amm.json packages/chain/idl/pm_amm.json
 echo "IDLs synced to packages/chain/idl"

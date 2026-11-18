@@ -1,0 +1,11 @@
+**/node_modules
+target
+tests/fixtures/*.so
+apps/web/.next
+apps/web/.netlify
+.netlify
+.anchor
+test-ledger
+*.log
+.env*
+**/*-keypair.json
