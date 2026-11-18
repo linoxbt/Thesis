@@ -57,7 +57,18 @@ export async function thesisDetail(db: Db, pda: string) {
     ])
   ).rows;
   const creator = await creatorSummary(db, t.creator as string);
+  const conv = byKey.get(t.conviction_market);
+  const spot = conv
+    ? (
+        await db.query(
+          `select publish_time, price, expo from spot_samples
+            where feed_id = $1 and publish_time between $2 and $3 order by publish_time`,
+          [conv.feed_id, Number(t.created_ts) - 3600, Number(t.end_ts) + 3600],
+        )
+      ).rows
+    : [];
   return {
+    spot,
     thesis: t,
     conviction: byKey.get(t.conviction_market) ?? null,
     protection: t.protection_market ? byKey.get(t.protection_market) ?? null : null,

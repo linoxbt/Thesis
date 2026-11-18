@@ -12,4 +12,5 @@ export const SOL_USD_FEED_ID = "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc
 
 export * from "./crossing";
 export * from "./pmamm";
+export * from "./pricing";
 export * from "./pyth";

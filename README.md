@@ -9,7 +9,7 @@ challenge, and a protection market that pays out if price touches the trader's
 liquidation level. Both settle from a Pyth-signed price that anyone can submit,
 with no admin.
 
-Status: **Phase 3** (indexer, Postgres, API) done; devnet deploy pending devnet SOL. See [`docs/PLAN.md`](docs/PLAN.md).
+Status: **Phase 4** (frontend) done; devnet deploy pending devnet SOL. See [`docs/PLAN.md`](docs/PLAN.md).
 
 ## Layout
 
