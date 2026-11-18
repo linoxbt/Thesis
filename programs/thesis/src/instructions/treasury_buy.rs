@@ -48,8 +48,12 @@ pub struct TreasuryBuyYes<'info> {
     #[account(mut, token::mint = no_mint, token::authority = authority)]
     pub treasury_no: Box<Account<'info, TokenAccount>>,
 
-    /// CHECK: pm-AMM requires the protocol DAO's USDC account.
-    #[account(mut)]
+    /// CHECK: must be the protocol DAO's USDC ATA.
+    #[account(
+        mut,
+        address = anchor_spl::associated_token::get_associated_token_address(&PROTOCOL_DAO, &usdc_mint.key())
+            @ ThesisError::WrongDaoAccount,
+    )]
     pub dao_usdc: UncheckedAccount<'info>,
 
     pub pm_amm_program: Program<'info, PmAmm>,
@@ -60,6 +64,11 @@ pub struct TreasuryBuyYes<'info> {
 /// the pool still sells it cheaper until then. The treasury takes that gap
 /// instead of an arbitrageur. The Authority is the market authority, so it
 /// keeps its own creator fee share (pm-AMM: `creator_usdc` = None).
+///
+/// Guards: the buy must return at least 1% more YES than the USDC it spends
+/// (always profitable, since a touched market pays $1 per YES; a manipulated
+/// pool just makes the buy fail), and it can't touch creator fees owed.
+/// `treasury_redeem` turns the YES back into USDC after settlement.
 pub fn handler(ctx: Context<TreasuryBuyYes>, amount_in: u64, min_output: u64) -> Result<()> {
     let config = &ctx.accounts.config;
     let keeper = ctx.accounts.keeper.key();
@@ -67,6 +76,10 @@ pub fn handler(ctx: Context<TreasuryBuyYes>, amount_in: u64, min_output: u64) ->
     require!(amount_in > 0, ThesisError::ZeroAmount);
     let tm = &ctx.accounts.touch_market;
     require!(tm.touched && !tm.settled, ThesisError::NotTouched);
+    let reserve = config.creator_fees_owed.checked_add(amount_in).ok_or(ThesisError::Overflow)?;
+    require!(ctx.accounts.treasury.amount >= reserve, ThesisError::TreasuryReserved);
+    let floor = (amount_in as u128 * (10_000 + TREASURY_BUY_MIN_EDGE_BPS) as u128 / 10_000) as u64;
+    let min_output = min_output.max(floor);
 
     let yes_before = ctx.accounts.treasury_yes.amount;
     let bump = [config.authority_bump];

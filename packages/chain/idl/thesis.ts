@@ -14,6 +14,48 @@ export type Thesis = {
   },
   "instructions": [
     {
+      "name": "acceptAdmin",
+      "docs": [
+        "The proposed admin takes over by signing."
+      ],
+      "discriminator": [
+        112,
+        42,
+        45,
+        90,
+        116,
+        181,
+        13,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "newAdmin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "claimCreatorFees",
       "docs": [
         "Creator: withdraw the earned share of fees attributed to a thesis."
@@ -38,6 +80,7 @@ export type Thesis = {
         },
         {
           "name": "config",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -412,7 +455,8 @@ export type Thesis = {
         {
           "name": "creator",
           "docs": [
-            "The creator. Pays the TouchMarket rent, and the seed unless sponsored."
+            "The creator. Pays the TouchMarket rent, reimburses the Authority for the",
+            "pm-AMM accounts it pays for, and pays the seed unless sponsored."
           ],
           "writable": true,
           "signer": true
@@ -878,8 +922,9 @@ export type Thesis = {
     {
       "name": "initializeConfig",
       "docs": [
-        "Admin, once: writes `Config`, funds the `Authority` PDA with SOL for",
-        "market rent, and creates the treasury (the Authority's USDC ATA)."
+        "Admin, once: writes `Config`, funds the `Authority` PDA with a SOL float",
+        "(creators repay what market creation spends from it), and creates the",
+        "treasury (the Authority's USDC ATA)."
       ],
       "discriminator": [
         208,
@@ -1058,6 +1103,62 @@ export type Thesis = {
               "name": "initializeConfigArgs"
             }
           }
+        }
+      ]
+    },
+    {
+      "name": "migrateConfig",
+      "docs": [
+        "Admin, once per deployment that predates v2: resize `Config` and set",
+        "the creator fees already owed."
+      ],
+      "discriminator": [
+        92,
+        131,
+        58,
+        105,
+        210,
+        154,
+        224,
+        193
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "can't deserialize as the v2 struct)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "creatorFeesOwed",
+          "type": "u64"
         }
       ]
     },
@@ -1312,6 +1413,10 @@ export type Thesis = {
         },
         {
           "name": "config",
+          "docs": [
+            "Writable: records the creator fees this trade adds to what's owed."
+          ],
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -1547,11 +1652,187 @@ export type Thesis = {
         },
         {
           "name": "traderYes",
-          "writable": true
+          "docs": [
+            "The trader's YES ATA: one account per wallet, so the cover cap below",
+            "can't be dodged by spreading YES across accounts."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "trader"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yesMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
         },
         {
           "name": "traderNo",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "trader"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "noMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
         },
         {
           "name": "daoUsdc",
@@ -1812,9 +2093,434 @@ export type Thesis = {
       ]
     },
     {
+      "name": "treasuryRedeem",
+      "docs": [
+        "Anyone, after settlement: claim a sponsored seed's LP residuals and redeem the",
+        "Authority's YES/NO for USDC into the treasury."
+      ],
+      "discriminator": [
+        154,
+        179,
+        45,
+        198,
+        243,
+        135,
+        180,
+        77
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Anyone may crank this: the USDC can only go to the treasury."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "usdcMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "touchMarket",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "touch_market.pm_market",
+                "account": "touchMarket"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pmMarket",
+          "writable": true
+        },
+        {
+          "name": "usdcMint",
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "yesMint",
+          "writable": true
+        },
+        {
+          "name": "noMint",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "treasuryYes",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yesMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "treasuryNo",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "noMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "lpPosition",
+          "docs": [
+            "markets only); seeds pinned here, contents read by pm-AMM."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pmMarket"
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "pmAmmProgram"
+            }
+          }
+        },
+        {
+          "name": "pmAmmProgram",
+          "address": "GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y"
+        },
+        {
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "claimResiduals",
+          "type": "bool"
+        }
+      ]
+    },
+    {
       "name": "updateConfig",
       "docs": [
-        "Admin: change any config field; the result must pass `Config::validate`."
+        "Admin: change config fields within `Config::validate`; `admin` only",
+        "proposes a successor, and the creator share is fixed."
       ],
       "discriminator": [
         29,
@@ -1922,6 +2628,19 @@ export type Thesis = {
   ],
   "events": [
     {
+      "name": "adminChanged",
+      "discriminator": [
+        232,
+        34,
+        31,
+        226,
+        62,
+        18,
+        19,
+        114
+      ]
+    },
+    {
       "name": "creatorFeesClaimed",
       "discriminator": [
         189,
@@ -2010,6 +2729,19 @@ export type Thesis = {
         154,
         82,
         233
+      ]
+    },
+    {
+      "name": "treasuryRedeemed",
+      "discriminator": [
+        169,
+        20,
+        8,
+        183,
+        247,
+        211,
+        169,
+        210
       ]
     },
     {
@@ -2231,9 +2963,80 @@ export type Thesis = {
       "code": 6040,
       "name": "futurePrice",
       "msg": "Price publish time is too far in the future"
+    },
+    {
+      "code": 6041,
+      "name": "treasuryReserved",
+      "msg": "Treasury USDC is reserved for creator fees owed"
+    },
+    {
+      "code": 6042,
+      "name": "windowTooLong",
+      "msg": "Window is longer than allowed"
+    },
+    {
+      "code": 6043,
+      "name": "linkWindowPassed",
+      "msg": "Market opened too long ago to join a thesis"
+    },
+    {
+      "code": 6044,
+      "name": "proofTooLate",
+      "msg": "The grace period is over; settle instead"
+    },
+    {
+      "code": 6045,
+      "name": "notSettled",
+      "msg": "Market is not settled yet"
+    },
+    {
+      "code": 6046,
+      "name": "notPendingAdmin",
+      "msg": "Signer is not the pending admin"
+    },
+    {
+      "code": 6047,
+      "name": "creatorShareFixed",
+      "msg": "The creator share can't change after launch"
+    },
+    {
+      "code": 6048,
+      "name": "wrongDaoAccount",
+      "msg": "dao_usdc must be the protocol DAO's USDC account"
+    },
+    {
+      "code": 6049,
+      "name": "alreadyMigrated",
+      "msg": "Config is already migrated"
+    },
+    {
+      "code": 6050,
+      "name": "wrongCreatorStats",
+      "msg": "Creator stats do not belong to this thesis's creator"
+    },
+    {
+      "code": 6051,
+      "name": "beneficiaryNeedsSponsor",
+      "msg": "Only a sponsored market can name a beneficiary"
     }
   ],
   "types": [
+    {
+      "name": "adminChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "oldAdmin",
+            "type": "pubkey"
+          },
+          {
+            "name": "newAdmin",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
     {
       "name": "config",
       "type": {
@@ -2373,6 +3176,21 @@ export type Thesis = {
           {
             "name": "authorityBump",
             "type": "u8"
+          },
+          {
+            "name": "pendingAdmin",
+            "docs": [
+              "Admin proposed by `update_config`; takes over only on `accept_admin`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "creatorFeesOwed",
+            "docs": [
+              "Creator fees earned but not yet claimed. Treasury spends (sponsored",
+              "seeds, treasury buys) must leave at least this much behind."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -2426,6 +3244,16 @@ export type Thesis = {
           {
             "name": "name",
             "type": "string"
+          },
+          {
+            "name": "beneficiary",
+            "docs": [
+              "Sponsored markets only: the wallet the market is created for (it can",
+              "link the market into its own thesis). None = the signer."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
           }
         ]
       }
@@ -3015,9 +3843,27 @@ export type Thesis = {
       }
     },
     {
+      "name": "treasuryRedeemed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "touchMarket",
+            "type": "pubkey"
+          },
+          {
+            "name": "usdcOut",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "updateConfigArgs",
       "docs": [
-        "Every field optional: only the ones sent change."
+        "Every field optional: only the ones sent change. `admin` only proposes a",
+        "new admin (it takes over on `accept_admin`), and `creator_share_bps` can't",
+        "change, because creators' earned fees are computed from it."
       ],
       "type": {
         "kind": "struct",

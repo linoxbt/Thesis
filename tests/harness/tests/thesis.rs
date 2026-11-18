@@ -106,13 +106,18 @@ fn trade_attributes_volume_fees_and_self_trades() {
     assert_eq!(t.self_volume_usdc, 0);
 
     // The creator challenges their own call: flagged as self-volume.
-    let own = Trader { kp: creator.insecure_clone(), ..trader_for(&mut env, conviction.pm_market, 0) };
-    let mint = env.usdc_mint;
-    env.put_token(own.usdc, mint, creator.pubkey(), 50 * USDC);
     let (yes_mint, no_mint) = (
         pda(&[thesis::constants::PM_YES_MINT_SEED, conviction.pm_market.as_ref()], &thesis::pm_amm::ID),
         pda(&[thesis::constants::PM_NO_MINT_SEED, conviction.pm_market.as_ref()], &thesis::pm_amm::ID),
     );
+    let own = Trader {
+        kp: creator.insecure_clone(),
+        usdc: Pubkey::new_unique(),
+        yes: anchor_spl::associated_token::get_associated_token_address(&creator.pubkey(), &yes_mint),
+        no: anchor_spl::associated_token::get_associated_token_address(&creator.pubkey(), &no_mint),
+    };
+    let mint = env.usdc_mint;
+    env.put_token(own.usdc, mint, creator.pubkey(), 50 * USDC);
     env.put_token(own.yes, yes_mint, creator.pubkey(), 0);
     env.put_token(own.no, no_mint, creator.pubkey(), 0);
     trade(&mut env, &own, thesis, &conviction, TradeSide::BuyNo, 5 * USDC).expect("self trade");

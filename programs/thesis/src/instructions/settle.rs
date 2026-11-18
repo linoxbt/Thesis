@@ -73,7 +73,7 @@ pub fn handler(ctx: Context<Settle>) -> Result<()> {
         require_keys_eq!(thesis.key(), m.origin_thesis, ThesisError::MarketNotInThesis);
         if thesis.conviction_market == m.key() {
             let stats = ctx.accounts.creator_stats.as_mut().ok_or(ThesisError::MissingThesisAccounts)?;
-            require_keys_eq!(stats.creator, thesis.creator, ThesisError::MissingThesisAccounts);
+            require_keys_eq!(stats.creator, thesis.creator, ThesisError::WrongCreatorStats);
             if m.touched {
                 thesis.outcome = 1;
                 stats.hit = stats.hit.checked_add(1).ok_or(ThesisError::Overflow)?;

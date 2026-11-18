@@ -119,7 +119,8 @@ export class Watcher {
     const treasuryYes = getAssociatedTokenAddressSync(yesMint, authority, true);
     const treasuryNo = getAssociatedTokenAddressSync(noMint, authority, true);
     const buy = await program.methods
-      .treasuryBuyYes(new BN(this.opts.treasuryBuyMicroUsdc), new BN(0))
+      // The program also enforces this floor: each YES must cost under $0.99.
+      .treasuryBuyYes(new BN(this.opts.treasuryBuyMicroUsdc), new BN((BigInt(this.opts.treasuryBuyMicroUsdc) * 101n) / 100n))
       .accountsPartial({
         keeper: keeper.publicKey,
         config,

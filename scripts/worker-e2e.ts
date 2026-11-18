@@ -97,6 +97,7 @@ async function main() {
       seedAmount: new BN(25 * USDC),
       sponsored: true,
       name: "e2e touch",
+      beneficiary: null,
     })
     .accountsPartial({
       creator: wallet.publicKey,

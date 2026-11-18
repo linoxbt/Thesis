@@ -161,6 +161,7 @@ async function main() {
       seedAmount: new BN(seedUsdc * USDC),
       sponsored: true,
       name: `SOL <= ${fmt(strike)}`,
+      beneficiary: null,
     })
     .accountsPartial({
       creator: wallet.publicKey,

@@ -10,6 +10,8 @@ crate-type = ["cdylib", "lib"]
 name = "thesis"
 
 [features]
+# Exposes test helpers (e.g. the PriceUpdateV2 encoder) to the LiteSVM harness.
+test-utils = []
 default = []
 cpi = ["no-entrypoint"]
 no-entrypoint = []

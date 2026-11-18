@@ -279,6 +279,8 @@ pub struct Create<'a> {
     pub spot_account: Option<Pubkey>,
     /// Creator USDC account (creator-seeded markets).
     pub creator_usdc: Option<Pubkey>,
+    /// Sponsored markets only: who the market is credited to.
+    pub beneficiary: Option<Pubkey>,
 }
 
 impl Default for Create<'_> {
@@ -293,6 +295,7 @@ impl Default for Create<'_> {
             creator: None,
             spot_account: None,
             creator_usdc: None,
+            beneficiary: None,
         }
     }
 }
@@ -346,6 +349,7 @@ pub fn create_market(env: &mut Env, o: Create) -> Result<Created, String> {
                 seed_amount: o.seed,
                 sponsored: o.sponsored,
                 name: format!("SOL touch {market_id}"),
+                beneficiary: o.beneficiary,
             },
         }
         .data(),
@@ -369,7 +373,13 @@ pub fn trader_for(env: &mut Env, pm_market: Pubkey, usdc: u64) -> Trader {
     let kp = env.funded_keypair(1_000_000_000);
     let yes_mint = pda(&[PM_YES_MINT_SEED, pm_market.as_ref()], &pm_amm::ID);
     let no_mint = pda(&[PM_NO_MINT_SEED, pm_market.as_ref()], &pm_amm::ID);
-    let t = Trader { kp, usdc: Pubkey::new_unique(), yes: Pubkey::new_unique(), no: Pubkey::new_unique() };
+    let owner = kp.pubkey();
+    let t = Trader {
+        usdc: Pubkey::new_unique(),
+        yes: get_associated_token_address(&owner, &yes_mint),
+        no: get_associated_token_address(&owner, &no_mint),
+        kp,
+    };
     let (owner, m) = (t.kp.pubkey(), env.usdc_mint);
     env.put_token(t.usdc, m, owner, usdc);
     env.put_token(t.yes, yes_mint, owner, 0);
@@ -526,18 +536,11 @@ pub fn create_thesis(env: &mut Env, creator: &Keypair, conviction: Pubkey, prote
     Ok(thesis)
 }
 
-/// Routes a trade through Thesis. Returns compute units used.
-pub fn trade(
-    env: &mut Env,
-    t: &Trader,
-    thesis: Pubkey,
-    c: &Created,
-    side: thesis::state::TradeSide,
-    amount_in: u64,
-) -> Result<u64, String> {
+/// A Thesis `trade` instruction (tests may swap accounts before sending).
+pub fn trade_ix(env: &mut Env, t: &Trader, thesis: Pubkey, c: &Created, side: thesis::state::TradeSide, amount_in: u64) -> Instruction {
     let th: thesis::state::Thesis = env.read(thesis);
     let dao = env.dao_usdc();
-    let ix = Instruction {
+    Instruction {
         program_id: thesis::ID,
         accounts: thesis::accounts::Trade {
             trader: t.kp.pubkey(),
@@ -561,9 +564,27 @@ pub fn trade(
         }
         .to_account_metas(None),
         data: thesis::instruction::Trade { side, amount_in, min_output: 0 }.data(),
-    };
+    }
+}
+
+/// Routes a trade through Thesis. Returns compute units used.
+pub fn trade(
+    env: &mut Env,
+    t: &Trader,
+    thesis: Pubkey,
+    c: &Created,
+    side: thesis::state::TradeSide,
+    amount_in: u64,
+) -> Result<u64, String> {
+    let ix = trade_ix(env, t, thesis, c, side, amount_in);
     let kp = t.kp.insecure_clone();
     env.send(&[compute_budget(1_400_000), ix], &kp, &[])
+}
+
+/// Replaces one account of an instruction by key.
+pub fn swap_account(ix: &mut Instruction, from: Pubkey, to: Pubkey) {
+    let m = ix.accounts.iter_mut().find(|m| m.pubkey == from).expect("account in ix");
+    m.pubkey = to;
 }
 
 pub fn claim_creator_fees(env: &mut Env, creator: &Keypair, thesis: Pubkey, to: Pubkey) -> Result<u64, String> {
@@ -627,6 +648,65 @@ pub fn treasury_buy_yes_ix(env: &mut Env, keeper: &Pubkey, c: &Created, amount_i
         .to_account_metas(None),
         data: thesis::instruction::TreasuryBuyYes { amount_in, min_output: 0 }.data(),
     }
+}
+
+pub fn treasury_redeem_ix(env: &mut Env, cranker: &Pubkey, c: &Created, claim_residuals: bool) -> Instruction {
+    let (yes, no) = treasury_outcome_accounts(env, c.pm_market);
+    Instruction {
+        program_id: thesis::ID,
+        accounts: thesis::accounts::TreasuryRedeem {
+            cranker: *cranker,
+            config: env.config,
+            authority: env.authority,
+            treasury: env.treasury,
+            touch_market: c.touch_market,
+            pm_market: c.pm_market,
+            usdc_mint: env.usdc_mint,
+            yes_mint: pda(&[PM_YES_MINT_SEED, c.pm_market.as_ref()], &pm_amm::ID),
+            no_mint: pda(&[PM_NO_MINT_SEED, c.pm_market.as_ref()], &pm_amm::ID),
+            vault: pda(&[PM_VAULT_SEED, c.pm_market.as_ref()], &pm_amm::ID),
+            treasury_yes: yes,
+            treasury_no: no,
+            lp_position: pda(&[PM_LP_SEED, c.pm_market.as_ref(), env.authority.as_ref()], &pm_amm::ID),
+            pm_amm_program: pm_amm::ID,
+            token_program: TOKEN_ID,
+        }
+        .to_account_metas(None),
+        data: thesis::instruction::TreasuryRedeem { claim_residuals }.data(),
+    }
+}
+
+pub fn treasury_redeem(env: &mut Env, c: &Created, claim_residuals: bool) -> Result<u64, String> {
+    let cranker = env.funded_keypair(100_000_000);
+    let ix = treasury_redeem_ix(env, &cranker.pubkey(), c, claim_residuals);
+    env.send(&[compute_budget(1_400_000), ix], &cranker, &[])
+}
+
+pub fn accept_admin(env: &mut Env, signer: &Keypair) -> Result<u64, String> {
+    let ix = Instruction {
+        program_id: thesis::ID,
+        accounts: thesis::accounts::AcceptAdmin { new_admin: signer.pubkey(), config: env.config }.to_account_metas(None),
+        data: thesis::instruction::AcceptAdmin {}.data(),
+    };
+    env.send(&[ix], signer, &[])
+}
+
+pub fn migrate_config(env: &mut Env, signer: &Keypair, creator_fees_owed: u64) -> Result<u64, String> {
+    let ix = Instruction {
+        program_id: thesis::ID,
+        accounts: thesis::accounts::MigrateConfig {
+            admin: signer.pubkey(),
+            config: env.config,
+            system_program: anchor_lang::system_program::ID,
+        }
+        .to_account_metas(None),
+        data: thesis::instruction::MigrateConfig { creator_fees_owed }.data(),
+    };
+    env.send(&[ix], signer, &[])
+}
+
+pub fn config(env: &Env) -> thesis::state::Config {
+    env.read(env.config)
 }
 
 pub fn prove_ix(env: &Env, prover: &Pubkey, touch_market: Pubkey, price_update: Pubkey) -> Instruction {

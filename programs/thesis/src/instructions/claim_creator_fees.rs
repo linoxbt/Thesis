@@ -9,7 +9,7 @@ use crate::state::{Config, CreatorFeesClaimed, CreatorStats, Thesis};
 pub struct ClaimCreatorFees<'info> {
     pub creator: Signer<'info>,
 
-    #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = usdc_mint)]
+    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump, has_one = usdc_mint)]
     pub config: Box<Account<'info, Config>>,
 
     #[account(seeds = [AUTHORITY_SEED], bump = config.authority_bump)]
@@ -41,16 +41,15 @@ pub struct ClaimCreatorFees<'info> {
 pub fn handler(ctx: Context<ClaimCreatorFees>) -> Result<()> {
     let share = ctx.accounts.config.creator_share_bps;
     let t = &mut ctx.accounts.thesis;
-    let amount = t
-        .creator_fees_earned(share)
-        .checked_sub(t.fees_claimed)
-        .ok_or(ThesisError::Overflow)?;
+    let amount = t.creator_fees_earned(share).saturating_sub(t.fees_claimed);
     require!(amount > 0, ThesisError::NothingToClaim);
     t.fees_claimed = t.fees_claimed.checked_add(amount).ok_or(ThesisError::Overflow)?;
+    let config = &mut ctx.accounts.config;
+    config.creator_fees_owed = config.creator_fees_owed.saturating_sub(amount);
     let stats = &mut ctx.accounts.creator_stats;
     stats.total_fees_earned = stats.total_fees_earned.checked_add(amount).ok_or(ThesisError::Overflow)?;
 
-    let bump = [ctx.accounts.config.authority_bump];
+    let bump = [config.authority_bump];
     let seeds: &[&[&[u8]]] = &[&[AUTHORITY_SEED, &bump]];
     transfer(
         CpiContext::new_with_signer(

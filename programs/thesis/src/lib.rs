@@ -1,8 +1,12 @@
 //! Thesis: touch markets on the pm-AMM, resolved by Pyth price proofs.
 //!
-//! Phase 0 scope: the program owns every market it creates through a PDA
-//! (`Authority`), seeds it from the treasury, accepts a Pyth proof of a touch,
-//! and settles through CPI. The thesis/social layer arrives in Phase 2.
+//! The program owns every market it creates through a PDA (`Authority`):
+//! creates and seeds touch markets on the pm-AMM, accepts a permissionless
+//! Pyth proof of a touch, settles through CPI, links markets into theses that
+//! route trades and attribute fees, and redeems the treasury's positions.
+//!
+//! `Config.lp_rebate_bps` and `Config.pm_amm_program` are reserved (v2 / kept
+//! for layout); nothing reads them.
 
 use anchor_lang::prelude::*;
 
@@ -24,8 +28,9 @@ use instructions::*;
 pub mod thesis {
     use super::*;
 
-    /// Admin, once: writes `Config`, funds the `Authority` PDA with SOL for
-    /// market rent, and creates the treasury (the Authority's USDC ATA).
+    /// Admin, once: writes `Config`, funds the `Authority` PDA with a SOL float
+    /// (creators repay what market creation spends from it), and creates the
+    /// treasury (the Authority's USDC ATA).
     pub fn initialize_config(ctx: Context<InitializeConfig>, args: InitializeConfigArgs) -> Result<()> {
         instructions::initialize_config::handler(ctx, args)
     }
@@ -41,9 +46,21 @@ pub mod thesis {
         instructions::create_touch_market::handler(ctx, args)
     }
 
-    /// Admin: change any config field; the result must pass `Config::validate`.
+    /// Admin: change config fields within `Config::validate`; `admin` only
+    /// proposes a successor, and the creator share is fixed.
     pub fn update_config(ctx: Context<UpdateConfig>, args: UpdateConfigArgs) -> Result<()> {
         instructions::update_config::update_config(ctx, args)
+    }
+
+    /// The proposed admin takes over by signing.
+    pub fn accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
+        instructions::update_config::accept_admin(ctx)
+    }
+
+    /// Admin, once per deployment that predates v2: resize `Config` and set
+    /// the creator fees already owed.
+    pub fn migrate_config(ctx: Context<MigrateConfig>, creator_fees_owed: u64) -> Result<()> {
+        instructions::update_config::migrate_config(ctx, creator_fees_owed)
     }
 
     /// Keeper or admin: post SOL's annualised volatility (bps).
@@ -82,5 +99,11 @@ pub mod thesis {
     /// Keeper: after a proven touch, buy underpriced YES with treasury USDC.
     pub fn treasury_buy_yes(ctx: Context<TreasuryBuyYes>, amount_in: u64, min_output: u64) -> Result<()> {
         instructions::treasury_buy::handler(ctx, amount_in, min_output)
+    }
+
+    /// Anyone, after settlement: claim a sponsored seed's LP residuals and redeem the
+    /// Authority's YES/NO for USDC into the treasury.
+    pub fn treasury_redeem(ctx: Context<TreasuryRedeem>, claim_residuals: bool) -> Result<()> {
+        instructions::treasury_redeem::handler(ctx, claim_residuals)
     }
 }
