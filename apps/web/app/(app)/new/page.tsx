@@ -223,7 +223,7 @@ export default function CreatePage() {
             <button
               key={d}
               onClick={() => (setDir(d), setTarget(""))}
-              className={"rounded-full py-1.5 text-sm font-medium " + (dir === d ? "bg-yes text-yes-ink" : "text-muted hover:text-ink")}
+              className={"rounded-full py-1.5 text-sm font-medium " + (dir === d ? "bg-ink text-bg" : "text-muted hover:text-ink")}
             >
               {d === "above" ? "SOL goes up to…" : "SOL goes down to…"}
             </button>
@@ -334,7 +334,7 @@ export default function CreatePage() {
         </div>
         {!wallet ? (
           IS_DEVNET ? (
-            <button onClick={() => void createBurner()} className="btn btn-yes w-full py-2.5">
+            <button onClick={() => void createBurner()} className="btn btn-primary w-full py-2.5">
               Get an instant wallet (free test USDC)
             </button>
           ) : (
@@ -344,7 +344,7 @@ export default function CreatePage() {
           <button
             onClick={() => void go()}
             disabled={blocked || (steps !== null && !steps.some((s) => s.status === "failed") && !finished)}
-            className="btn btn-yes w-full py-2.5 disabled:opacity-40"
+            className="btn btn-primary w-full py-2.5 disabled:opacity-40"
             data-testid="create-submit"
           >
             {steps?.some((s) => s.status === "failed") ? "Retry from the failed step" : "Post thesis"}

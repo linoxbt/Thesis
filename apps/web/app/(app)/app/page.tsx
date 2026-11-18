@@ -36,7 +36,7 @@ export default function FeedPage() {
           settles from a Pyth price anyone can prove.
         </p>
         <div className="mt-6 flex flex-wrap gap-2">
-          <Link href="/new" className="btn btn-yes">
+          <Link href="/new" className="btn btn-primary">
             Post a call <ArrowUpRight size={14} className="-mt-0.5 inline" />
           </Link>
           <Link href="/protect" className="btn btn-ghost">
@@ -75,7 +75,7 @@ export default function FeedPage() {
         {data && data.theses.length === 0 && (
           <div className="panel p-8 text-center text-sm text-muted">
             {sort === "ending" ? "Nothing ending soon." : "No calls yet."}{" "}
-            <Link href="/new" className="text-yes underline">
+            <Link href="/new" className="text-ink underline decoration-brand underline-offset-4">
               Post the first one
             </Link>
             .

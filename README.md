@@ -9,7 +9,7 @@ challenge, and a protection market that pays out if price touches the trader's
 liquidation level. Both settle from a Pyth-signed price that anyone can submit,
 with no admin.
 
-Status: web app live (preview) at https://thesis-calls.netlify.app — program deploy pending devnet SOL. See [`docs/DEPLOY.md`](docs/DEPLOY.md). See [`docs/PLAN.md`](docs/PLAN.md).
+Status: live on devnet. Web: https://thesis-calls.netlify.app (landing at `/`, app at `/app`). Program `9yVcFaDE…` on devnet; worker and Postgres on Railway. See [`docs/DEPLOY.md`](docs/DEPLOY.md). See [`docs/PLAN.md`](docs/PLAN.md).
 
 ## Layout
 
@@ -27,7 +27,7 @@ Status: web app live (preview) at https://thesis-calls.netlify.app — program d
 
 | Program | Devnet | Mainnet |
 |---|---|---|
-| Thesis | `9yVcFaDEmBk1VU66tXxuvUujZXfiiT3ED1EpioVuug6h` (not deployed yet) | — |
+| Thesis | `9yVcFaDEmBk1VU66tXxuvUujZXfiiT3ED1EpioVuug6h` | — |
 | pm-AMM | `GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y` | same |
 | Pyth receiver | `rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ` | same |
 

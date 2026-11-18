@@ -1,40 +1,78 @@
 @import "tailwindcss";
 
 /*
- * Visual language after the Cryptix Framer template (crypto trading dashboard):
- * near-black with a violet cast, one neon-mint accent, Instrument Sans display
- * type, Inter body, JetBrains Mono for every number and section label,
- * hairline-ruled panels, mint glow behind charts, pill buttons.
- * Protection keeps its own amber accent.
+ * Thesis brand system.
+ *
+ * Editorial, research-desk identity: an investment thesis, not a casino.
+ *   Ink (dark) and Paper (soft white) themes share one token set.
+ *   Signal vermilion is the brand: it marks "the touch" (logo dot, section ticks).
+ *     It never encodes data.
+ *   Data colours: YES/backing = green, protection = blue, loss/error = red.
+ *   Type: Instrument Serif for display, Inter for UI, JetBrains Mono for numbers.
+ *
+ * Chart marks (*-mark) are validated per theme with the dataviz palette checker
+ *   (lightness band, CVD + normal-vision separation, >=3:1 vs panel):
+ *   Ink   #1f9d63 / #3b74e0 on #131418
+ *   Paper #178a55 / #3567d6 on #fbfaf6
  */
 @theme {
-  --color-bg: #08070e;
-  --color-panel: #111016;
-  --color-panel-2: #17171d;
-  --color-panel-3: #202026;
-  --color-line: #1f1e26;
-  --color-line-2: #2c2b34;
-  --color-ink: #fafafa;
-  --color-muted: #a3a3a3;
-  --color-faint: #6b6b74;
-  --color-yes: #00ffb2;
-  --color-yes-ink: #03140d;
-  --color-guard: #f5b942;
-  --color-guard-ink: #2a1d02;
-  --color-bad: #ff5c6c;
-  /* Chart marks: validated with the dataviz palette checker on #111016
-     (lightness band, CVD + normal-vision separation, 3:1 contrast). */
-  --color-yes-mark: #00ad78;
-  --color-guard-mark: #bf8620;
+  --color-bg: #0c0d10;
+  --color-panel: #131418;
+  --color-panel-2: #1a1b20;
+  --color-panel-3: #23242a;
+  --color-line: #212228;
+  --color-line-2: #2f3037;
+  --color-ink: #f3f1ea;
+  --color-muted: #a9a69d;
+  --color-faint: #75736c;
+  --color-brand: #ff6a3d;
+  --color-brand-ink: #1a0a04;
+  --color-yes: #3ecf8e;
+  --color-yes-ink: #03170d;
+  --color-guard: #7aa2ff;
+  --color-guard-ink: #061433;
+  --color-bad: #ff6b6b;
+  --color-yes-mark: #1f9d63;
+  --color-guard-mark: #3b74e0;
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Instrument Sans", "Inter", ui-sans-serif, sans-serif;
+  --font-display: "Instrument Serif", ui-serif, Georgia, serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Paper: warm soft white, never pure #fff. */
+:root[data-theme="light"] {
+  --color-bg: #f4f2ec;
+  --color-panel: #fbfaf6;
+  --color-panel-2: #f0ede5;
+  --color-panel-3: #e7e3d9;
+  --color-line: #e4e0d6;
+  --color-line-2: #d3cec2;
+  --color-ink: #16171b;
+  --color-muted: #57564f;
+  --color-faint: #7b786e;
+  --color-brand: #e2531f;
+  --color-brand-ink: #ffffff;
+  --color-yes: #11764a;
+  --color-yes-ink: #ffffff;
+  --color-guard: #2c5ac4;
+  --color-guard-ink: #ffffff;
+  --color-bad: #c4362c;
+  --color-yes-mark: #178a55;
+  --color-guard-mark: #3567d6;
+  color-scheme: light;
+}
+:root {
+  color-scheme: dark;
 }
 
 html,
 body {
   background: var(--color-bg);
   color: var(--color-ink);
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-brand) 30%, transparent);
 }
 
 .num {
@@ -45,25 +83,30 @@ body {
 .display {
   font-family: var(--font-display);
   font-weight: 400;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.015em;
+}
+.display em,
+em.display {
+  font-style: italic;
 }
 
-/* "▍ DESIGNED FOR YOU" — mono section label with a mint tick. */
+/* Section label: mono caps with a vermilion tick. */
 .label {
   font-family: var(--font-mono);
   font-size: 12px;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--color-yes);
+  color: var(--color-muted);
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
 .label::before {
   content: "";
-  width: 2px;
-  height: 12px;
-  background: var(--color-yes);
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--color-brand);
 }
 .label-guard {
   color: var(--color-guard);
@@ -78,7 +121,7 @@ body {
   border-radius: 16px;
 }
 
-/* Soft mint glow behind hero charts, as on the template's dashboard frame. */
+/* Faint warm light from above, behind hero panels and charts. */
 .glow {
   position: relative;
 }
@@ -88,29 +131,65 @@ body {
   inset: -1px;
   border-radius: inherit;
   pointer-events: none;
-  background: radial-gradient(60% 40% at 50% 0%, rgb(0 255 178 / 0.1), transparent 70%);
+  background: radial-gradient(60% 45% at 50% 0%, color-mix(in oklab, var(--color-brand) 9%, transparent), transparent 70%);
 }
 .glow-line {
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgb(0 255 178 / 0.6), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--color-brand) 55%, transparent), transparent);
+}
+
+/* Hairline grid, for the landing page backdrop. */
+.grid-bg {
+  background-image:
+    linear-gradient(var(--color-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-line) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(70% 60% at 50% 30%, #000 30%, transparent 75%);
 }
 
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
   border-radius: 9999px;
   font-weight: 500;
   padding: 0.5rem 1rem;
-  transition: background-color 120ms, opacity 120ms;
+  transition:
+    background-color 120ms,
+    opacity 120ms,
+    border-color 120ms;
+}
+.btn:disabled {
+  opacity: 0.5;
+}
+.btn-primary {
+  background: var(--color-ink);
+  color: var(--color-bg);
+}
+.btn-primary:hover {
+  background: color-mix(in oklab, var(--color-ink) 85%, var(--color-bg));
+}
+.btn-brand {
+  background: var(--color-brand);
+  color: var(--color-brand-ink);
+}
+.btn-brand:hover {
+  background: color-mix(in oklab, var(--color-brand) 88%, var(--color-ink));
 }
 .btn-yes {
   background: var(--color-yes);
   color: var(--color-yes-ink);
 }
 .btn-yes:hover {
-  background: #4dffc8;
+  background: color-mix(in oklab, var(--color-yes) 88%, var(--color-ink));
 }
 .btn-guard {
   background: var(--color-guard);
   color: var(--color-guard-ink);
+}
+.btn-guard:hover {
+  background: color-mix(in oklab, var(--color-guard) 88%, var(--color-ink));
 }
 .btn-ghost {
   border: 1px solid var(--color-line-2);
@@ -129,11 +208,57 @@ body {
   border-color: var(--color-line-2);
 }
 
+/* FAQ disclosure */
+details > summary {
+  list-style: none;
+  cursor: pointer;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}
+details[open] .faq-plus {
+  transform: rotate(45deg);
+}
+
 /* Wallet adapter modal, themed to match. */
 .wallet-adapter-modal-wrapper {
   background: var(--color-panel) !important;
   border: 1px solid var(--color-line);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 0.25) !important;
+}
+.wallet-adapter-modal-title,
+.wallet-adapter-modal-list .wallet-adapter-button,
+.wallet-adapter-modal-list-more {
+  color: var(--color-ink) !important;
+}
+.wallet-adapter-modal-list .wallet-adapter-button:not([disabled]):hover {
+  background: var(--color-panel-2) !important;
+}
+.wallet-adapter-modal-button-close {
+  background: var(--color-panel-2) !important;
+}
+.wallet-adapter-modal-button-close svg {
+  fill: var(--color-muted) !important;
 }
 .wallet-adapter-button {
   font-family: var(--font-sans) !important;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .touch-pulse {
+    animation: touch-pulse 2.4s ease-out infinite;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  @keyframes touch-pulse {
+    0% {
+      transform: scale(1);
+      opacity: 0.55;
+    }
+    70%,
+    100% {
+      transform: scale(3.2);
+      opacity: 0;
+    }
+  }
 }

@@ -216,16 +216,30 @@ Workspace: `packages/chain` (IDLs, Pyth decoding, `provable()`, pm-AMM price),
 
 ## Phase 4 — Frontend (Day 5)
 
-`apps/web` (Next.js 16, Tailwind 4). Visual language after the **Cryptix** Framer
-template (a crypto-trading dashboard: https://www.framer.com/marketplace/templates/cryptix/),
-adapted, not copied: near-black `#08070e`, one neon-mint accent `#00FFB2` for
-YES/back and calls to action, amber for protection, Instrument Sans display
-type, Inter body, JetBrains Mono for every number and section label, mono
-"▍ LABEL" headers, hairline panels, mint glow behind charts, pill buttons, a
-dashboard sidebar, "Quick trade" panels shaped like a swap box. Chart-mark
-colours (`#00ad78`, `#bf8620`) validated with the dataviz palette checker.
+`apps/web` (Next.js 16, Tailwind 4). Layout after the **Cryptix** Framer
+template (https://www.framer.com/marketplace/templates/cryptix/): dashboard
+sidebar, "Quick trade" swap-box panels, mono section labels, hairline panels,
+pill buttons. Branding is our own (see "Brand" below).
 
-- [x] Feed `/`: Hot / New / Ending soon; each card has the creator, the call in
+### Brand (Phase 4b)
+
+- **Mark**: a T drawn as a market event. The crossbar is the strike line, the
+  stem is price rising into it, and the vermilion dot is the touch. Paths in
+  `components/Brand.tsx`; files in `public/brand/`; sheet in `docs/brand-sheet.png`.
+- **Themes**: Ink (dark, `#0c0d10`) and Paper (soft warm white, `#f4f2ec`, never
+  pure white). Same token names, switched by `data-theme` on `<html>`, which
+  follows the system preference until the user picks one with the toggle.
+  The choice is stored in `localStorage` and applied before first paint.
+- **Colour roles**: vermilion (`#ff6a3d` / `#e2531f`) is brand only, never data;
+  green = YES/backing; blue = protection; red = loss/error; ink = primary CTAs.
+  Chart marks validated per theme with the dataviz checker.
+- **Type**: Instrument Serif (display), Inter (UI), JetBrains Mono (numbers).
+- **Landing** `/`: nav, hero with an example call touching its strike, built-on
+  strip, live stats (protocol facts until there's activity), how it works,
+  two-markets bento, trustless settlement (the five proof checks), principles,
+  FAQ, CTA, footer. The app lives under `/app` (route group `(app)`).
+
+- [x] Feed `/app`: Hot / New / Ending soon; each card has the creator, the call in
       one line, live YES %, protection badge, 24h volume, time left, and Back /
       Challenge that trade inline without leaving the feed.
 - [x] Thesis `/t/:pda`: the call, creator record, SOL/USD (Pyth) with target and

@@ -1,6 +1,7 @@
 import { ImageResponse } from "next/og";
 import { thesisDetail } from "@thesis/db";
 import { bad, db, pubkey } from "@/lib/server";
+import { MARK_PATHS } from "@/components/Brand";
 
 export const dynamic = "force-dynamic";
 
@@ -32,23 +33,30 @@ export async function GET(_req: Request, { params }: { params: Promise<{ pda: st
           flexDirection: "column",
           justifyContent: "space-between",
           padding: 64,
-          background: "radial-gradient(70% 50% at 50% 0%, #0d2a22 0%, #08070e 70%)",
-          color: "#fafafa",
+          background: "radial-gradient(70% 50% at 50% 0%, #2a160e 0%, #0c0d10 70%)",
+          color: "#f3f1ea",
           fontFamily: "monospace",
         }}
       >
-        <div style={{ display: "flex", fontSize: 28, color: "#00ffb2", letterSpacing: 2 }}>{"▍ THESIS · " + name}</div>
+        <div style={{ display: "flex", alignItems: "center", fontSize: 28, color: "#a9a69d", letterSpacing: 2 }}>
+          <svg width="44" height="44" viewBox="4 5 40 40" style={{ marginRight: 16 }}>
+            <path d={MARK_PATHS.bar} fill="#f3f1ea" />
+            <path d={MARK_PATHS.stem} fill="#f3f1ea" />
+            <circle cx={24} cy={16} r={4.5} fill="#ff6a3d" />
+          </svg>
+          {"THESIS · " + name}
+        </div>
         <div style={{ display: "flex", flexDirection: "column" }}>
           <div style={{ display: "flex", fontSize: 64, fontWeight: 700 }}>{call}</div>
           {t.text ? (
-            <div style={{ display: "flex", fontSize: 32, color: "#a3a3a3", marginTop: 16 }}>
+            <div style={{ display: "flex", fontSize: 32, color: "#a9a69d", marginTop: 16 }}>
               {String(t.text).slice(0, 120)}
             </div>
           ) : null}
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
-          <div style={{ display: "flex", fontSize: 96, color: "#00ffb2" }}>{yes.toFixed(0) + "% YES"}</div>
-          <div style={{ display: "flex", fontSize: 32, color: d.protection ? "#f5b942" : "#a3a3a3" }}>
+          <div style={{ display: "flex", fontSize: 96, color: "#3ecf8e" }}>{yes.toFixed(0) + "% YES"}</div>
+          <div style={{ display: "flex", fontSize: 32, color: d.protection ? "#7aa2ff" : "#a9a69d" }}>
             {(d.protection ? "PROTECTED · " : "") + tag}
           </div>
         </div>

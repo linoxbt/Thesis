@@ -71,7 +71,7 @@ export default function StatsPage() {
                   </td>
                   <td className="text-right">
                     {t.proof_tx ? (
-                      <a href={explorerTx(t.proof_tx)} target="_blank" rel="noreferrer" className="text-yes underline">
+                      <a href={explorerTx(t.proof_tx)} target="_blank" rel="noreferrer" className="text-ink underline decoration-brand underline-offset-4">
                         proof tx
                       </a>
                     ) : (
