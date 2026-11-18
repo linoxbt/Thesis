@@ -40,10 +40,17 @@ async function main() {
 
   // 1. Feed (and the desktop sidebar collapses to a rail, remembered)
   await page.waitForSelector('[data-testid="thesis-card"]', { timeout: 30_000 });
+  const logoAt = async () => {
+    const b = await page.locator('aside a[aria-label="Thesis home"]').first().boundingBox();
+    return b ? `${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.width)}` : "hidden";
+  };
+  const logoOpen = await logoAt();
   await page.click('[data-testid="sidebar-toggle"]');
   await page.reload();
   await page.waitForSelector('[data-testid="thesis-card"]');
   const rail = await page.locator('[data-sidebar="collapsed"]').count();
+  const logoClosed = await logoAt();
+  check("collapsed sidebar keeps the logo and name in place", logoOpen === logoClosed, `open ${logoOpen}, collapsed ${logoClosed}`);
   await page.click('[data-testid="sidebar-toggle"]');
   const open = await page.locator('[data-sidebar="open"]').count();
   check("sidebar collapses, stays collapsed after reload, expands", rail === 1 && open === 1, `rail ${rail}, open ${open}`);

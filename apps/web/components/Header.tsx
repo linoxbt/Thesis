@@ -7,7 +7,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { IS_DEVNET } from "@/lib/client/config";
-import { Logo, LogoMark } from "./Brand";
+import { Logo } from "./Brand";
 import { StatusBanner } from "./StatusBanner";
 import { ago, pythToNumber, shortAddr, usd } from "@/lib/client/format";
 import { useSpot } from "@/lib/client/useConfig";
@@ -187,12 +187,14 @@ export function AppShell({ children }: { children: ReactNode }) {
       data-sidebar={collapsed ? "collapsed" : "open"}
     >
       <div className="hidden border-r border-line lg:block">
-      <aside className={"sticky top-0 flex h-screen flex-col py-5 " + (collapsed ? "items-stretch px-2.5" : "px-4")}>
-        <div className={"flex items-center " + (collapsed ? "justify-center" : "justify-between")}>
+      <aside className={"sticky top-0 z-30 flex h-screen flex-col py-5 " + (collapsed ? "items-stretch px-2.5" : "px-4")}>
+        <div className={"flex items-center " + (collapsed ? "relative h-[26px]" : "justify-between")}>
           {collapsed ? (
-            <Link href="/" aria-label="Thesis home" className="text-ink">
-              <LogoMark size={24} />
-            </Link>
+            // Same place as when open (16px in, 20px down); the name extends
+            // over the top bar, on the page colour so the rail's border doesn't cross it.
+            <div className="absolute left-[6px] top-px z-30 flex items-center bg-bg pr-3" data-testid="rail-logo">
+              <Logo href="/" />
+            </div>
           ) : (
             <Logo href="/" />
           )}
@@ -243,7 +245,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <div className="min-w-0">
         <header className="sticky top-0 z-20 border-b border-line bg-bg/85 backdrop-blur">
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 lg:px-8">
+          <div className={"mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 lg:px-8 " + (collapsed ? "lg:pl-24" : "")}>
             <div className="flex items-center gap-4">
               {detail && (
                 <button onClick={back} className="-ml-1 grid h-9 w-9 place-items-center rounded-full text-ink hover:bg-panel-2 lg:hidden" aria-label="Back" data-testid="mobile-back">
