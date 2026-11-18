@@ -41,6 +41,8 @@ pub fn handler(ctx: Context<ProveTouch>) -> Result<()> {
     // allow a small skew, refuse anything beyond it.
     let now = Clock::get()?.unix_timestamp;
     require!(p.publish_time <= now + MAX_CLOCK_SKEW_SECS, ThesisError::FuturePrice);
+    // Spec: no proof by end + grace means NO, whenever settle gets cranked.
+    require!(now <= m.end_ts.saturating_add(config.grace_secs as i64), ThesisError::ProofTooLate);
     require!(p.exponent == m.expo, ThesisError::WrongExpo);
     let crossed = match m.direction {
         Direction::Below => p.price <= m.strike,

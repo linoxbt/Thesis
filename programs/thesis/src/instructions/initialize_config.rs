@@ -92,6 +92,8 @@ pub fn handler(ctx: Context<InitializeConfig>, args: InitializeConfigArgs) -> Re
     config.validate()?;
     config.bump = ctx.bumps.config;
     config.authority_bump = ctx.bumps.authority;
+    config.pending_admin = Pubkey::default();
+    config.creator_fees_owed = 0;
 
     if args.authority_funding > 0 {
         transfer(

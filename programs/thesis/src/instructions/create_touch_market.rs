@@ -26,6 +26,9 @@ pub struct CreateTouchMarketArgs {
     /// instead of from the creator's own USDC.
     pub sponsored: bool,
     pub name: String,
+    /// Sponsored markets only: the wallet the market is created for (it can
+    /// link the market into its own thesis). None = the signer.
+    pub beneficiary: Option<Pubkey>,
 }
 
 #[derive(Accounts)]
@@ -128,13 +131,20 @@ pub fn handler(ctx: Context<CreateTouchMarket>, args: CreateTouchMarketArgs) -> 
     if args.sponsored {
         require!(creator == config.admin || creator == config.keeper, ThesisError::SponsorNotAllowed);
         require!(args.seed_amount <= config.sponsor_budget, ThesisError::SponsorBudgetExhausted);
+        // The seed can't come out of creator fees owed.
+        let reserve = config.creator_fees_owed.checked_add(args.seed_amount).ok_or(ThesisError::Overflow)?;
+        require!(ctx.accounts.treasury.amount >= reserve, ThesisError::TreasuryReserved);
     } else {
         require!(ctx.accounts.creator_usdc.is_some(), ThesisError::MissingCreatorUsdc);
+        require!(args.beneficiary.is_none(), ThesisError::BeneficiaryNeedsSponsor);
     }
+    // Who the market belongs to (who may link it into a thesis).
+    let owner = args.beneficiary.unwrap_or(creator);
 
     // --- Window ---
     let tau = args.end_ts.checked_sub(now).ok_or(ThesisError::Overflow)?;
     require!(tau > PM_MIN_DURATION_SECS, ThesisError::InvalidWindow);
+    require!(tau <= MAX_WINDOW_SECS, ThesisError::WindowTooLong);
 
     // --- Spot and volatility ---
     let spot = verified_price(
@@ -279,7 +289,7 @@ pub fn handler(ctx: Context<CreateTouchMarket>, args: CreateTouchMarketArgs) -> 
     tm.settled = false;
     tm.winning_side = 0;
     tm.origin_thesis = Pubkey::default();
-    tm.creator = creator;
+    tm.creator = owner;
     tm.seeded_by = seeder;
     tm.seed_amount = args.seed_amount;
     tm.spot_at_open = spot.price;
@@ -288,7 +298,7 @@ pub fn handler(ctx: Context<CreateTouchMarket>, args: CreateTouchMarketArgs) -> 
     emit!(TouchMarketCreated {
         touch_market: tm.key(),
         pm_market: tm.pm_market,
-        creator,
+        creator: owner,
         direction: tm.direction,
         strike: tm.strike,
         expo: tm.expo,

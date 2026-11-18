@@ -60,9 +60,27 @@ export function toView(m: TouchMarketAccount): MarketView {
 }
 
 /** Every TouchMarket not yet settled. */
-export async function openMarkets(ctx: Ctx): Promise<{ key: PublicKey; account: TouchMarketAccount }[]> {
-  const all = await ctx.program.account.touchMarket.all();
-  return all.filter((m) => !m.account.settled).map((m) => ({ key: m.publicKey, account: m.account }));
+/** Byte offsets in a TouchMarket account (8-byte discriminator included). */
+export const TOUCH_SETTLED_OFFSET = 160;
+export const TOUCH_SEEDED_BY_OFFSET = 226;
+const SETTLED = (v: boolean) => ({ memcmp: { offset: TOUCH_SETTLED_OFFSET, bytes: v ? "2" : "1" } }); // base58 of [1] / [0]
+
+type MarketRow = { key: PublicKey; account: TouchMarketAccount };
+const rows = (all: { publicKey: PublicKey; account: TouchMarketAccount }[]): MarketRow[] =>
+  all.map((m) => ({ key: m.publicKey, account: m.account }));
+
+/** Unsettled markets, filtered by the RPC node rather than downloaded and dropped. */
+export async function openMarkets(ctx: Ctx): Promise<MarketRow[]> {
+  return rows((await ctx.program.account.touchMarket.all([SETTLED(false)])).filter((m) => !m.account.settled));
 }
+
+/** Settled markets the treasury seeded (where it may have money to redeem). */
+export async function settledSponsoredMarkets(ctx: Ctx): Promise<MarketRow[]> {
+  const sponsored = { memcmp: { offset: TOUCH_SEEDED_BY_OFFSET, bytes: ctx.authority.toBase58() } };
+  return rows((await ctx.program.account.touchMarket.all([SETTLED(true), sponsored])).filter((m) => m.account.settled));
+}
+
+export const lpPositionPda = (pmMarket: PublicKey, owner: PublicKey) =>
+  pmPda([Buffer.from("lp"), pmMarket.toBuffer(), owner.toBuffer()]);
 
 export const log = (scope: string, msg: string) => console.log(`${new Date().toISOString()} [${scope}] ${msg}`);

@@ -226,6 +226,7 @@ export async function createMarketInstructions(
       seedAmount: new BN(a.seed.toString()),
       sponsored: !!a.sponsored,
       name: a.name.slice(0, 60),
+      beneficiary: null,
     } as never)
     .accountsPartial({
       creator: a.creator,

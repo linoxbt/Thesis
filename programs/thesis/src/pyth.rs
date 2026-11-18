@@ -87,6 +87,7 @@ pub fn parse_price_update(data: &[u8]) -> Result<PriceUpdate> {
 
 /// Serialises a `PriceUpdateV2` the way the receiver stores it. Used by tests
 /// and by tooling that builds fixtures; never called onchain.
+#[cfg(any(test, feature = "test-utils"))]
 pub fn encode_price_update(u: &PriceUpdate, write_authority: [u8; 32], posted_slot: u64) -> Vec<u8> {
     let mut v = Vec::with_capacity(134);
     v.extend_from_slice(&PRICE_UPDATE_V2_DISCRIMINATOR);

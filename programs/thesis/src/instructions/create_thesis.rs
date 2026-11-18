@@ -50,6 +50,9 @@ pub fn handler(ctx: Context<CreateThesis>, text_hash: [u8; 32]) -> Result<()> {
         require_keys_eq!(m.creator, creator, ThesisError::NotMarketCreator);
         require_keys_eq!(m.origin_thesis, Pubkey::default(), ThesisError::MarketAlreadyLinked);
         require!(!m.touched && !m.settled && now < m.end_ts, ThesisError::MarketClosed);
+        // Link only fresh markets: a track record can't be built by linking a
+        // market once its outcome is clear (e.g. crossed but not yet proven).
+        require!(now.saturating_sub(m.start_ts) <= THESIS_LINK_WINDOW_SECS, ThesisError::LinkWindowPassed);
         Ok(())
     };
 

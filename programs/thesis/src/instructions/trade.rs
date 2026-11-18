@@ -13,7 +13,8 @@ pub struct Trade<'info> {
     #[account(mut)]
     pub trader: Signer<'info>,
 
-    #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = usdc_mint)]
+    /// Writable: records the creator fees this trade adds to what's owed.
+    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump, has_one = usdc_mint)]
     pub config: Box<Account<'info, Config>>,
 
     #[account(seeds = [AUTHORITY_SEED], bump = config.authority_bump)]
@@ -58,14 +59,20 @@ pub struct Trade<'info> {
     #[account(mut, token::mint = usdc_mint, token::authority = trader)]
     pub trader_usdc: Box<Account<'info, TokenAccount>>,
 
-    #[account(mut, token::mint = yes_mint, token::authority = trader)]
+    /// The trader's YES ATA: one account per wallet, so the cover cap below
+    /// can't be dodged by spreading YES across accounts.
+    #[account(mut, associated_token::mint = yes_mint, associated_token::authority = trader)]
     pub trader_yes: Box<Account<'info, TokenAccount>>,
 
-    #[account(mut, token::mint = no_mint, token::authority = trader)]
+    #[account(mut, associated_token::mint = no_mint, associated_token::authority = trader)]
     pub trader_no: Box<Account<'info, TokenAccount>>,
 
-    /// CHECK: pm-AMM requires the protocol DAO's USDC account.
-    #[account(mut)]
+    /// CHECK: the protocol DAO's USDC ATA (pm-AMM's fee recipient).
+    #[account(
+        mut,
+        address = anchor_spl::associated_token::get_associated_token_address(&PROTOCOL_DAO, &usdc_mint.key())
+            @ ThesisError::WrongDaoAccount,
+    )]
     pub dao_usdc: UncheckedAccount<'info>,
 
     pub pm_amm_program: Program<'info, PmAmm>,
@@ -151,7 +158,12 @@ pub fn handler(ctx: Context<Trade>, side: TradeSide, amount_in: u64, min_output:
     if is_creator {
         t.self_volume_usdc = t.self_volume_usdc.checked_add(usdc_amount).ok_or(ThesisError::Overflow)?;
     }
+    let share = ctx.accounts.config.creator_share_bps;
+    let earned_before = t.creator_fees_earned(share);
     t.fees_attributed = t.fees_attributed.checked_add(fee).ok_or(ThesisError::Overflow)?;
+    let newly_owed = t.creator_fees_earned(share).saturating_sub(earned_before);
+    let config = &mut ctx.accounts.config;
+    config.creator_fees_owed = config.creator_fees_owed.checked_add(newly_owed).ok_or(ThesisError::Overflow)?;
     let stats = &mut ctx.accounts.creator_stats;
     stats.total_volume = stats.total_volume.checked_add(usdc_amount).ok_or(ThesisError::Overflow)?;
 

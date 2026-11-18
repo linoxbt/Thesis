@@ -38,7 +38,16 @@ pub struct Config {
     pub paused: bool,
     pub bump: u8,
     pub authority_bump: u8,
+    // ---- appended in v2 (migrate_config resizes v1 accounts) ----
+    /// Admin proposed by `update_config`; takes over only on `accept_admin`.
+    pub pending_admin: Pubkey,
+    /// Creator fees earned but not yet claimed. Treasury spends (sponsored
+    /// seeds, treasury buys) must leave at least this much behind.
+    pub creator_fees_owed: u64,
 }
+
+/// Size of a v1 `Config` (before `pending_admin` and `creator_fees_owed`).
+pub const CONFIG_V1_LEN: usize = 8 + Config::INIT_SPACE - 32 - 8;
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace, Debug)]
 pub enum Direction {
@@ -108,6 +117,18 @@ pub struct Touched {
 }
 
 #[event]
+pub struct TreasuryRedeemed {
+    pub touch_market: Pubkey,
+    pub usdc_out: u64,
+}
+
+#[event]
+pub struct AdminChanged {
+    pub old_admin: Pubkey,
+    pub new_admin: Pubkey,
+}
+
+#[event]
 pub struct Settled {
     pub touch_market: Pubkey,
     pub winning_side: u8,
@@ -122,7 +143,15 @@ impl Config {
         use crate::errors::ThesisError;
         require!(self.creator_share_bps <= 10_000, ThesisError::InvalidConfig);
         require!(self.lp_rebate_bps <= 10_000, ThesisError::InvalidConfig);
-        require!(self.max_conf_bps > 0 && self.max_conf_bps <= 10_000, ThesisError::InvalidConfig);
+        // Bounded so an admin can't freeze settlement or block every proof.
+        require!(
+            self.max_conf_bps >= crate::constants::MIN_CONF_BPS && self.max_conf_bps <= crate::constants::MAX_CONF_BPS,
+            ThesisError::InvalidConfig
+        );
+        require!(
+            self.grace_secs >= crate::constants::MIN_GRACE_SECS && self.grace_secs <= crate::constants::MAX_GRACE_SECS,
+            ThesisError::InvalidConfig
+        );
         require!(
             self.min_seed_per_market > 0 && self.min_seed_per_market <= self.max_seed_per_market,
             ThesisError::InvalidConfig

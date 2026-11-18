@@ -4,9 +4,171 @@
     "name": "pm_amm",
     "version": "0.1.0",
     "spec": "0.1.0",
-    "description": "Paradigm dynamic pm-AMM on Solana (trimmed to what Thesis CPIs into; full IDL in idls/full/)"
+    "description": "Paradigm dynamic pm-AMM on Solana"
   },
   "instructions": [
+    {
+      "name": "claim_lp_residuals",
+      "docs": [
+        "Claim pending YES+NO residuals accrued to an LP position.",
+        "Allowed at any time, including after resolution."
+      ],
+      "discriminator": [
+        245,
+        137,
+        197,
+        230,
+        204,
+        93,
+        183,
+        28
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "yes_mint",
+          "writable": true,
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "no_mint",
+          "writable": true,
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "lp_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "signer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_yes",
+          "writable": true
+        },
+        {
+          "name": "user_no",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_winnings",
+      "docs": [
+        "Burn all user tokens (winning + losing), pay winning side at 1 USDC each.",
+        "Only callable post-resolution. Burns both sides atomically."
+      ],
+      "discriminator": [
+        161,
+        215,
+        24,
+        59,
+        14,
+        236,
+        242,
+        221
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "market"
+        },
+        {
+          "name": "collateral_mint",
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "yes_mint",
+          "writable": true,
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "no_mint",
+          "writable": true,
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "user_yes",
+          "docs": [
+            "User's YES token account."
+          ],
+          "writable": true
+        },
+        {
+          "name": "user_no",
+          "docs": [
+            "User's NO token account."
+          ],
+          "writable": true
+        },
+        {
+          "name": "user_collateral",
+          "docs": [
+            "User's USDC token account."
+          ],
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
     {
       "name": "deposit_liquidity",
       "docs": [
@@ -140,7 +302,7 @@
         {
           "name": "collateral_mint",
           "docs": [
-            "The collateral mint \u2014 ANY SPL mint. The YES/NO mints below are created",
+            "The collateral mint — ANY SPL mint. The YES/NO mints below are created",
             "with the SAME decimals, so \"1 collateral unit = 1 winning token\" holds",
             "and the reserves/solvency math stays scale-invariant."
           ]
@@ -365,14 +527,14 @@
         {
           "name": "dao_usdc",
           "docs": [
-            "Protocol DAO's USDC ATA \u2014 receives 50% of the swap fee."
+            "Protocol DAO's USDC ATA — receives 50% of the swap fee."
           ],
           "writable": true
         },
         {
           "name": "creator_usdc",
           "docs": [
-            "Market creator's USDC ATA \u2014 receives 50% of the swap fee. OPTIONAL: pass",
+            "Market creator's USDC ATA — receives 50% of the swap fee. OPTIONAL: pass",
             "`None` when the swapper IS the creator (they keep their fee share), which",
             "also avoids a duplicate-mutable-account error with `user_collateral`.",
             "Validated in the handler when present (owner == market.authority)."
@@ -406,6 +568,19 @@
     }
   ],
   "accounts": [
+    {
+      "name": "LpPosition",
+      "discriminator": [
+        105,
+        241,
+        37,
+        200,
+        224,
+        2,
+        252,
+        90
+      ]
+    },
     {
       "name": "Market",
       "discriminator": [
@@ -595,12 +770,12 @@
     {
       "code": 6034,
       "name": "InvalidCommitDuration",
-      "msg": "Invalid commit duration: must be 1 min \u2264 d \u2264 7 days"
+      "msg": "Invalid commit duration: must be 1 min ≤ d ≤ 7 days"
     },
     {
       "code": 6035,
       "name": "InvalidMarketDuration",
-      "msg": "Invalid market duration: must be 5 min \u2264 d \u2264 30 days"
+      "msg": "Invalid market duration: must be 5 min ≤ d ≤ 30 days"
     },
     {
       "code": 6036,
@@ -699,6 +874,55 @@
     }
   ],
   "types": [
+    {
+      "name": "LpPosition",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "shares",
+            "type": "u128"
+          },
+          {
+            "name": "collateral_deposited",
+            "type": "u64"
+          },
+          {
+            "name": "yes_per_share_checkpoint",
+            "type": "u128"
+          },
+          {
+            "name": "no_per_share_checkpoint",
+            "type": "u128"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "excess_yes",
+            "docs": [
+              "Entry-side surplus owed to this LP (see `Market::unclaimed_excess_*`).",
+              "Fits in the former 16-byte tail padding, so LEN is unchanged and",
+              "pre-existing positions read as 0."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "excess_no",
+            "type": "u64"
+          }
+        ]
+      }
+    },
     {
       "name": "Market",
       "type": {

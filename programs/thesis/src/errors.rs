@@ -84,4 +84,26 @@ pub enum ThesisError {
     NotTouched,
     #[msg("Price publish time is too far in the future")]
     FuturePrice,
+    #[msg("Treasury USDC is reserved for creator fees owed")]
+    TreasuryReserved,
+    #[msg("Window is longer than allowed")]
+    WindowTooLong,
+    #[msg("Market opened too long ago to join a thesis")]
+    LinkWindowPassed,
+    #[msg("The grace period is over; settle instead")]
+    ProofTooLate,
+    #[msg("Market is not settled yet")]
+    NotSettled,
+    #[msg("Signer is not the pending admin")]
+    NotPendingAdmin,
+    #[msg("The creator share can't change after launch")]
+    CreatorShareFixed,
+    #[msg("dao_usdc must be the protocol DAO's USDC account")]
+    WrongDaoAccount,
+    #[msg("Config is already migrated")]
+    AlreadyMigrated,
+    #[msg("Creator stats do not belong to this thesis's creator")]
+    WrongCreatorStats,
+    #[msg("Only a sponsored market can name a beneficiary")]
+    BeneficiaryNeedsSponsor,
 }
