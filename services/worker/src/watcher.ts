@@ -36,7 +36,8 @@ export class Watcher {
   ) {}
 
   async start(): Promise<void> {
-    await this.refresh();
+    // The program may not be initialised yet: log and keep retrying.
+    await this.refresh().catch((e) => log("watcher", `not ready yet: ${(e as Error).message.split("\n")[0]}`));
     this.timer = setInterval(() => this.refresh().catch((e) => log("watcher", `refresh failed: ${e}`)), this.opts.refreshMs);
     await this.source.start((t) => void this.onTick(t));
     log("watcher", `watching ${this.markets.size} open markets via ${this.source.name}`);

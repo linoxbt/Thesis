@@ -16,7 +16,7 @@ export class Keeper {
   ) {}
 
   async start(): Promise<void> {
-    await this.tick();
+    await this.tick().catch((e) => log("keeper", `not ready yet: ${(e as Error).message.split("\n")[0]}`));
     this.timer = setInterval(() => this.tick().catch((e) => log("keeper", `tick failed: ${e}`)), this.intervalMs);
   }
 

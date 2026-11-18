@@ -216,9 +216,37 @@ Workspace: `packages/chain` (IDLs, Pyth decoding, `provable()`, pm-AMM price),
 
 ## Phase 4 — Frontend (Day 5)
 
-- Next.js on Vercel: Feed, Thesis, Create, Protect, Profile, Stats.
-- Burner wallets from the pm-AMM kit; quotes with `quoteSwap`; cover capped by
-  measured price impact.
+`apps/web` (Next.js 16, Tailwind 4, JetBrains Mono for numbers, teal = YES/back,
+gold = protection; chart-mark colours validated with the dataviz palette checker).
+
+- [x] Feed `/`: Hot / New / Ending soon; each card has the creator, the call in
+      one line, live YES %, protection badge, 24h volume, time left, and Back /
+      Challenge that trade inline without leaving the feed.
+- [x] Thesis `/t/:pda`: the call, creator record, SOL/USD (Pyth) with target and
+      cover strikes, conviction and protection panels (YES-price chart, trade,
+      Open → Touched → Settled → Claim, "Prove it"), creator fee claim, recent
+      trades with explorer links, share on X.
+- [x] Create `/new`: direction, target, window (10-min demo on devnet, 24h,
+      48h, 7d), text, seed, "Protect me" (liquidation price + cover spend); live
+      opening odds from the program's formula and the onchain strike rules; one
+      button, then a progress tracker over 3–5 transactions that resumes from a
+      failed step.
+- [x] Protect `/protect`: long/short, liquidation price, window, spend; "pays $X
+      if SOL touches $K before T, costs $Y"; creates the market and buys cover.
+- [x] Profile `/u/:wallet` and Stats `/stats` (proof transaction links).
+- [x] Wallets: instant burner on devnet (localStorage key, funded through
+      `/api/faucet`) plus any Wallet Standard wallet.
+- [x] Exact quotes by simulating the real transaction (no pm-AMM maths copied);
+      protection buys moving the pool > 10 points are refused (Phase 0 finding).
+- [x] Every transaction: pending / confirmed / failed + explorer link; units on
+      every number; devnet/mainnet badge; plain-language risk copy.
+- [ ] Display name / X handle on profiles (needs a signed-message check).
+
+**Phase 4 results** (`scripts/ui-e2e.ts`, Playwright against a local validator
+cloning devnet pm-AMM, the worker, Postgres and `next start`): 10/10 — feed
+renders, instant wallet funded, exact quote, Back confirmed onchain, full create
+flow (2 markets, thesis, $2 cover paying $6.85, text), thesis panels, profile,
+stats, no console errors. All six screens fit a 390 px phone viewport.
 
 ## Phase 5 — Mainnet + traction (Day 6)
 
