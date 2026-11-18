@@ -1,0 +1,21 @@
+[toolchain]
+anchor_version = "1.0.1"
+solana_version = "3.0.14"
+package_manager = "pnpm"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+thesis = "9yVcFaDEmBk1VU66tXxuvUujZXfiiT3ED1EpioVuug6h"
+
+[programs.devnet]
+thesis = "9yVcFaDEmBk1VU66tXxuvUujZXfiiT3ED1EpioVuug6h"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "cargo test -p thesis --test spike -- --nocapture"

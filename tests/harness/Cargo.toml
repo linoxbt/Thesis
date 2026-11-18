@@ -1,0 +1,25 @@
+# Separate workspace: LiteSVM pulls crates that need a newer Cargo than the
+# Solana platform tools, so it must not share the program's lockfile.
+[workspace]
+
+[package]
+name = "thesis-harness"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+thesis = { path = "../../programs/thesis", features = ["no-entrypoint"] }
+anchor-lang = "=1.0.1"
+anchor-spl = { version = "=1.0.1", features = ["token", "associated_token"] }
+litesvm = "0.18"
+solana-account = "4"
+solana-clock = "3"
+solana-instruction = "3"
+solana-keypair = "3"
+solana-message = "4"
+solana-program-pack = "3"
+solana-signer = "3"
+solana-transaction = "4"

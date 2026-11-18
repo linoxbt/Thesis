@@ -1,0 +1,18 @@
+{
+  "name": "thesis",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "build": "anchor build",
+    "test": "cd tests/harness && cargo test --tests -- --nocapture --test-threads=1",
+    "devnet:spike": "tsx scripts/devnet-spike.ts"
+  },
+  "devDependencies": {
+    "@anchor-lang/core": "^1.0.1",
+    "@solana/spl-token": "^0.4.13",
+    "@solana/web3.js": "^1.98.0",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

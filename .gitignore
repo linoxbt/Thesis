@@ -1,0 +1,14 @@
+target/
+node_modules/
+.anchor/
+test-ledger/
+*.log
+.env
+.env.*
+# keypairs never go in git
+*-keypair.json
+id.json
+devnet-wallet.json
+
+# dumped from devnet by scripts/fetch-fixtures.sh
+tests/fixtures/*.so
