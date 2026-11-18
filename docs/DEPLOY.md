@@ -62,3 +62,22 @@ data routes return empty results (`indexer: false`), `/api/config` answers 503.
 
 The worker image pins pnpm 10.28.0: Corepack otherwise fetches the newest pnpm,
 whose default `minimumReleaseAge` rejects packages published in the last day.
+
+## Telegram alerts (optional)
+
+Off until a bot exists. To switch on:
+
+1. In Telegram, message **@BotFather** → `/newbot` → pick a name and a username
+   ending in `bot` (e.g. `ThesisAlertsBot`). It replies with a token.
+2. **Railway → worker → Variables:** `TELEGRAM_BOT_TOKEN` = the token (keep it
+   secret). Optional: `TELEGRAM_ADMIN_CHAT_ID` = your own chat id for operator
+   alerts (keeper SOL low, worker start), and `SITE_URL` if the site moves.
+3. **Netlify → Environment variables:** `TELEGRAM_BOT_USERNAME` = the bot's
+   username (no @), then redeploy the site.
+
+Users connect from Profile → Settings → Connect Telegram: the wallet signs a
+message, the site returns a one-time `t.me/<bot>?start=<code>` link (15 min),
+and pressing Start in Telegram links the chat. `/stop` unlinks. Alerts: take
+profit or liquidation touched, markets settled (called it / missed it / your
+side won / cover paid), and others backing or challenging your call. Each alert
+is recorded before it is sent, so a restart never repeats one.

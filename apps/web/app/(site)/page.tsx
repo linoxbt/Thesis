@@ -6,6 +6,7 @@ import { LogoMark } from "@/components/Brand";
 import { CodeTabs } from "@/components/landing/CodeTabs";
 import { DotField } from "@/components/landing/DotField";
 import { LiveLine } from "@/components/landing/LiveStats";
+import { Reveal } from "@/components/landing/Reveal";
 import { ProductWindow } from "@/components/landing/ProductWindow";
 import { SiteNav } from "@/components/landing/SiteNav";
 
@@ -93,18 +94,18 @@ export default function LandingPage() {
 
       {/* Hero: the colour field */}
       <section className="relative overflow-hidden bg-field text-white">
-        <DotField className="pointer-events-none absolute -right-10 top-16 hidden h-[560px] w-auto md:block" />
+        <DotField className="sweep pointer-events-none absolute -right-10 top-16 hidden h-[560px] w-auto md:block" />
         <div className="relative mx-auto max-w-[1160px] px-5 pb-16 pt-32 sm:pt-36 lg:px-8">
-          <h1 className="text-[54px] font-semibold leading-[0.98] tracking-[-0.045em] sm:text-[76px] lg:text-[88px]">
+          <h1 className="rise text-[54px] font-semibold leading-[0.98] tracking-[-0.045em] sm:text-[76px] lg:text-[88px]">
             Calls, made
             <br />
             tradable.
           </h1>
-          <p className="mt-7 max-w-[560px] text-[17px] font-medium leading-relaxed text-white/90">
+          <p className="rise mt-7 max-w-[560px] text-[17px] font-medium leading-relaxed text-white/90" style={{ ["--d" as string]: "120ms" }}>
             Post your SOL position: side, leverage, take profit, liquidation. It becomes a live market the crowd backs or
             challenges, your liquidation gets cover, and a Pyth price anyone can submit settles both.
           </p>
-          <div className="mt-9 flex flex-wrap items-center gap-3">
+          <div className="rise mt-9 flex flex-wrap items-center gap-3" style={{ ["--d" as string]: "240ms" }}>
             <Link href="/app" className="inline-flex items-center gap-1.5 rounded-lg bg-white px-5 py-3 text-[15px] font-medium text-black transition-colors hover:bg-white/90">
               Launch app <ArrowUpRight size={16} />
             </Link>
@@ -115,7 +116,7 @@ export default function LandingPage() {
         </div>
       </section>
       <div className="relative" style={{ background: "linear-gradient(var(--color-field) 0 58%, var(--color-bg) 58% 100%)" }}>
-        <div className="mx-auto max-w-[1160px] px-5 lg:px-8">
+        <div className="rise mx-auto max-w-[1160px] px-5 lg:px-8" style={{ ["--d" as string]: "380ms" }}>
           <ProductWindow />
         </div>
       </div>
@@ -134,12 +135,17 @@ export default function LandingPage() {
 
       {/* Settlement numbers */}
       <Container className="py-28 lg:py-32">
-        <H2 className="text-center">Settled by math, not moderators</H2>
+        <Reveal>
+          <H2 className="text-center">Settled by math, not moderators</H2>
+        </Reveal>
         <div className="mt-14 grid gap-4 md:grid-cols-3">
+          <Reveal className="h-full">
           <StatCard chip="Confidence" big="≤0.5%" icon={<Gauge size={44} strokeWidth={1.25} />}>
             A Pyth print counts only if its confidence interval is within half a percent of the price.
           </StatCard>
-          <div className="relative flex min-h-[380px] flex-col overflow-hidden rounded-3xl bg-field p-7 text-white">
+          </Reveal>
+          <Reveal className="h-full" delay={110}>
+          <div className="lift relative flex h-full min-h-[380px] flex-col overflow-hidden rounded-3xl bg-field p-7 text-white">
             <DotField cell={8} seed={3} touchAt={0.6} className="pointer-events-none absolute -bottom-6 left-0 h-[260px] w-auto opacity-60" />
             <span className="num relative w-fit rounded-full bg-black/25 px-2.5 py-1 text-[11px] uppercase tracking-[0.08em]">Proof</span>
             <p className="relative mt-4 text-[19px] font-semibold leading-snug tracking-[-0.02em]">Every market resolves from one signed price</p>
@@ -152,9 +158,12 @@ export default function LandingPage() {
             </div>
             <div className="relative mt-auto text-[56px] font-semibold leading-none tracking-[-0.04em]">0 admins</div>
           </div>
+          </Reveal>
+          <Reveal className="h-full" delay={220}>
           <StatCard chip="Grace" big="120s" icon={<Timer size={44} strokeWidth={1.25} />}>
             After a touch or the deadline, a two-minute grace window, then anyone can settle the market.
           </StatCard>
+          </Reveal>
         </div>
         <LiveLine />
       </Container>
@@ -163,7 +172,7 @@ export default function LandingPage() {
       <section id="markets" className="relative scroll-mt-24 overflow-hidden bg-field text-white">
         <DotField cell={8} seed={21} touchAt={0.8} className="pointer-events-none absolute -right-16 bottom-0 h-[380px] w-auto opacity-40" />
         <div className="relative mx-auto grid max-w-[1160px] items-center gap-12 px-5 py-24 lg:grid-cols-2 lg:px-8 lg:py-28">
-          <div>
+          <Reveal>
             <H2>Every call is two markets</H2>
             <p className="mt-5 max-w-md text-[17px] font-medium leading-relaxed text-white/90">
               Your take profit becomes a conviction market the crowd backs or challenges. Your liquidation becomes a protection
@@ -172,24 +181,24 @@ export default function LandingPage() {
             <Link href="/new" className="mt-8 inline-flex items-center gap-1.5 rounded-lg bg-black px-5 py-3 text-[15px] font-medium text-white hover:bg-black/80">
               Post a trade <ArrowRight size={16} />
             </Link>
-          </div>
+          </Reveal>
           <div className="relative h-[440px]">
-            <MiniCard className="left-0 top-0 -rotate-[8deg] sm:left-[2%]" title="Long SOL 20x" tone="#3ecf8e" lines={[["entry", "$73.04"], ["take profit", "$76.69"], ["liquidation", "$69.39"]]} />
-            <MiniCard className="left-[19%] top-[132px] -rotate-[8deg] sm:left-[26%]" title="Conviction · TP" tone="#ff6a3d" lines={[["SOL touches", "$76.69"], ["crowd YES", "64.0%"], ["vol 24h", "$18,240"]]} />
-            <MiniCard className="left-[38%] top-[264px] -rotate-[8deg] sm:left-[50%]" title="Liquidation cover" tone="#7aa2ff" lines={[["pays if SOL", "$69.39"], ["cover YES", "24.8%"], ["cover bought", "$2,410"]]} />
+            <MiniCard className="float left-0 top-0 -rotate-[8deg] sm:left-[2%]" title="Long SOL 20x" tone="#3ecf8e" lines={[["entry", "$73.04"], ["take profit", "$76.69"], ["liquidation", "$69.39"]]} />
+            <MiniCard className="float left-[19%] top-[132px] -rotate-[8deg] [--d:-2s] sm:left-[26%]" title="Conviction · TP" tone="#ff6a3d" lines={[["SOL touches", "$76.69"], ["crowd YES", "64.0%"], ["vol 24h", "$18,240"]]} />
+            <MiniCard className="float left-[38%] top-[264px] -rotate-[8deg] [--d:-4s] sm:left-[50%]" title="Liquidation cover" tone="#7aa2ff" lines={[["pays if SOL", "$69.39"], ["cover YES", "24.8%"], ["cover bought", "$2,410"]]} />
           </div>
         </div>
       </section>
 
       {/* How it works */}
       <Container id="how" className="py-28 lg:py-32">
-        <div className="text-center">
+        <Reveal className="text-center">
           <span className="chip">How it works</span>
           <H2 className="mt-5">From open position to settled market</H2>
           <p className="mx-auto mt-4 max-w-xl text-[17px] text-muted">Three steps, all onchain. Nothing to sign up for.</p>
-        </div>
+        </Reveal>
         <div className="mt-14 grid gap-4 md:grid-cols-3">
-          <StepCard n="01" title="Post your trade" body="Side, leverage, take profit and liquidation, plus a line on why. The market opens at fair odds computed onchain from volatility.">
+          <Reveal className="h-full" delay={0}><StepCard n="01" title="Post your trade" body="Side, leverage, take profit and liquidation, plus a line on why. The market opens at fair odds computed onchain from volatility.">
             <div className="grid grid-cols-2 gap-1 text-xs">
               <span className="rounded-lg bg-yes py-1.5 text-center font-semibold text-yes-ink">Long</span>
               <span className="rounded-lg border border-line py-1.5 text-center text-muted">Short</span>
@@ -200,8 +209,8 @@ export default function LandingPage() {
               <span className="rounded-lg border border-line px-2 py-1.5 text-bad">liq 69.39</span>
             </div>
             <div className="num mt-2 text-xs text-muted">opening odds 40.4% · +100% ROE at TP</div>
-          </StepCard>
-          <StepCard n="02" title="The crowd prices it" body="Backers buy YES on your take profit, challengers buy NO. The price is the crowd's live probability, and you earn on every trade.">
+          </StepCard></Reveal>
+          <Reveal className="h-full" delay={110}><StepCard n="02" title="The crowd prices it" body="Backers buy YES on your take profit, challengers buy NO. The price is the crowd's live probability, and you earn on every trade.">
             <div className="num flex justify-between text-xs">
               <span className="text-yes">YES 64¢</span>
               <span className="text-muted">NO 36¢</span>
@@ -213,8 +222,8 @@ export default function LandingPage() {
             <svg viewBox="0 0 200 40" className="mt-3 h-10 w-full" aria-hidden="true">
               <path d="M0 32 L20 30 L40 31 L60 26 L80 27 L100 20 L120 22 L140 15 L160 16 L180 10 L200 8" fill="none" stroke="var(--color-yes-mark)" strokeWidth="2" />
             </svg>
-          </StepCard>
-          <StepCard n="03" title="Price proves it" body="The first verified Pyth print at your take profit or liquidation resolves that market. Anyone can submit it; our watcher usually does.">
+          </StepCard></Reveal>
+          <Reveal className="h-full" delay={220}><StepCard n="03" title="Price proves it" body="The first verified Pyth print at your take profit or liquidation resolves that market. Anyone can submit it; our watcher usually does.">
             <ul className="num space-y-1.5 text-xs">
               {["signed update", "SOL/USD feed", "conf 0.03%", "inside window", "past the strike"].map((k) => (
                 <li key={k} className="flex items-center gap-2 text-muted">
@@ -222,14 +231,14 @@ export default function LandingPage() {
                 </li>
               ))}
             </ul>
-          </StepCard>
+          </StepCard></Reveal>
         </div>
       </Container>
 
       {/* Proof */}
       <div className="border-y border-line bg-panel">
         <Container id="proof" className="grid items-center gap-12 py-24 lg:grid-cols-[0.9fr_1.1fr] lg:py-28">
-          <div>
+          <Reveal>
             <span className="chip">Permissionless</span>
             <H2 className="mt-5">Prove it yourself</H2>
             <p className="mt-4 max-w-md text-[17px] leading-relaxed text-muted">
@@ -239,18 +248,20 @@ export default function LandingPage() {
             <a href={EXPLORER} target="_blank" rel="noreferrer" className="mt-8 inline-flex items-center gap-1.5 rounded-lg border border-line-2 px-4 py-2.5 text-sm hover:bg-panel-2">
               Program on Solana Explorer <ArrowUpRight size={14} />
             </a>
-          </div>
-          <CodeTabs tabs={CODE} />
+          </Reveal>
+          <Reveal delay={120}>
+            <CodeTabs tabs={CODE} />
+          </Reveal>
         </Container>
       </div>
 
       {/* Bento */}
       <Container className="py-28 lg:py-32">
-        <div className="text-center">
+        <Reveal className="text-center">
           <H2>Built for perp traders who keep score</H2>
           <p className="mx-auto mt-4 max-w-xl text-[17px] text-muted">Hedge the downside, start at a fair price, and let the record speak.</p>
-        </div>
-        <div className="mt-14 grid gap-4 lg:grid-cols-3">
+        </Reveal>
+        <Reveal delay={100} className="mt-14 grid gap-4 lg:grid-cols-3">
           <Bento className="lg:col-span-2" icon={<Shield size={18} />} title="Hedge the wick" tone="guard">
             Your perp venue liquidates on one wick. Buy cover at your liquidation price: if SOL touches it, each share pays 1
             USDC, whatever happens next.
@@ -289,16 +300,16 @@ export default function LandingPage() {
               Try it free <ArrowRight size={14} />
             </Link>
           </Bento>
-        </div>
+        </Reveal>
       </Container>
 
       {/* FAQ */}
       <Container id="faq" className="grid gap-12 pb-28 lg:grid-cols-[0.8fr_1.2fr] lg:pb-32">
-        <div>
+        <Reveal>
           <span className="chip">FAQ</span>
           <H2 className="mt-5">Questions, answered</H2>
-        </div>
-        <div className="divide-y divide-line border-y border-line">
+        </Reveal>
+        <Reveal delay={100} className="divide-y divide-line border-y border-line">
           {FAQ.map(([q, a]) => (
             <details key={q} className="group py-5">
               <summary className="flex items-center justify-between gap-6 text-[17px] font-medium tracking-[-0.01em]">
@@ -308,11 +319,12 @@ export default function LandingPage() {
               <div className="mt-3 max-w-xl font-sans leading-relaxed text-muted">{a}</div>
             </details>
           ))}
-        </div>
+        </Reveal>
       </Container>
 
       {/* CTA */}
       <Container className="pb-24">
+        <Reveal>
         <div className="relative overflow-hidden rounded-3xl bg-field px-6 py-20 text-center text-white sm:px-12">
           <DotField cell={8} seed={8} touchAt={0.7} className="pointer-events-none absolute -right-10 bottom-0 h-[300px] w-auto opacity-60" />
           <div className="relative">
@@ -328,6 +340,7 @@ export default function LandingPage() {
             </div>
           </div>
         </div>
+        </Reveal>
       </Container>
 
       {/* Footer */}
@@ -354,7 +367,7 @@ export default function LandingPage() {
 
 function StatCard({ chip, big, icon, children }: { chip: string; big: string; icon: ReactNode; children: ReactNode }) {
   return (
-    <div className="flex min-h-[380px] flex-col items-center rounded-3xl border border-line bg-panel p-7 text-center">
+    <div className="lift flex h-full min-h-[380px] flex-col items-center rounded-3xl border border-line bg-panel p-7 text-center">
       <span className="chip">{chip}</span>
       <div className="mt-5 text-[60px] font-semibold leading-none tracking-[-0.05em] text-ink">{big}</div>
       <div className="my-auto py-6">
@@ -369,7 +382,7 @@ function StatCard({ chip, big, icon, children }: { chip: string; big: string; ic
 
 function StepCard({ n, title, body, children }: { n: string; title: string; body: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col rounded-3xl border border-line bg-panel p-7">
+    <div className="lift flex h-full flex-col rounded-3xl border border-line bg-panel p-7">
       <div className="flex h-[156px] flex-col justify-center rounded-2xl border border-line bg-bg p-5">{children}</div>
       <span className="num mt-7 text-xs text-faint">{n}</span>
       <h3 className="mt-2 text-xl font-semibold tracking-[-0.025em]">{title}</h3>
@@ -380,7 +393,7 @@ function StepCard({ n, title, body, children }: { n: string; title: string; body
 
 function Bento({ className = "", icon, title, tone, children }: { className?: string; icon: ReactNode; title: string; tone?: "guard"; children: ReactNode }) {
   return (
-    <div className={"flex flex-col rounded-3xl border border-line bg-panel p-7 " + className}>
+    <div className={"lift flex flex-col rounded-3xl border border-line bg-panel p-7 " + className}>
       <div className={"grid h-10 w-10 place-items-center rounded-xl " + (tone === "guard" ? "bg-guard/10 text-guard" : "bg-panel-3 text-ink")}>{icon}</div>
       <h3 className="mt-6 text-xl font-semibold tracking-[-0.025em]">{title}</h3>
       <div className="mt-2 flex flex-1 flex-col justify-between gap-5 font-sans leading-relaxed text-muted">{children}</div>

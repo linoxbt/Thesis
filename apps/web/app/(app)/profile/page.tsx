@@ -14,6 +14,8 @@ import { shortAddr } from "@/lib/client/format";
 import { useConfig } from "@/lib/client/useConfig";
 import { useActiveWallet, useBurner, useConnection, type ActiveWallet } from "@/lib/client/wallet";
 import { cleanProfile, profileMessage } from "@/lib/profileMessage";
+import { ThemeSetting } from "@/components/ThemeToggle";
+import { TelegramAlerts } from "@/components/TelegramAlerts";
 
 /** Your Profile: name and X handle (wallet-signed), wallet and balances, and your record. */
 export default function ProfilePage() {
@@ -45,7 +47,29 @@ function SignedOut() {
           Connect a wallet
         </button>
       </div>
+      <div className="mt-10 text-left">
+        <Settings wallet={null} />
+      </div>
     </div>
+  );
+}
+
+/** Appearance (any visitor) and Telegram alerts (needs a wallet). */
+function Settings({ wallet }: { wallet: ActiveWallet | null }) {
+  return (
+    <section className="panel p-6" data-testid="settings">
+      <h2 className="text-lg font-semibold tracking-[-0.02em]">Settings</h2>
+      <div className="mt-4">
+        <div className="text-sm">Appearance</div>
+        <p className="mb-2 mt-0.5 text-xs text-faint">Light is the default. Saved in this browser.</p>
+        <ThemeSetting />
+      </div>
+      {wallet && (
+        <div className="mt-6 border-t border-line pt-5">
+          <TelegramAlerts wallet={wallet} />
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -83,6 +107,8 @@ function SignedIn({ wallet }: { wallet: ActiveWallet }) {
         <EditProfile wallet={wallet} current={data?.profile ?? null} onSaved={() => void reload()} />
         <WalletPanel wallet={wallet} />
       </div>
+
+      <Settings wallet={wallet} />
 
       <div>
         <span className="label">Activity</span>

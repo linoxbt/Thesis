@@ -2,7 +2,8 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { Pool } from "pg";
 import {
-  feed, insertCrossing, insertTrade, migrate, profile, saveSignedProfile, setMarketPrice, setMarketTx, setThesisText, sha256Hex,
+  claimAlert, consumeLinkCode, createLinkCode, feed, insertCrossing, insertTrade, migrate, profile, saveSignedProfile, setMarketPrice,
+  telegramLink, unlinkChat, setMarketTx, setThesisText, sha256Hex,
   stats, thesisDetail, upsertMarket, upsertProfile, upsertThesis, type MarketRow, type TradeRow,
 } from "../src";
 
@@ -26,7 +27,7 @@ const trade = (over: Partial<TradeRow>): TradeRow => ({
 
 before(async () => {
   await db.query("drop schema public cascade; create schema public;");
-  assert.deepEqual(await migrate(db), ["001_init.sql"]);
+  assert.deepEqual(await migrate(db), ["001_init.sql", "002_telegram.sql"]);
   assert.deepEqual(await migrate(db), [], "migrations are idempotent");
 
   // Alice: thesis T1 (conviction C1 above, protection P1 below), and T2 (missed, old).
@@ -134,4 +135,19 @@ test("signed profile edits apply only when newer than the stored one", async () 
   assert.equal(await save("newer", NOW + 10), true, "newer edit applied");
   const p = (await profile(db, w)).profile as { display_name: string };
   assert.equal(p.display_name, "newer");
+});
+
+test("telegram: one-time link codes, links, unlink, alert de-duplication", async () => {
+  const code = await createLinkCode(db, "Alice");
+  assert.equal(await consumeLinkCode(db, "nope", 42, "alice"), null, "unknown code");
+  assert.equal(await consumeLinkCode(db, code, 42, "alice"), "Alice");
+  assert.equal(await consumeLinkCode(db, code, 43, "eve"), null, "a code works once");
+  assert.deepEqual((await telegramLink(db, "Alice"))?.username, "alice");
+  const expired = await createLinkCode(db, "Bob");
+  await db.query("update telegram_link_codes set expires_at = now() - interval '1 second' where code = $1", [expired]);
+  assert.equal(await consumeLinkCode(db, expired, 44, "bob"), null, "expired code refused");
+  assert.equal(await claimAlert(db, "k1"), true);
+  assert.equal(await claimAlert(db, "k1"), false, "an alert is claimed once");
+  assert.deepEqual(await unlinkChat(db, 42), ["Alice"]);
+  assert.equal(await telegramLink(db, "Alice"), null);
 });

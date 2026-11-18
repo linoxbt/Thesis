@@ -2,14 +2,13 @@
 
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
-import { ArrowLeft, ArrowUpRight, BarChart3, LayoutGrid, PenLine, Shield, User, Zap } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, BarChart3, PanelLeftClose, PanelLeftOpen, LayoutGrid, PenLine, Shield, User, Zap } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { IS_DEVNET } from "@/lib/client/config";
-import { Logo } from "./Brand";
+import { Logo, LogoMark } from "./Brand";
 import { StatusBanner } from "./StatusBanner";
-import { ThemeToggle } from "./ThemeToggle";
 import { ago, pythToNumber, shortAddr, usd } from "@/lib/client/format";
 import { useSpot } from "@/lib/client/useConfig";
 import { useActiveWallet, useBurner } from "@/lib/client/wallet";
@@ -119,20 +118,29 @@ export function WalletButton() {
   );
 }
 
-function NavLink({ href, label, icon: Icon, active }: { href: string; label: string; icon: typeof LayoutGrid; active: boolean }) {
+function NavLink({ href, label, icon: Icon, active, collapsed }: { href: string; label: string; icon: typeof LayoutGrid; active: boolean; collapsed: boolean }) {
   return (
     <Link
       href={href}
+      aria-label={collapsed ? label : undefined}
       className={
-        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors " +
+        "group relative flex items-center gap-3 rounded-lg py-2 text-sm transition-colors " +
+        (collapsed ? "justify-center px-0 " : "px-3 ") +
         (active ? "bg-panel-2 text-ink" : "text-muted hover:bg-panel-2/60 hover:text-ink")
       }
     >
       <Icon size={16} className={active ? "text-brand" : ""} />
-      {label}
+      {!collapsed && label}
+      {collapsed && (
+        <span className="pointer-events-none absolute left-full z-40 ml-3 whitespace-nowrap rounded-md bg-ink px-2 py-1 text-xs text-bg opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+          {label}
+        </span>
+      )}
     </Link>
   );
 }
+
+const COLLAPSE_KEY = "thesis-sidebar-collapsed";
 
 /** Dashboard shell: sidebar on desktop, top bar + bottom tabs on phones. */
 const TITLES: [RegExp, string][] = [
@@ -156,16 +164,61 @@ export function AppShell({ children }: { children: ReactNode }) {
   const detail = /^\/(t|u)\//.test(path);
   const router = useRouter();
   const back = () => (window.history.length > 1 ? router.back() : router.push("/app"));
+  // Desktop sidebar: full or an icon rail; remembered per browser.
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    try {
+      setCollapsed(localStorage.getItem(COLLAPSE_KEY) === "1");
+    } catch {}
+  }, []);
+  const toggle = () =>
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem(COLLAPSE_KEY, c ? "0" : "1");
+      } catch {}
+      return !c;
+    });
   return (
-    <div className="min-h-screen lg:grid lg:grid-cols-[232px_1fr]">
+    <div
+      className={
+        "app-shell min-h-screen lg:grid lg:transition-[grid-template-columns] lg:duration-200 " +
+        (collapsed ? "lg:grid-cols-[68px_1fr]" : "lg:grid-cols-[232px_1fr]")
+      }
+      data-sidebar={collapsed ? "collapsed" : "open"}
+    >
       <div className="hidden border-r border-line lg:block">
-      <aside className="sticky top-0 flex h-screen flex-col px-4 py-5">
-        <Logo href="/" />
+      <aside className={"sticky top-0 flex h-screen flex-col py-5 " + (collapsed ? "items-stretch px-2.5" : "px-4")}>
+        <div className={"flex items-center " + (collapsed ? "justify-center" : "justify-between")}>
+          {collapsed ? (
+            <Link href="/" aria-label="Thesis home" className="text-ink">
+              <LogoMark size={24} />
+            </Link>
+          ) : (
+            <Logo href="/" />
+          )}
+          {!collapsed && (
+            <button onClick={toggle} className="rounded-md p-1.5 text-faint hover:bg-panel-2 hover:text-ink" aria-label="Collapse sidebar" title="Collapse sidebar" data-testid="sidebar-toggle">
+              <PanelLeftClose size={16} />
+            </button>
+          )}
+        </div>
         <nav className="mt-8 space-y-1">
           {NAV.map((n) => (
-            <NavLink key={n.href} {...n} active={isActive(n.href)} />
+            <NavLink key={n.href} {...n} active={isActive(n.href)} collapsed={collapsed} />
           ))}
         </nav>
+        {collapsed ? (
+          <div className="mt-auto flex flex-col items-center gap-2">
+            {IS_DEVNET && !active && (
+              <button onClick={() => void createBurner()} className="grid h-9 w-9 place-items-center rounded-lg bg-ink text-bg" title="Get an instant wallet" aria-label="Get an instant wallet">
+                <Zap size={15} />
+              </button>
+            )}
+            <button onClick={toggle} className="grid h-9 w-9 place-items-center rounded-lg text-faint hover:bg-panel-2 hover:text-ink" aria-label="Expand sidebar" title="Expand sidebar" data-testid="sidebar-toggle">
+              <PanelLeftOpen size={16} />
+            </button>
+          </div>
+        ) : (
         <div className="mt-auto">
           {IS_DEVNET && (
             <div className="rounded-xl border border-line bg-panel p-3">
@@ -184,6 +237,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             About Thesis <ArrowUpRight size={12} />
           </Link>
         </div>
+        )}
       </aside>
       </div>
 
@@ -209,7 +263,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span className="hidden sm:inline">
                 <ClusterBadge />
               </span>
-              <ThemeToggle />
               <WalletButton />
             </div>
           </div>

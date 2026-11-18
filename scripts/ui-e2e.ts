@@ -29,21 +29,24 @@ async function main() {
   });
   page.on("pageerror", (e: Error) => consoleErrors.push(String(e)));
 
-  // 0. Landing: renders, theme toggles and persists, "Launch app" opens the feed
+  // 0. Landing: renders in the light theme by default; "Launch app" opens the feed
   await page.goto(BASE + "/");
   await page.waitForSelector('[data-testid="launch-app"]');
-  const before = await page.evaluate(() => document.documentElement.dataset.theme);
-  await page.click('[data-testid="theme-toggle"]');
-  const after = await page.evaluate(() => document.documentElement.dataset.theme);
-  await page.reload();
-  const kept = await page.evaluate(() => document.documentElement.dataset.theme);
-  check("landing: theme toggles and persists", !!before && before !== after && kept === after, `${before} -> ${after}, after reload ${kept}`);
+  const firstTheme = await page.evaluate(() => document.documentElement.dataset.theme);
+  check("light is the default theme", firstTheme === "light", String(firstTheme));
   await page.screenshot({ path: `${OUT}/landing-desktop.png`, fullPage: true });
   await page.click('[data-testid="launch-app"]');
   await page.waitForURL(/\/app$/);
 
-  // 1. Feed
+  // 1. Feed (and the desktop sidebar collapses to a rail, remembered)
   await page.waitForSelector('[data-testid="thesis-card"]', { timeout: 30_000 });
+  await page.click('[data-testid="sidebar-toggle"]');
+  await page.reload();
+  await page.waitForSelector('[data-testid="thesis-card"]');
+  const rail = await page.locator('[data-sidebar="collapsed"]').count();
+  await page.click('[data-testid="sidebar-toggle"]');
+  const open = await page.locator('[data-sidebar="open"]').count();
+  check("sidebar collapses, stays collapsed after reload, expands", rail === 1 && open === 1, `rail ${rail}, open ${open}`);
   const cards = await page.locator('[data-testid="thesis-card"]').count();
   check("feed shows thesis cards", cards >= 3, `${cards} cards`);
   const pill = await page.locator('[data-testid="side-pill"]').first().textContent();
@@ -132,6 +135,20 @@ async function main() {
     await page.waitForFunction(() => /e2e trader/.test(document.querySelector('[data-testid="profile-name"]')?.textContent ?? ""), null, { timeout: 15_000 });
     check("profile: wallet-signed display name saved", true);
     await page.screenshot({ path: `${OUT}/profile.png`, fullPage: true });
+
+    // 6b2. Theme lives in Profile: switch to dark, persists across reloads
+    await page.click('[data-testid="theme-dark"]');
+    await page.reload();
+    await page.waitForSelector('[data-testid="settings"]');
+    const kept = await page.evaluate(() => document.documentElement.dataset.theme);
+    check("theme switch in Profile persists", kept === "dark", String(kept));
+
+    // 6b3. Telegram alerts: signing gets a one-time bot link
+    if (await page.locator('[data-testid="telegram-connect"]').count()) {
+      await page.click('[data-testid="telegram-connect"]');
+      const href = await page.locator('[data-testid="telegram-open"]').getAttribute("href", { timeout: 15_000 }).catch(() => null);
+      check("telegram: wallet-signed connect returns a one-time bot link", !!href && /^https:\/\/t\.me\/\w+\?start=[\w-]{10,}$/.test(href), href ?? "");
+    }
 
     // 6c. The logo goes to the home page
     await page.click('aside a[aria-label="Thesis home"]');
