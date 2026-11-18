@@ -7,6 +7,7 @@ import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
 import "./globals.css";
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import type { ReactNode } from "react";
 import { Providers } from "@/components/Providers";
 import { THEME_SCRIPT } from "@/components/ThemeToggle";
@@ -31,10 +32,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
-      </head>
       <body className="min-h-screen font-sans antialiased">
+        <Script id="theme" strategy="beforeInteractive">
+          {THEME_SCRIPT}
+        </Script>
         <Providers>
           {children}
           <TxToasts />
