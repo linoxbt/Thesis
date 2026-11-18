@@ -9,9 +9,10 @@ import { MAX_COVER_IMPACT_BPS } from "@/components/TradeBox";
 import {
   createMarketInstructions, createThesisInstruction, quoteTrade, sha256, toTx, tradeInstructions,
 } from "@/lib/client/actions";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { explorerTx, IS_DEVNET, USDC } from "@/lib/client/config";
 import { pct, pythToNumber, usd, usdc } from "@/lib/client/format";
-import { useTx } from "@/lib/client/tx";
+import { explainError, useTx } from "@/lib/client/tx";
 import { useConfig, useSpot } from "@/lib/client/useConfig";
 import { useActiveWallet, useBurner } from "@/lib/client/wallet";
 
@@ -92,8 +93,24 @@ export default function CreatePage() {
     config && (seedMicro < BigInt(config.minSeedUsdc) || seedMicro > BigInt(config.maxSeedUsdc))
       ? `Seed must be ${usdc(config.minSeedUsdc, 0)}–${usdc(config.maxSeedUsdc, 0)}`
       : null;
-  const blocked = !preview || !!preview.err || !!preview.pErr || !!seedErr || !usdcMint || config?.paused;
   const total = seedMicro * (protect ? 2n : 1n) + (protect ? coverMicro : 0n);
+  const [balance, setBalance] = useState<bigint | null>(null);
+  useEffect(() => {
+    if (!wallet || !usdcMint) return setBalance(null);
+    const ata = getAssociatedTokenAddressSync(usdcMint, wallet.publicKey);
+    let live = true;
+    const load = () =>
+      connection.getTokenAccountBalance(ata).then((b) => live && setBalance(BigInt(b.value.amount))).catch(() => live && setBalance(0n));
+    void load();
+    const t = setInterval(load, 15_000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [wallet, usdcMint, connection]);
+  const resuming = steps?.some((s) => s.status === "done");
+  const shortBy = !resuming && balance !== null && balance < total ? total - balance : 0n;
+  const blocked = !preview || !!preview.err || !!preview.pErr || !!seedErr || !usdcMint || config?.paused || shortBy > 0n;
 
   const setStep = (key: StepKey, patch: Partial<Step>) =>
     setSteps((xs) => xs?.map((s) => (s.key === key ? { ...s, ...patch } : s)) ?? null);
@@ -183,7 +200,7 @@ export default function CreatePage() {
         setMade({ ...state });
       }
     } catch (e) {
-      setSteps((xs) => xs?.map((s) => (s.status === "active" ? { ...s, status: "failed", note: (e as Error).message.split("\n")[0] } : s)) ?? null);
+      setSteps((xs) => xs?.map((s) => (s.status === "active" ? { ...s, status: "failed", note: explainError(e) } : s)) ?? null);
     }
     setMade({ ...state });
   };
@@ -192,17 +209,21 @@ export default function CreatePage() {
 
   return (
     <div className="mx-auto max-w-xl space-y-4">
-      <h1 className="text-xl font-semibold">Post a thesis</h1>
-      <section className="space-y-3 rounded-xl bg-panel p-4 ring-1 ring-line">
+      <div>
+        <span className="label">New call</span>
+        <h1 className="display mt-2 text-4xl">Post your trade</h1>
+        <p className="mt-2 text-sm text-muted">Your call becomes a market the crowd can back or challenge. Add cover in the same step.</p>
+      </div>
+      <section className="space-y-3 panel p-5">
         <div className="num text-xs text-muted">
           SOL now: <span className="text-ink">{spotUsd ? usd(spotUsd) : "…"}</span> (Pyth)
         </div>
-        <div className="grid grid-cols-2 gap-1 rounded-md bg-bg p-1">
+        <div className="grid grid-cols-2 gap-1 rounded-full border border-line bg-bg p-1">
           {(["above", "below"] as const).map((d) => (
             <button
               key={d}
               onClick={() => (setDir(d), setTarget(""))}
-              className={"rounded py-1.5 text-sm font-semibold " + (dir === d ? "bg-yes text-yes-ink" : "text-muted")}
+              className={"rounded-full py-1.5 text-sm font-medium " + (dir === d ? "bg-yes text-yes-ink" : "text-muted hover:text-ink")}
             >
               {d === "above" ? "SOL goes up to…" : "SOL goes down to…"}
             </button>
@@ -214,7 +235,7 @@ export default function CreatePage() {
             value={target}
             onChange={(e) => setTarget(e.target.value.replace(/[^0-9.]/g, ""))}
             inputMode="decimal"
-            className="num mt-1 w-full rounded-md bg-bg px-3 py-2 ring-1 ring-line outline-none focus:ring-muted"
+            className="num field mt-1 w-full px-3 py-2.5 outline-none"
             aria-label="Target price in USD"
           />
         </label>
@@ -225,7 +246,7 @@ export default function CreatePage() {
               <button
                 key={w.secs}
                 onClick={() => setWindow(w.secs)}
-                className={"rounded-md px-3 py-1.5 text-sm ring-1 " + (window === w.secs ? "bg-panel-2 ring-muted" : "ring-line text-muted")}
+                className={"num rounded-full px-3 py-1 text-xs " + (window === w.secs ? "bg-ink text-bg" : "border border-line text-muted hover:text-ink")}
               >
                 {w.label}
               </button>
@@ -239,7 +260,7 @@ export default function CreatePage() {
             maxLength={280}
             onChange={(e) => setText(e.target.value)}
             rows={2}
-            className="mt-1 w-full rounded-md bg-bg px-3 py-2 ring-1 ring-line outline-none focus:ring-muted"
+            className="field mt-1 w-full px-3 py-2.5 outline-none"
           />
         </label>
         <label className="block text-sm">
@@ -248,18 +269,18 @@ export default function CreatePage() {
             value={seed}
             onChange={(e) => setSeed(e.target.value.replace(/[^0-9.]/g, ""))}
             inputMode="decimal"
-            className="num mt-1 w-full rounded-md bg-bg px-3 py-2 ring-1 ring-line outline-none focus:ring-muted"
+            className="num field mt-1 w-full px-3 py-2.5 outline-none"
           />
           {seedErr && <span className="text-xs text-bad">{seedErr}</span>}
         </label>
-        <div className="num rounded-md bg-panel-2 p-3 text-sm">
+        <div className="num rounded-xl border border-line bg-panel-2 p-3 text-sm">
           Opening odds: <strong>{preview?.open !== null && preview?.open !== undefined ? pct(preview.open, 2) : "…"}</strong>
           <span className="text-muted"> that SOL touches {target ? usd(Number(target)) : "…"} in time</span>
           {preview?.err && <div className="mt-1 text-xs text-bad">{preview.err}</div>}
         </div>
       </section>
 
-      <section className="space-y-3 rounded-xl bg-panel p-4 ring-1 ring-guard/30">
+      <section className="space-y-3 panel border-guard/25 p-5">
         <label className="flex items-center justify-between text-sm font-semibold">
           <span>
             Protect me <span className="font-normal text-muted">(cover if SOL touches your liquidation price)</span>
@@ -274,7 +295,7 @@ export default function CreatePage() {
                 value={liq}
                 onChange={(e) => setLiq(e.target.value.replace(/[^0-9.]/g, ""))}
                 inputMode="decimal"
-                className="num mt-1 w-full rounded-md bg-bg px-3 py-2 ring-1 ring-line outline-none focus:ring-muted"
+                className="num field mt-1 w-full px-3 py-2.5 outline-none"
               />
             </label>
             <label className="block text-sm">
@@ -283,10 +304,10 @@ export default function CreatePage() {
                 value={cover}
                 onChange={(e) => setCover(e.target.value.replace(/[^0-9.]/g, ""))}
                 inputMode="decimal"
-                className="num mt-1 w-full rounded-md bg-bg px-3 py-2 ring-1 ring-line outline-none focus:ring-muted"
+                className="num field mt-1 w-full px-3 py-2.5 outline-none"
               />
             </label>
-            <div className="num rounded-md bg-panel-2 p-3 text-sm">
+            <div className="num rounded-xl border border-line bg-panel-2 p-3 text-sm">
               Cover opens at <strong>{preview?.pOpen !== null && preview?.pOpen !== undefined ? pct(preview.pOpen, 2) : "…"}</strong>
               {preview?.pOpen ? (
                 <span className="text-muted">
@@ -301,13 +322,19 @@ export default function CreatePage() {
         )}
       </section>
 
-      <section className="rounded-xl bg-panel p-4 ring-1 ring-line">
+      <section className="panel p-5">
         <div className="num mb-3 text-sm text-muted">
           Total: <span className="text-ink">{usdc(total)}</span> USDC + ~{protect ? "0.1" : "0.05"} SOL rent
+          {balance !== null && (
+            <span className="block text-xs text-faint">
+              wallet: {usdc(balance)} USDC
+              {shortBy > 0n && <span className="text-bad"> · {usdc(shortBy)} short{IS_DEVNET ? ": top up from the wallet menu" : ""}</span>}
+            </span>
+          )}
         </div>
         {!wallet ? (
           IS_DEVNET ? (
-            <button onClick={() => void createBurner()} className="w-full rounded-md bg-yes py-2.5 font-semibold text-yes-ink">
+            <button onClick={() => void createBurner()} className="btn btn-yes w-full py-2.5">
               Get an instant wallet (free test USDC)
             </button>
           ) : (
@@ -317,7 +344,7 @@ export default function CreatePage() {
           <button
             onClick={() => void go()}
             disabled={blocked || (steps !== null && !steps.some((s) => s.status === "failed") && !finished)}
-            className="w-full rounded-md bg-yes py-2.5 font-semibold text-yes-ink disabled:opacity-40"
+            className="btn btn-yes w-full py-2.5 disabled:opacity-40"
             data-testid="create-submit"
           >
             {steps?.some((s) => s.status === "failed") ? "Retry from the failed step" : "Post thesis"}
@@ -347,7 +374,7 @@ export default function CreatePage() {
         {finished && made.thesis && (
           <Link
             href={`/t/${made.thesis.toBase58()}`}
-            className="mt-4 block rounded-md bg-panel-2 py-2 text-center text-sm font-semibold ring-1 ring-line"
+            className="btn btn-ghost mt-4 block w-full text-center text-sm"
             data-testid="view-thesis"
           >
             View your thesis →

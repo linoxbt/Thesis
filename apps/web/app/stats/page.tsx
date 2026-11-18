@@ -21,9 +21,9 @@ interface Stats {
 
 function Tile({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-lg bg-panel p-3 ring-1 ring-line">
+    <div className="bg-panel px-5 py-4">
       <div className="text-xs text-muted">{label}</div>
-      <div className="mt-1 text-2xl font-semibold">{value}</div>
+      <div className="num mt-1 text-2xl text-ink">{value}</div>
       {sub && <div className="text-[11px] text-faint">{sub}</div>}
     </div>
   );
@@ -37,12 +37,13 @@ export default function StatsPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold">Traction</h1>
+        <span className="label">Onchain traction</span>
+        <h1 className="display mt-2 text-4xl">Traction</h1>
         <p className="text-sm text-muted">
           Live from the chain ({data.cluster}). Team wallets and the treasury's own trades are excluded.
         </p>
       </div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-4">
         <Tile label="Trading wallets" value={data.wallets} />
         <Tile label="Trades" value={data.trades} />
         <Tile label="Volume" value={usdc(data.volume_usdc, 0)} sub={`${usdc(data.volume_via_thesis_usdc, 0)} through Thesis`} />
@@ -52,15 +53,16 @@ export default function StatsPage() {
         <Tile label="Paid out" value={usdc(data.payouts_usdc, 0)} />
         <Tile label="Touches proven" value={String(data.touches_proven)} />
       </div>
-      <section className="rounded-xl bg-panel p-4 ring-1 ring-line">
-        <h2 className="mb-2 text-sm font-semibold">Touches proven onchain</h2>
+      <section className="panel p-5">
+        <span className="label">Proofs</span>
+        <h2 className="display mb-3 mt-2 text-xl">Touches proven onchain</h2>
         {data.touches.length === 0 ? (
           <p className="text-sm text-muted">None yet.</p>
         ) : (
           <table className="num w-full text-sm">
             <tbody>
               {data.touches.map((t) => (
-                <tr key={t.touch_market} className="border-t border-line">
+                <tr key={t.touch_market} className="border-t border-line text-xs">
                   <td className="py-1.5">
                     SOL {t.direction === "below" ? "≤" : "≥"} {usd(pythToNumber(t.strike, t.expo))}
                   </td>
@@ -69,7 +71,7 @@ export default function StatsPage() {
                   </td>
                   <td className="text-right">
                     {t.proof_tx ? (
-                      <a href={explorerTx(t.proof_tx)} target="_blank" rel="noreferrer" className="underline">
+                      <a href={explorerTx(t.proof_tx)} target="_blank" rel="noreferrer" className="text-yes underline">
                         proof tx
                       </a>
                     ) : (

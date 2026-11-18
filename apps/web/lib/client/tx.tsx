@@ -1,7 +1,7 @@
 "use client";
 
 import { useConnection } from "@solana/wallet-adapter-react";
-import { SendTransactionError, type Transaction } from "@solana/web3.js";
+import type { Transaction } from "@solana/web3.js";
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
 import type { ActiveWallet } from "./wallet";
 
@@ -26,11 +26,13 @@ let nextId = 1;
 /** Turns program errors into a sentence a trader can act on. */
 export function explainError(e: unknown): string {
   const msg = (e as Error)?.message ?? String(e);
-  const logs = (e as SendTransactionError)?.logs ?? [];
+  // SendTransactionError keeps its logs on `logs`; our own errors attach them too.
+  const err = e as { logs?: string[]; transactionLogs?: string[] } | null;
+  const logs = err?.logs ?? err?.transactionLogs ?? [];
   const anchor = [...logs, msg].join("\n").match(/Error Message: ([^.\n]+)/);
   if (anchor) return anchor[1];
   if (/User rejected/i.test(msg)) return "You rejected the transaction in your wallet.";
-  if (/insufficient (funds|lamports)|0x1\b/i.test(msg)) return "Not enough SOL or USDC in this wallet.";
+  if (/insufficient (funds|lamports)|custom program error: 0x1\b/i.test([...logs, msg].join("\n"))) return "Not enough SOL or USDC in this wallet.";
   if (/SlippageExceeded|6007/.test(msg)) return "The price moved before your trade landed. Try again.";
   if (/blockhash/i.test(msg)) return "The network was slow and the transaction expired. Try again.";
   return msg.split("\n")[0].slice(0, 200);

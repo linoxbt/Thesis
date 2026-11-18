@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
  *
  * Normally forwards to the pm-AMM faucet (1,000 mUSDC per wallet per hour,
  * plus a little devnet SOL). For a local validator, set DEV_FAUCET_KEYPAIR to
- * a funded keypair file: the route then sends 0.1 SOL and 200 mUSDC itself.
+ * a funded keypair file: the route then sends 0.1 SOL and 100 mUSDC itself.
  */
 export async function POST(req: Request) {
   if (env.cluster !== "devnet") return bad("faucet is devnet only", 404);
@@ -22,7 +22,14 @@ export async function POST(req: Request) {
   if (!wallet) return bad("wallet must be a valid address");
 
   const devKey = process.env.DEV_FAUCET_KEYPAIR;
-  if (devKey) return localFaucet(wallet, devKey);
+  if (devKey) {
+    try {
+      return await localFaucet(wallet, devKey);
+    } catch (e) {
+      const msg = (e as Error).message;
+      return bad(/insufficient/i.test(msg) ? "Local faucet is out of test USDC" : `Local faucet failed: ${msg.split("\n")[0]}`, 503);
+    }
+  }
 
   const r = await fetch(env.faucetUrl, {
     method: "POST",
@@ -43,12 +50,12 @@ async function localFaucet(wallet: PublicKey, keyPath: string) {
   const tx = new Transaction().add(
     SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: wallet, lamports: 0.1 * LAMPORTS_PER_SOL }),
     createAssociatedTokenAccountIdempotentInstruction(payer.publicKey, to, wallet, mint),
-    createTransferInstruction(from, to, payer.publicKey, 200_000_000),
+    createTransferInstruction(from, to, payer.publicKey, 100_000_000),
   );
   tx.feePayer = payer.publicKey;
   tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
   tx.sign(payer);
   const signature = await connection.sendRawTransaction(tx.serialize());
   await connection.confirmTransaction(signature, "confirmed");
-  return json({ ok: true, signature, amount: 200, sol: 0.1, local: true });
+  return json({ ok: true, signature, amount: 100, sol: 0.1, local: true });
 }

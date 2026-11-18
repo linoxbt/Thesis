@@ -111,19 +111,20 @@ export default function ProtectPage() {
   return (
     <div className="mx-auto max-w-xl space-y-4">
       <div>
-        <h1 className="text-xl font-semibold">Protect a position</h1>
+        <span className="label label-guard">Protection</span>
+        <h1 className="display mt-2 text-4xl">Protect a position</h1>
         <p className="text-sm text-muted">No public call needed. Cover pays if SOL touches your liquidation price.</p>
       </div>
-      <section className="space-y-3 rounded-xl bg-panel p-4 ring-1 ring-guard/30">
+      <section className="space-y-3 panel border-guard/25 p-5">
         <div className="num text-xs text-muted">
           SOL now: <span className="text-ink">{spotUsd ? usd(spotUsd) : "…"}</span> (Pyth)
         </div>
-        <div className="grid grid-cols-2 gap-1 rounded-md bg-bg p-1">
+        <div className="grid grid-cols-2 gap-1 rounded-full border border-line bg-bg p-1">
           {(["long", "short"] as const).map((s) => (
             <button
               key={s}
               onClick={() => (setSide(s), setLiq(""))}
-              className={"rounded py-1.5 text-sm font-semibold " + (side === s ? "bg-guard text-guard-ink" : "text-muted")}
+              className={"rounded-full py-1.5 text-sm font-medium " + (side === s ? "bg-guard text-guard-ink" : "text-muted hover:text-ink")}
             >
               I'm {s} SOL
             </button>
@@ -135,7 +136,7 @@ export default function ProtectPage() {
             value={liq}
             onChange={(e) => setLiq(e.target.value.replace(/[^0-9.]/g, ""))}
             inputMode="decimal"
-            className="num mt-1 w-full rounded-md bg-bg px-3 py-2 ring-1 ring-line outline-none focus:ring-muted"
+            className="num field mt-1 w-full px-3 py-2.5 outline-none"
           />
         </label>
         <div className="flex flex-wrap gap-1">
@@ -143,7 +144,7 @@ export default function ProtectPage() {
             <button
               key={w.secs}
               onClick={() => setWindow(w.secs)}
-              className={"rounded-md px-3 py-1.5 text-sm ring-1 " + (window === w.secs ? "bg-panel-2 ring-muted" : "ring-line text-muted")}
+              className={"num rounded-full px-3 py-1 text-xs " + (window === w.secs ? "bg-ink text-bg" : "border border-line text-muted hover:text-ink")}
             >
               {w.label}
             </button>
@@ -152,14 +153,14 @@ export default function ProtectPage() {
         <div className="grid grid-cols-2 gap-2">
           <label className="block text-sm">
             <span className="text-muted">Spend on cover</span>
-            <input value={spend} onChange={(e) => setSpend(e.target.value.replace(/[^0-9.]/g, ""))} inputMode="decimal" className="num mt-1 w-full rounded-md bg-bg px-3 py-2 ring-1 ring-line outline-none" />
+            <input value={spend} onChange={(e) => setSpend(e.target.value.replace(/[^0-9.]/g, ""))} inputMode="decimal" className="num field mt-1 w-full px-3 py-2.5 outline-none" />
           </label>
           <label className="block text-sm">
             <span className="text-muted">Seed the pool</span>
-            <input value={seed} onChange={(e) => setSeed(e.target.value.replace(/[^0-9.]/g, ""))} inputMode="decimal" className="num mt-1 w-full rounded-md bg-bg px-3 py-2 ring-1 ring-line outline-none" />
+            <input value={seed} onChange={(e) => setSeed(e.target.value.replace(/[^0-9.]/g, ""))} inputMode="decimal" className="num field mt-1 w-full px-3 py-2.5 outline-none" />
           </label>
         </div>
-        <div className="num rounded-md bg-panel-2 p-3 text-sm" data-testid="protect-summary">
+        <div className="num rounded-xl border border-line bg-panel-2 p-3 text-sm" data-testid="protect-summary">
           {view?.err ? (
             <span className="text-bad">{view.err}</span>
           ) : view?.open ? (
@@ -174,7 +175,7 @@ export default function ProtectPage() {
         <p className="text-[11px] text-faint">Price-touch protection, paid at window end. Not a liquidation guarantee.</p>
         {!wallet ? (
           IS_DEVNET ? (
-            <button onClick={() => void createBurner()} className="w-full rounded-md bg-guard py-2.5 font-semibold text-guard-ink">
+            <button onClick={() => void createBurner()} className="btn btn-guard w-full py-2.5">
               Get an instant wallet (free test USDC)
             </button>
           ) : (
@@ -184,7 +185,7 @@ export default function ProtectPage() {
           <button
             onClick={() => void go()}
             disabled={busy || !view || !!view.err || !usdcMint}
-            className="w-full rounded-md bg-guard py-2.5 font-semibold text-guard-ink disabled:opacity-40"
+            className="btn btn-guard w-full py-2.5 disabled:opacity-40"
           >
             {busy ? "Working…" : "Protect me"}
           </button>

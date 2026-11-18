@@ -11,6 +11,7 @@ import { useTx } from "@/lib/client/tx";
 import { useConfig } from "@/lib/client/useConfig";
 import { useActiveWallet } from "@/lib/client/wallet";
 import { LineChart } from "./LineChart";
+import { Delta } from "./ThesisCard";
 import { TradeBox } from "./TradeBox";
 
 export interface MarketRow {
@@ -113,91 +114,105 @@ export function MarketPanel({
   const open = !m.touched && !m.settled && endTs > now;
   const title =
     kind === "protection"
-      ? `Protection · pays if SOL ${m.direction === "below" ? "≤" : "≥"} ${usd(strike)}`
-      : `Conviction · SOL ${m.direction === "below" ? "≤" : "≥"} ${usd(strike)}`;
+      ? `Pays if SOL ${m.direction === "below" ? "falls to" : "rises to"} ${usd(strike)}`
+      : `SOL ${m.direction === "below" ? "falls to" : "rises to"} ${usd(strike)}`;
 
   return (
-    <section
-      className={"min-w-0 rounded-xl bg-panel p-4 ring-1 " + (kind === "protection" ? "ring-guard/30" : "ring-line")}
-      data-testid={`panel-${kind}`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <h3 className="text-sm font-semibold">{title}</h3>
-        <div className="num text-right">
-          <div className="text-2xl font-bold">{pct(yes, 1)}</div>
-          <div className="text-[11px] text-muted">YES · opened {pct(m.initial_price_bps, 1)}</div>
-        </div>
-      </div>
-      <div className="mt-2">
-        <LineChart
-          label={`${title}, YES price`}
-          color={markColor}
-          points={prices.map((p) => ({ t: Number(p.ts), v: p.yes_price_bps / 100 }))}
-          yDomain={[0, 100]}
-          yFormat={(v) => `${v.toFixed(0)}%`}
-          marker={m.touched && m.touch_publish_time ? { t: Number(m.touch_publish_time), label: "touched" } : undefined}
-          height={140}
-        />
-      </div>
-
-      <div className="mt-3 text-sm">
-        {m.settled ? (
-          <div className="rounded-lg bg-panel-2 p-3">
+    <section className={"panel glow min-w-0 p-5 " + (kind === "protection" ? "border-guard/25" : "")} data-testid={`panel-${kind}`}>
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              Settled: <strong>{m.winning_side === 1 ? "YES — touched" : "NO — not touched"}</strong>
+              <span className={"label " + (kind === "protection" ? "label-guard" : "")}>
+                {kind === "protection" ? "Protection" : "Conviction"}
+              </span>
+              <h3 className="display mt-2 text-xl">{title}</h3>
             </div>
-            {wallet && winning > 0n ? (
-              <button onClick={() => void claim()} className="mt-2 w-full rounded-md bg-yes py-2 font-semibold text-yes-ink">
-                Claim {usdc(winning)}
-              </button>
-            ) : (
-              wallet && <div className="mt-1 text-xs text-muted">Nothing to claim in this wallet.</div>
-            )}
+            <div className="text-right">
+              <div className="flex items-baseline justify-end gap-2">
+                <span className="num text-4xl leading-none">{pct(yes, 1)}</span>
+                <Delta now={yes} open={m.initial_price_bps} />
+              </div>
+              <div className="num mt-1 text-[11px] text-faint">YES · opened {pct(m.initial_price_bps, 1)}</div>
+            </div>
           </div>
-        ) : m.touched ? (
-          <div className="rounded-lg bg-panel-2 p-3">
-            <div>
-              Touched at <span className="num">{usd(pythToNumber(m.touch_price!, m.expo))}</span> ({when(Number(m.touch_publish_time))}).
-            </div>
-            <div className="text-xs text-muted">
-              Settles {settleAt > now ? `in ${timeLeft(settleAt, now)}` : "any moment now"}: YES pays $1 per token at
-              settlement, never at the moment of the touch.
-              {m.proof_tx && (
-                <>
-                  {" "}
-                  <a href={explorerTx(m.proof_tx)} target="_blank" rel="noreferrer" className="underline">
-                    Proof transaction
-                  </a>
-                </>
+          <div className="mt-4">
+            <LineChart
+              label={`${title}, YES price`}
+              color={markColor}
+              points={prices.map((p) => ({ t: Number(p.ts), v: p.yes_price_bps / 100 }))}
+              yDomain={[0, 100]}
+              yFormat={(v) => `${v.toFixed(0)}%`}
+              marker={m.touched && m.touch_publish_time ? { t: Number(m.touch_publish_time), label: "touched" } : undefined}
+              height={200}
+            />
+          </div>
+        </div>
+
+        <div className="min-w-0 text-sm">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm text-ink">{kind === "protection" ? "Buy cover" : "Quick trade"}</span>
+            <span className="num text-xs text-faint">{open ? `${timeLeft(endTs, now)} left` : ""}</span>
+          </div>
+          {m.settled ? (
+            <div className="rounded-2xl border border-line bg-panel-2 p-4">
+              <div className="text-muted">
+                Settled: <span className="text-ink">{m.winning_side === 1 ? "YES — touched" : "NO — not touched"}</span>
+              </div>
+              {wallet && winning > 0n ? (
+                <button onClick={() => void claim()} className="btn btn-yes mt-3 w-full">
+                  Claim {usdc(winning)}
+                </button>
+              ) : (
+                wallet && <div className="mt-1 text-xs text-faint">Nothing to claim in this wallet.</div>
               )}
             </div>
-          </div>
-        ) : open ? (
-          <>
-            <TradeBox
-              kind={kind}
-              market={{ touchMarket: m.touch_market, pmMarket: m.pm_market, thesis, thesisCreator: creator }}
-              onDone={() => (onChange(), void loadPos())}
-            />
-            <div className="mt-2 flex items-center justify-between text-xs text-muted">
-              <span className="num">{timeLeft(endTs, now)} left</span>
-              <button onClick={() => void prove()} className="underline hover:text-ink" disabled={!wallet}>
-                Prove it
-              </button>
+          ) : m.touched ? (
+            <div className="rounded-2xl border border-yes/25 bg-yes/5 p-4">
+              <div>
+                Touched at <span className="num">{usd(pythToNumber(m.touch_price!, m.expo))}</span>
+                <span className="text-muted"> · {when(Number(m.touch_publish_time))}</span>
+              </div>
+              <div className="mt-1 text-xs text-muted">
+                Settles {settleAt > now ? `in ${timeLeft(settleAt, now)}` : "any moment now"}. YES pays $1 per token at
+                settlement, never at the moment of the touch.
+              </div>
+              {m.proof_tx && (
+                <a href={explorerTx(m.proof_tx)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-yes underline">
+                  Proof transaction ↗
+                </a>
+              )}
             </div>
-            {proveMsg && <p className="mt-1 text-xs text-muted">{proveMsg}</p>}
-          </>
-        ) : (
-          <div className="rounded-lg bg-panel-2 p-3 text-muted">
-            Window closed. Settles {settleAt > now ? `in ${timeLeft(settleAt, now)}` : "any moment now"} (NO unless a
-            touch inside the window is proven first).
-          </div>
-        )}
-        {pos && (pos.yes > 0n || pos.no > 0n) && (
-          <div className="num mt-2 text-xs text-muted">
-            Your position: {(Number(pos.yes) / USDC).toFixed(2)} YES · {(Number(pos.no) / USDC).toFixed(2)} NO
-          </div>
-        )}
+          ) : open ? (
+            <>
+              <TradeBox
+                kind={kind}
+                market={{ touchMarket: m.touch_market, pmMarket: m.pm_market, thesis, thesisCreator: creator }}
+                onDone={() => (onChange(), void loadPos())}
+              />
+              <div className="mt-2 flex items-center justify-between px-1 text-xs text-faint">
+                <span>Saw the touch?</span>
+                <button onClick={() => void prove()} className="text-muted underline hover:text-ink" disabled={!wallet}>
+                  Prove it
+                </button>
+              </div>
+              {proveMsg && <p className="mt-1 px-1 text-xs text-muted">{proveMsg}</p>}
+            </>
+          ) : (
+            <div className="rounded-2xl border border-line bg-panel-2 p-4 text-muted">
+              Window closed. Settles {settleAt > now ? `in ${timeLeft(settleAt, now)}` : "any moment now"} (NO unless a
+              touch inside the window is proven first).
+            </div>
+          )}
+          {pos && (pos.yes > 0n || pos.no > 0n) && (
+            <div className="num mt-3 flex justify-between rounded-xl border border-line px-3 py-2 text-xs">
+              <span className="text-faint">Your position</span>
+              <span>
+                {(Number(pos.yes) / USDC).toFixed(2)} YES · {(Number(pos.no) / USDC).toFixed(2)} NO
+              </span>
+            </div>
+          )}
+        </div>
       </div>
     </section>
   );

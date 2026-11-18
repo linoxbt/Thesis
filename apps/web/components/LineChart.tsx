@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 export interface Point {
   t: number; // unix seconds
@@ -34,6 +34,7 @@ export function LineChart({ points, color, label, yDomain, yFormat, refs = [], m
   const wrap = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(300);
   const [hover, setHover] = useState<number | null>(null);
+  const gid = useId().replace(/:/g, "");
 
   useEffect(() => {
     const el = wrap.current;
@@ -65,7 +66,7 @@ export function LineChart({ points, color, label, yDomain, yFormat, refs = [], m
 
   if (!geo || pts.length === 0) {
     return (
-      <div ref={wrap} className="flex items-center justify-center rounded bg-panel-2 text-xs text-muted" style={{ height }}>
+      <div ref={wrap} className="flex items-center justify-center rounded-xl border border-dashed border-line text-xs text-faint" style={{ height }}>
         No data yet
       </div>
     );
@@ -127,7 +128,17 @@ export function LineChart({ points, color, label, yDomain, yFormat, refs = [], m
               </text>
             </g>
           )}
-          <path d={area} fill={color} opacity={0.1} />
+          <defs>
+            <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity={0.12} />
+              <stop offset="100%" stopColor={color} stopOpacity={0} />
+            </linearGradient>
+            <filter id={`${gid}-glow`} x="-5%" y="-30%" width="110%" height="160%">
+              <feGaussianBlur stdDeviation="3" />
+            </filter>
+          </defs>
+          <path d={area} fill={`url(#${gid})`} />
+          <path d={path} fill="none" stroke={color} strokeWidth={4} opacity={0.35} filter={`url(#${gid}-glow)`} />
           <path d={path} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
           <circle cx={geo.x(last.t)} cy={geo.y(last.v)} r={4} fill={color} stroke="var(--color-panel)" strokeWidth={2} />
           <text x={geo.x(last.t) + 8} y={geo.y(last.v) + 4} fontSize={11} fill="var(--color-ink)" className="num">
@@ -150,7 +161,7 @@ export function LineChart({ points, color, label, yDomain, yFormat, refs = [], m
         </svg>
         {h && (
           <div
-            className="pointer-events-none absolute rounded bg-panel-2 px-2 py-1 text-xs ring-1 ring-line"
+            className="pointer-events-none absolute rounded-lg border border-line-2 bg-panel-2 px-2.5 py-1.5 text-xs shadow-xl"
             style={{ left: Math.min(geo.x(h.t) + 8, width - 120), top: 4 }}
           >
             <div className="num font-semibold text-ink">{yFormat(h.v)}</div>
