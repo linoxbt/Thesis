@@ -299,6 +299,18 @@ fn prove_touch_rules_then_settle_yes() {
 }
 
 #[test]
+fn proof_tolerates_small_clock_skew_only() {
+    let mut env = setup();
+    let strike = spot_plus_bps(-50);
+    let c = create_market(&mut env, Create { strike, window: 600, ..Default::default() }).unwrap();
+    // Solana's clock lags wall time; a print 16 s ahead is refused, 15 s ahead counts.
+    let key = env.put_price(good_update(START_TS + 16, strike));
+    expect_err(prove(&mut env, c.touch_market, key), "FuturePrice");
+    let key = env.put_price(good_update(START_TS + 15, strike));
+    prove(&mut env, c.touch_market, key).expect("15 s skew is allowed");
+}
+
+#[test]
 fn touch_above_with_late_proof_in_grace() {
     let mut env = setup();
     let strike = spot_plus_bps(60);
