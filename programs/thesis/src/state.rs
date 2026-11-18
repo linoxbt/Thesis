@@ -146,3 +146,95 @@ impl Config {
         Ok(())
     }
 }
+
+#[account]
+#[derive(InitSpace)]
+pub struct Thesis {
+    pub creator: Pubkey,
+    pub id: u64,
+    /// TouchMarket PDA the crowd backs or challenges.
+    pub conviction_market: Pubkey,
+    /// TouchMarket PDA for the creator's cover; default = none.
+    pub protection_market: Pubkey,
+    /// sha256 of the thesis text (text lives offchain).
+    pub text_hash: [u8; 32],
+    pub created_ts: i64,
+    pub end_ts: i64,
+    /// USDC moved by trades routed through `trade` (both markets).
+    pub volume_usdc: u64,
+    /// Part of `volume_usdc` traded by the creator's own wallet.
+    pub self_volume_usdc: u64,
+    /// Treasury fee income from trades routed through `trade`.
+    pub fees_attributed: u64,
+    /// Creator share already paid out.
+    pub fees_claimed: u64,
+    /// 0 open, 1 hit (conviction market touched), 2 missed.
+    pub outcome: u8,
+    pub bump: u8,
+}
+
+impl Thesis {
+    /// Creator share earned so far, per `creator_share_bps`.
+    pub fn creator_fees_earned(&self, creator_share_bps: u16) -> u64 {
+        ((self.fees_attributed as u128) * (creator_share_bps as u128) / 10_000) as u64
+    }
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct CreatorStats {
+    pub creator: Pubkey,
+    pub next_thesis_id: u64,
+    pub posted: u32,
+    pub hit: u32,
+    pub missed: u32,
+    pub total_volume: u64,
+    pub total_fees_earned: u64,
+    pub bump: u8,
+}
+
+#[event]
+pub struct ThesisCreated {
+    pub thesis: Pubkey,
+    pub creator: Pubkey,
+    pub id: u64,
+    pub conviction_market: Pubkey,
+    pub protection_market: Pubkey,
+    pub text_hash: [u8; 32],
+    pub end_ts: i64,
+}
+
+#[event]
+pub struct Traded {
+    pub thesis: Pubkey,
+    pub touch_market: Pubkey,
+    pub trader: Pubkey,
+    pub side: TradeSide,
+    pub usdc_amount: u64,
+    pub token_amount: u64,
+    pub fee_to_treasury: u64,
+    pub is_creator: bool,
+}
+
+#[event]
+pub struct CreatorFeesClaimed {
+    pub thesis: Pubkey,
+    pub creator: Pubkey,
+    pub amount: u64,
+}
+
+#[event]
+pub struct TreasuryBought {
+    pub touch_market: Pubkey,
+    pub usdc_in: u64,
+    pub yes_out: u64,
+}
+
+/// What a trader does through `trade`. Buys spend USDC; sells receive it.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TradeSide {
+    BuyYes,
+    BuyNo,
+    SellYes,
+    SellNo,
+}

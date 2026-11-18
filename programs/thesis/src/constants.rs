@@ -3,6 +3,8 @@ use anchor_lang::prelude::*;
 pub const CONFIG_SEED: &[u8] = b"config";
 pub const AUTHORITY_SEED: &[u8] = b"authority";
 pub const TOUCH_SEED: &[u8] = b"touch";
+pub const THESIS_SEED: &[u8] = b"thesis";
+pub const CREATOR_SEED: &[u8] = b"creator";
 
 /// pm-AMM PDA seeds (from its source, commit d5b407b).
 pub const PM_MARKET_SEED: &[u8] = b"market";

@@ -9,13 +9,14 @@ challenge, and a protection market that pays out if price touches the trader's
 liquidation level. Both settle from a Pyth-signed price that anyone can submit,
 with no admin.
 
-Status: **Phase 1** (engine) done; devnet deploy pending devnet SOL. See [`docs/PLAN.md`](docs/PLAN.md).
+Status: **Phase 2** (thesis layer + watcher) done; devnet deploy pending devnet SOL. See [`docs/PLAN.md`](docs/PLAN.md).
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `programs/thesis` | Anchor 1.0.1 program: `initialize_config`, `update_config`, `set_volatility`, `create_touch_market` (opening price computed onchain), `prove_touch`, `settle` |
+| `programs/thesis` | Anchor 1.0.1 program: config (`initialize_config`, `update_config`, `set_volatility`), markets (`create_touch_market` with onchain opening price, `prove_touch`, `settle`), theses (`create_thesis`, `trade`, `claim_creator_fees`), `treasury_buy_yes` |
+| `services/worker` | Watcher (proves touches) + keeper (settles); `pnpm worker` |
 | `idls/pm_amm.json` | pm-AMM IDL (MIT, [sparkfun-labs/pm-amm](https://github.com/sparkfun-labs/pm-amm) `d5b407b`) for `declare_program!` |
 | `tests/harness` | LiteSVM tests against the real pm-AMM and Metaplex bytecode |
 | `tests/fixtures` | A real Pyth `PriceUpdateV2` account; programs dumped by `scripts/fetch-fixtures.sh` |

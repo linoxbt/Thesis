@@ -57,7 +57,30 @@ pub mod thesis {
     }
 
     /// Anyone, after `end_ts + grace_secs`: resolve YES if touched, else NO.
+    /// Records the thesis outcome when its conviction market settles.
     pub fn settle(ctx: Context<Settle>) -> Result<()> {
         instructions::settle::handler(ctx)
+    }
+
+    /// Creator: link their own open conviction market (and optional opposite
+    /// protection market) into a public thesis.
+    pub fn create_thesis(ctx: Context<CreateThesis>, text_hash: [u8; 32]) -> Result<()> {
+        instructions::create_thesis::handler(ctx, text_hash)
+    }
+
+    /// Any trader: back, challenge or protect through Thesis so the creator
+    /// earns their fee share. Closed once the market is touched.
+    pub fn trade(ctx: Context<Trade>, side: state::TradeSide, amount_in: u64, min_output: u64) -> Result<()> {
+        instructions::trade::handler(ctx, side, amount_in, min_output)
+    }
+
+    /// Creator: withdraw the earned share of fees attributed to a thesis.
+    pub fn claim_creator_fees(ctx: Context<ClaimCreatorFees>) -> Result<()> {
+        instructions::claim_creator_fees::handler(ctx)
+    }
+
+    /// Keeper: after a proven touch, buy underpriced YES with treasury USDC.
+    pub fn treasury_buy_yes(ctx: Context<TreasuryBuyYes>, amount_in: u64, min_output: u64) -> Result<()> {
+        instructions::treasury_buy::handler(ctx, amount_in, min_output)
     }
 }

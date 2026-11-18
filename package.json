@@ -5,7 +5,10 @@
   "scripts": {
     "build": "anchor build",
     "test": "cd tests/harness && cargo test --tests -- --nocapture --test-threads=1",
-    "devnet:spike": "tsx scripts/devnet-spike.ts"
+    "devnet:spike": "tsx scripts/devnet-spike.ts",
+    "worker": "tsx services/worker/src/index.ts",
+    "test:worker": "tsx --test services/worker/test/*.test.ts",
+    "e2e:worker": "tsx scripts/worker-e2e.ts"
   },
   "devDependencies": {
     "@anchor-lang/core": "^1.0.1",

@@ -37,6 +37,8 @@ pub fn handler(ctx: Context<ProveTouch>) -> Result<()> {
         p.publish_time >= m.start_ts && p.publish_time <= m.end_ts,
         ThesisError::OutsideWindow
     );
+    // Real Pyth prices can't be future-dated; refuse one anyway.
+    require!(p.publish_time <= Clock::get()?.unix_timestamp, ThesisError::FuturePrice);
     require!(p.exponent == m.expo, ThesisError::WrongExpo);
     let crossed = match m.direction {
         Direction::Below => p.price <= m.strike,

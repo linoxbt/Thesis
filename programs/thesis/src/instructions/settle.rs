@@ -5,7 +5,7 @@ use crate::errors::ThesisError;
 use crate::pm_amm;
 use crate::pm_amm::program::PmAmm;
 use crate::pm_amm::types::Side;
-use crate::state::{Config, Settled, TouchMarket};
+use crate::state::{Config, CreatorStats, Settled, Thesis, TouchMarket};
 
 #[derive(Accounts)]
 pub struct Settle<'info> {
@@ -26,6 +26,14 @@ pub struct Settle<'info> {
     pub pm_market: UncheckedAccount<'info>,
 
     pub pm_amm_program: Program<'info, PmAmm>,
+
+    /// Required when the market belongs to a thesis (`origin_thesis`).
+    #[account(mut)]
+    pub thesis: Option<Box<Account<'info, Thesis>>>,
+
+    /// The thesis creator's stats; required with `thesis`.
+    #[account(mut)]
+    pub creator_stats: Option<Box<Account<'info, CreatorStats>>>,
 }
 
 pub fn handler(ctx: Context<Settle>) -> Result<()> {
@@ -58,6 +66,23 @@ pub fn handler(ctx: Context<Settle>) -> Result<()> {
 
     m.settled = true;
     m.winning_side = if m.touched { 1 } else { 2 };
+
+    // A thesis records its outcome when its conviction market settles.
+    if m.origin_thesis != Pubkey::default() {
+        let thesis = ctx.accounts.thesis.as_mut().ok_or(ThesisError::MissingThesisAccounts)?;
+        require_keys_eq!(thesis.key(), m.origin_thesis, ThesisError::MarketNotInThesis);
+        if thesis.conviction_market == m.key() {
+            let stats = ctx.accounts.creator_stats.as_mut().ok_or(ThesisError::MissingThesisAccounts)?;
+            require_keys_eq!(stats.creator, thesis.creator, ThesisError::MissingThesisAccounts);
+            if m.touched {
+                thesis.outcome = 1;
+                stats.hit = stats.hit.checked_add(1).ok_or(ThesisError::Overflow)?;
+            } else {
+                thesis.outcome = 2;
+                stats.missed = stats.missed.checked_add(1).ok_or(ThesisError::Overflow)?;
+            }
+        }
+    }
     emit!(Settled { touch_market: m.key(), winning_side: m.winning_side });
     Ok(())
 }
