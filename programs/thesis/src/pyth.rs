@@ -39,6 +39,30 @@ fn take<const N: usize>(data: &[u8], at: &mut usize) -> Result<[u8; N]> {
     Ok(bytes)
 }
 
+/// Reads a `PriceUpdateV2` and applies the checks every caller needs: owned by
+/// the Pyth receiver, fully verified, the configured feed, positive price,
+/// confidence within `max_conf_bps` of price.
+pub fn verified_price(
+    info: &AccountInfo,
+    receiver: &Pubkey,
+    feed_id: &[u8; 32],
+    max_conf_bps: u16,
+) -> Result<PriceUpdate> {
+    require_keys_eq!(*info.owner, *receiver, ThesisError::WrongPriceOwner);
+    let p = {
+        let data = info.try_borrow_data()?;
+        parse_price_update(&data)?
+    };
+    require!(p.fully_verified, ThesisError::NotFullyVerified);
+    require!(&p.feed_id == feed_id, ThesisError::WrongFeed);
+    require!(p.price > 0, ThesisError::NonPositivePrice);
+    require!(
+        (p.conf as i128) * 10_000 <= (p.price as i128) * (max_conf_bps as i128),
+        ThesisError::ConfTooWide
+    );
+    Ok(p)
+}
+
 pub fn parse_price_update(data: &[u8]) -> Result<PriceUpdate> {
     let mut at = 0usize;
     let disc: [u8; 8] = take(data, &mut at)?;

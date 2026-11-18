@@ -12,8 +12,6 @@ pub enum ThesisError {
     InvalidStrike,
     #[msg("Window must be longer than the pm-AMM minimum")]
     InvalidWindow,
-    #[msg("Opening price must be within 100..=9900 bps")]
-    InvalidOpeningPrice,
     #[msg("Account is not the expected pm-AMM PDA")]
     WrongPmAccount,
     #[msg("Market already touched or settled")]
@@ -40,4 +38,26 @@ pub enum ThesisError {
     TooEarly,
     #[msg("Arithmetic overflow")]
     Overflow,
+    #[msg("Spot price is too old")]
+    StaleSpot,
+    #[msg("Volatility has not been updated recently")]
+    StaleVolatility,
+    #[msg("TouchBelow needs a strike under spot, TouchAbove one over spot")]
+    StrikeWrongSide,
+    #[msg("Strike is too close to spot")]
+    StrikeTooClose,
+    #[msg("Strike is too far from spot")]
+    StrikeTooFar,
+    #[msg("Opening probability is outside the allowed range")]
+    OpeningPriceOutOfRange,
+    #[msg("Only the admin or keeper may sponsor a market")]
+    SponsorNotAllowed,
+    #[msg("Sponsor budget exhausted")]
+    SponsorBudgetExhausted,
+    #[msg("Creator USDC account required for a creator-seeded market")]
+    MissingCreatorUsdc,
+    #[msg("Volatility out of range")]
+    InvalidVolatility,
+    #[msg("Invalid config value")]
+    InvalidConfig,
 }

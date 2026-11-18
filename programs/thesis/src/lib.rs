@@ -14,6 +14,7 @@ declare_program!(pm_amm);
 pub mod constants;
 pub mod errors;
 pub mod instructions;
+pub mod pricing;
 pub mod pyth;
 pub mod state;
 
@@ -29,13 +30,25 @@ pub mod thesis {
         instructions::initialize_config::handler(ctx, args)
     }
 
-    /// Creates a pm-AMM market whose authority is the `Authority` PDA, seeds it
-    /// from the treasury, and records the touch terms.
+    /// Anyone: create a touch market. The opening price is computed onchain
+    /// from a fresh Pyth spot and `Config.sol_vol_bps`; the pm-AMM market's
+    /// authority is the `Authority` PDA. Seeded by the creator, or by the
+    /// treasury when an admin/keeper sponsors it.
     pub fn create_touch_market(
         ctx: Context<CreateTouchMarket>,
         args: CreateTouchMarketArgs,
     ) -> Result<()> {
         instructions::create_touch_market::handler(ctx, args)
+    }
+
+    /// Admin: change any config field; the result must pass `Config::validate`.
+    pub fn update_config(ctx: Context<UpdateConfig>, args: UpdateConfigArgs) -> Result<()> {
+        instructions::update_config::update_config(ctx, args)
+    }
+
+    /// Keeper or admin: post SOL's annualised volatility (bps).
+    pub fn set_volatility(ctx: Context<SetVolatility>, sol_vol_bps: u32) -> Result<()> {
+        instructions::update_config::set_volatility(ctx, sol_vol_bps)
     }
 
     /// Anyone: submit a fully verified Pyth price update that shows the touch.

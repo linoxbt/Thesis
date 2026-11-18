@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::constants::*;
 use crate::errors::ThesisError;
-use crate::pyth::parse_price_update;
+use crate::pyth::verified_price;
 use crate::state::{Config, Direction, TouchMarket, Touched};
 
 #[derive(Accounts)]
@@ -27,25 +27,17 @@ pub fn handler(ctx: Context<ProveTouch>) -> Result<()> {
     let m = &mut ctx.accounts.touch_market;
     require!(!m.touched && !m.settled, ThesisError::AlreadyFinal);
 
-    let info = ctx.accounts.price_update.to_account_info();
-    require_keys_eq!(*info.owner, config.pyth_receiver, ThesisError::WrongPriceOwner);
-    let p = {
-        let data = info.try_borrow_data()?;
-        parse_price_update(&data)?
-    };
-
-    require!(p.fully_verified, ThesisError::NotFullyVerified);
-    require!(p.feed_id == m.feed_id, ThesisError::WrongFeed);
+    let p = verified_price(
+        &ctx.accounts.price_update.to_account_info(),
+        &config.pyth_receiver,
+        &m.feed_id,
+        config.max_conf_bps,
+    )?;
     require!(
         p.publish_time >= m.start_ts && p.publish_time <= m.end_ts,
         ThesisError::OutsideWindow
     );
     require!(p.exponent == m.expo, ThesisError::WrongExpo);
-    require!(p.price > 0, ThesisError::NonPositivePrice);
-    require!(
-        (p.conf as i128) * 10_000 <= (p.price as i128) * (config.max_conf_bps as i128),
-        ThesisError::ConfTooWide
-    );
     let crossed = match m.direction {
         Direction::Below => p.price <= m.strike,
         Direction::Above => p.price >= m.strike,

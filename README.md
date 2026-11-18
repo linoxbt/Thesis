@@ -9,13 +9,13 @@ challenge, and a protection market that pays out if price touches the trader's
 liquidation level. Both settle from a Pyth-signed price that anyone can submit,
 with no admin.
 
-Status: **Phase 0** (foundations and spikes). See [`docs/PLAN.md`](docs/PLAN.md).
+Status: **Phase 1** (engine) done; devnet deploy pending devnet SOL. See [`docs/PLAN.md`](docs/PLAN.md).
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `programs/thesis` | Anchor 1.0.1 program: `initialize_config`, `create_touch_market`, `prove_touch`, `settle` |
+| `programs/thesis` | Anchor 1.0.1 program: `initialize_config`, `update_config`, `set_volatility`, `create_touch_market` (opening price computed onchain), `prove_touch`, `settle` |
 | `idls/pm_amm.json` | pm-AMM IDL (MIT, [sparkfun-labs/pm-amm](https://github.com/sparkfun-labs/pm-amm) `d5b407b`) for `declare_program!` |
 | `tests/harness` | LiteSVM tests against the real pm-AMM and Metaplex bytecode |
 | `tests/fixtures` | A real Pyth `PriceUpdateV2` account; programs dumped by `scripts/fetch-fixtures.sh` |
@@ -54,10 +54,10 @@ solana config set -u devnet
 curl -X POST https://pm-amm-devnet.vercel.app/api/faucet \
   -H 'content-type: application/json' -d "{\"wallet\":\"$(solana address)\"}"   # mUSDC
 anchor deploy --provider.cluster devnet      # ~2 SOL of program rent
-pnpm devnet:spike --distance-bps 15 --window 330 --seed 25
+pnpm devnet:spike --distance-bps 60 --window 7200 --seed 25
 ```
 
-The spike creates a TouchBelow market 0.15% under spot, buys YES directly on
+The spike creates a sponsored TouchBelow market 0.6% under spot (opening price computed onchain), buys YES directly on
 the pm-AMM, proves a touch from Pyth's sponsored SOL/USD account if price
 crosses, and settles after the 120 s grace period.
 
