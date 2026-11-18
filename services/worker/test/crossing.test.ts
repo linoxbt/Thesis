@@ -38,6 +38,8 @@ test("accepts a valid crossing, at and beyond the strike, both directions", () =
   assert.deepEqual(provableAt(market({ direction: "above" }), tick({ price: STRIKE + 5n }), 50), { ok: true });
   assert.deepEqual(provableAt(market(), tick({ publishTime: 1_000 }), 50), { ok: true });
   assert.deepEqual(provableAt(market(), tick({ publishTime: 1_600 }), 50), { ok: true });
+  // Within the clock-skew allowance.
+  assert.deepEqual(provableAt(market({ endTs: 9_999 }), tick({ publishTime: NOW + 15 }), 50), { ok: true });
 });
 
 test("mirrors every onchain rejection", () => {
@@ -53,7 +55,7 @@ test("mirrors every onchain rejection", () => {
     ["WrongExpo", market(), tick({ expo: -6 })],
     ["NoTouch", market(), tick({ price: STRIKE + 1n })],
     ["NoTouch", market({ direction: "above" }), tick({ price: STRIKE - 1n })],
-    ["FuturePrice", market({ endTs: 9_999 }), tick({ publishTime: NOW + 1 })],
+    ["FuturePrice", market({ endTs: 9_999 }), tick({ publishTime: NOW + 16 })],
   ];
   for (const [reason, m, t] of cases) assert.deepEqual(provableAt(m, t, 50), { ok: false, reason }, reason);
 });

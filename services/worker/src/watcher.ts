@@ -21,6 +21,9 @@ export interface WatcherOptions {
 export class Watcher {
   private markets = new Map<string, { key: PublicKey; account: TouchMarketAccount }>();
   private inflight = new Set<string>();
+  /** Crossings whose transaction failed; retried on every refresh. */
+  private pending = new Map<string, { tick: PriceTick; attempts: number }>();
+  static readonly MAX_ATTEMPTS = 10;
   private maxConfBps = 50;
   private usdcMint?: PublicKey;
   private timer?: NodeJS.Timeout;
@@ -50,10 +53,16 @@ export class Watcher {
     this.usdcMint = config.usdcMint;
     const open = await openMarkets(this.ctx);
     this.markets = new Map(open.filter((m) => !m.account.touched).map((m) => [m.key.toBase58(), m]));
+    for (const [id, p] of this.pending) {
+      if (!this.markets.has(id) || p.attempts >= Watcher.MAX_ATTEMPTS) this.pending.delete(id);
+      else await this.onTick(p.tick, id);
+    }
   }
 
-  async onTick(tick: PriceTick): Promise<void> {
+  /** Checks every open market (or just `only`) against a tick. */
+  async onTick(tick: PriceTick, only?: string): Promise<void> {
     for (const [id, m] of this.markets) {
+      if (only && id !== only) continue;
       if (this.inflight.has(id)) continue;
       const v = provable(toView(m.account), tick, this.maxConfBps);
       if (!v.ok) continue;
@@ -66,11 +75,14 @@ export class Watcher {
         const sig = await this.prove(m.key, m.account, tick.proofAccount);
         this.crossings.push({ market: id, price: tick.price, publishTime: tick.publishTime, signature: sig });
         this.markets.delete(id);
+        this.pending.delete(id);
         log("watcher", `proved ${id} at price ${tick.price} (t=${tick.publishTime}): ${sig}`);
       } catch (e) {
         const msg = (e as Error).message.split("\n")[0];
         this.crossings.push({ market: id, price: tick.price, publishTime: tick.publishTime, error: msg });
-        log("watcher", `prove ${id} failed: ${msg}`);
+        const attempts = (this.pending.get(id)?.attempts ?? 0) + 1;
+        this.pending.set(id, { tick, attempts });
+        log("watcher", `prove ${id} failed (attempt ${attempts}, will retry): ${msg}`);
       } finally {
         this.inflight.delete(id);
       }
@@ -93,7 +105,9 @@ export class Watcher {
     } catch (e) {
       if (ixs.length <= 2) throw e;
       // The proof matters more than the buy: retry it alone.
+      const logs = (e as { logs?: string[]; transactionLogs?: string[] }).logs ?? (e as { transactionLogs?: string[] }).transactionLogs;
       log("watcher", `bundle failed (${(e as Error).message.split("\n")[0]}); proving without the treasury buy`);
+      if (logs?.length) log("watcher", `bundle logs:\n  ${logs.filter((l) => /Error|failed|consumed|log:/.test(l)).join("\n  ")}`);
       return await program.provider.sendAndConfirm!(new Transaction().add(ixs[0], ixs[1]));
     }
   }

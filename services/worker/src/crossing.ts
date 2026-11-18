@@ -1,5 +1,8 @@
 import type { PriceTick } from "./pyth";
 
+/** Same as MAX_CLOCK_SKEW_SECS in programs/thesis/src/constants.rs. */
+export const MAX_CLOCK_SKEW_SECS = 15;
+
 /** The fields of a TouchMarket the watcher needs. */
 export interface MarketView {
   feedId: Buffer;
@@ -25,7 +28,7 @@ export function provable(m: MarketView, t: PriceTick, maxConfBps: number, now = 
   if (t.price <= 0n) return { ok: false, reason: "NonPositivePrice" };
   if (t.conf * 10_000n > t.price * BigInt(maxConfBps)) return { ok: false, reason: "ConfTooWide" };
   if (t.publishTime < m.startTs || t.publishTime > m.endTs) return { ok: false, reason: "OutsideWindow" };
-  if (t.publishTime > now) return { ok: false, reason: "FuturePrice" };
+  if (t.publishTime > now + MAX_CLOCK_SKEW_SECS) return { ok: false, reason: "FuturePrice" };
   if (t.expo !== m.expo) return { ok: false, reason: "WrongExpo" };
   const crossed = m.direction === "below" ? t.price <= m.strike : t.price >= m.strike;
   return crossed ? { ok: true } : { ok: false, reason: "NoTouch" };

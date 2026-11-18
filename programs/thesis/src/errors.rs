@@ -82,6 +82,6 @@ pub enum ThesisError {
     MissingThesisAccounts,
     #[msg("Market must be touched first")]
     NotTouched,
-    #[msg("Price publish time is in the future")]
+    #[msg("Price publish time is too far in the future")]
     FuturePrice,
 }

@@ -16,5 +16,9 @@ pub const PM_LP_SEED: &[u8] = b"lp";
 /// Pyth Solana receiver program (same ID on devnet and mainnet).
 pub const PYTH_RECEIVER_ID: Pubkey = pubkey!("rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ");
 
+/// A Pyth publish_time may sit slightly ahead of Solana's clock, which lags
+/// wall time by a second or more; proofs this far "in the future" still count.
+pub const MAX_CLOCK_SKEW_SECS: i64 = 15;
+
 /// pm-AMM's own minimum market duration.
 pub const PM_MIN_DURATION_SECS: i64 = 300;
