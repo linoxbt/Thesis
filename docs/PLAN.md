@@ -211,7 +211,7 @@ Workspace: `packages/chain` (IDLs, Pyth decoding, `provable()`, pm-AMM price),
 |---|---|
 | DB tests (real Postgres 16) | 5 pass: migrations idempotent, feed sorts, detail, text hash check, profile, stats exclusions |
 | Worker tests | 8 pass incl. realised vol within 12 % on simulated paths (σ 30/60/120 %) |
-| Local end-to-end (validator cloning devnet pm-AMM + Postgres) | see below |
+| Local end-to-end (validator cloning devnet pm-AMM + Postgres) | 13/13 pass: watcher proved the touch and bought YES for the treasury in one tx, keeper settled YES, thesis hit recorded; indexer wrote created/proof/settle txs, the Thesis trade (side, amount, self-trade flag), the direct pm-AMM swap (amount, exact 1 % treasury fee), the treasury buy, one crossing and 30 price points |
 | API smoke test against that data | every route correct, bad inputs 400/404/409 |
 
 ## Phase 4 — Frontend (Day 5)
