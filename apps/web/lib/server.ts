@@ -3,6 +3,9 @@ import { PublicKey } from "@solana/web3.js";
 import { connect } from "@thesis/db";
 import type { Pool } from "pg";
 
+/** False until a Postgres (Supabase, Netlify DB…) is attached via DATABASE_URL. */
+export const hasDb = () => !!process.env.DATABASE_URL;
+
 const g = globalThis as unknown as { __thesisDb?: Pool };
 /** One pool per server process (survives dev hot reloads). */
 export function db(): Pool {

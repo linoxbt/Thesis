@@ -1,0 +1,12 @@
+# Netlify build for the web app (pnpm workspace package @thesis/web).
+# Next.js runs on Netlify's OpenNext runtime (installed automatically): pages
+# and API route handlers become Netlify Functions.
+[build]
+  command = "pnpm --filter @thesis/web run build"
+  publish = "apps/web/.next"
+
+[build.environment]
+  NODE_VERSION = "22"
+  NEXT_TELEMETRY_DISABLED = "1"
+  # Public, non-secret: which cluster the UI talks to.
+  NEXT_PUBLIC_CLUSTER = "devnet"

@@ -7,6 +7,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { IS_DEVNET } from "@/lib/client/config";
+import { StatusBanner } from "./StatusBanner";
 import { ago, pythToNumber, shortAddr, usd } from "@/lib/client/format";
 import { useSpot } from "@/lib/client/useConfig";
 import { useActiveWallet, useBurner } from "@/lib/client/wallet";
@@ -210,7 +211,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
         </header>
-        <main className="mx-auto max-w-6xl px-4 pb-28 pt-6 lg:px-8">{children}</main>
+        <main className="mx-auto max-w-6xl px-4 pb-28 pt-6 lg:px-8">
+          <StatusBanner />
+          {children}
+        </main>
       </div>
 
       <nav className="fixed inset-x-0 bottom-0 z-20 flex justify-around border-t border-line bg-bg/95 py-2 backdrop-blur lg:hidden">

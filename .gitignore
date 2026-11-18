@@ -17,3 +17,6 @@ tests/fixtures/*.so
 .next/
 next-env.d.ts
 *.tsbuildinfo
+
+# Netlify CLI link state
+.netlify/

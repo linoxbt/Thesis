@@ -1,5 +1,5 @@
 import { feed, type FeedSort } from "@thesis/db";
-import { bad, db, json } from "@/lib/server";
+import { bad, db, hasDb, json } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
 
@@ -10,5 +10,6 @@ export async function GET(req: Request) {
   if (!["hot", "new", "ending"].includes(sort)) return bad("sort must be hot, new or ending");
   const limit = Number(url.searchParams.get("limit") ?? "50");
   if (!Number.isInteger(limit) || limit < 1) return bad("limit must be a positive integer");
+  if (!hasDb()) return json({ sort, theses: [], indexer: false });
   return json({ sort, theses: await feed(db(), { sort, limit }) }, 200, 5);
 }
