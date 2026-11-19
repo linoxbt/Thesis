@@ -74,6 +74,7 @@ const FAQ: [string, ReactNode][] = [
   ],
   ["What does protection do?", "It's a touch market on your liquidation level. Each protection share pays 1 USDC if SOL touches that level before the deadline, so you can hedge the wick that would stop you out."],
   ["What do creators earn?", "Every trade pays a 2% fee: half to the pm-AMM protocol, half to the Thesis treasury. The creator of the call can claim half of the treasury's share, a quarter of the whole fee, on every trade through their thesis."],
+  ["Can a quick wick be missed?", "Yes, on devnet today. Touches are proven from Pyth's onchain SOL/USD price account, which updates about every 30 minutes on devnet, so only prints that land there count: a wick between two prints can't be proven. Posting Pyth's exact prints from its Hermes service closes that gap and is the next step before mainnet."],
   ["Is this real money?", "Not yet. Thesis runs on Solana devnet with test USDC. One click creates an instant wallet that funds itself, so you can try every flow without installing anything."],
 ];
 

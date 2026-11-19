@@ -43,7 +43,21 @@ set on the project.
 | `RPC_URL` | functions | server-side RPC (OrbitFlare or similar) |
 | `DATABASE_URL` | functions | Postgres for the indexer's read cache (secret) |
 | `TEAM_WALLETS` | functions | comma-separated, excluded from `/stats` |
-| `PYTH_PRICE_ACCOUNT` / `NEXT_PUBLIC_PYTH_PRICE_ACCOUNT` | both | optional override of the SOL/USD price account |
+| `NEXT_PUBLIC_PYTH_PRICE_ACCOUNT` | both | optional override of the SOL/USD price account (one variable for browser and server; `PYTH_PRICE_ACCOUNT` is still read as a fallback) |
+| `FAUCET_SECRET_KEY` | functions | devnet SOL drip key (secret, see below) |
+| `FAUCET_DAILY_SOL`, `FAUCET_PER_IP` | functions | faucet caps (default 3 SOL/day, 3 drips per IP per 12h) |
+| `IP_HASH_SALT` | functions | salt for the hashed IPs used by rate limits (any random string) |
+| `TELEGRAM_BOT_USERNAME` | functions | enables Connect Telegram (see below) |
+
+The site sends a strict Content-Security-Policy (`apps/web/next.config.ts`):
+the browser may only talk to this origin and the RPC in `NEXT_PUBLIC_RPC_URL`
+(plus `*.solana.com`). Set `NEXT_PUBLIC_RPC_URL` before building if you move
+RPC providers, or the app can't reach it.
+
+Postgres connections use TLS for every non-local host (the Railway proxy
+certificate isn't publicly verifiable, so it's encrypted but unverified;
+`DATABASE_SSL=verify` to require a valid certificate, `DATABASE_SSL=off` to
+disable).
 
 ### Preview mode
 
@@ -57,11 +71,41 @@ data routes return empty results (`indexer: false`), `/api/config` answers 503.
 |---|---|---|
 | Program | Solana devnet `9yVcFaDEmBk1VU66tXxuvUujZXfiiT3ED1EpioVuug6h` | initialised by `scripts/init-devnet.ts`; keeper set by `scripts/set-keeper.ts` |
 | Postgres | Railway (project `thesis`, service `Postgres`) | public TCP proxy for Netlify; the worker uses the private `DATABASE_URL` reference |
-| Worker | Railway (service `worker`) | `services/worker/Dockerfile`, builds on every push to `main`; vars: `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `RPC_URL`, `PRICE_SOURCE=onchain`, `PYTH_PRICE_ACCOUNT`, `TREASURY_BUY_USDC`, `VOL_KEEPER=on`, `KEEPER_SECRET_KEY` (JSON byte array) |
+| Worker | Railway (service `worker`) | `services/worker/Dockerfile` (runs as the `node` user), builds on every push to `main`; vars: `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `RPC_URL`, `PRICE_SOURCE=onchain`, `PYTH_PRICE_ACCOUNT`, `TREASURY_BUY_USDC`, `VOL_KEEPER=on`, `KEEPER_SECRET_KEY` (JSON byte array); optional `PRIORITY_FEE_MICROLAMPORTS`, `KEEPER_MIN_SOL`, `AUTHORITY_MIN_SOL` |
 | Web | Netlify `thesis-calls` | `DATABASE_URL` set to the Railway public URL |
 
-The worker image pins pnpm 10.28.0: Corepack otherwise fetches the newest pnpm,
-whose default `minimumReleaseAge` rejects packages published in the last day.
+The worker image pins pnpm 10.28.0 for the install (Corepack otherwise fetches
+the newest pnpm, whose default `minimumReleaseAge` rejects packages published
+in the last day) and starts `tsx` directly, so nothing is downloaded at start.
+The worker applies database migrations on start (one at a time, under an
+advisory lock); the web app expects them, so deploy the worker first when a
+change adds a migration.
+
+## Upgrading the program
+
+```bash
+cargo build-sbf --tools-version v1.52 --manifest-path programs/thesis/Cargo.toml
+solana program show 9yVcFaDEmBk1VU66tXxuvUujZXfiiT3ED1EpioVuug6h -u devnet   # Data Length
+solana program extend 9yVcFaDEmBk1VU66tXxuvUujZXfiiT3ED1EpioVuug6h <bytes> -u devnet  # if the .so grew past it
+solana program deploy target/deploy/thesis.so --program-id 9yVcFaDEmBk1VU66tXxuvUujZXfiiT3ED1EpioVuug6h -u devnet --use-rpc
+```
+
+The deploy needs the .so's size in SOL as a temporary buffer (about 3.3 SOL
+for 475 KB; refunded when it completes). A program whose Config was created
+before v2 needs `RPC_URL=… npx tsx scripts/migrate-config.ts --send` right
+after the upgrade (it resizes Config and records the creator fees already
+owed); every instruction fails until it runs. Devnet was migrated on
+2026-11-18.
+
+Changing the admin is two steps: `update_config { admin }` proposes, and the
+new key signs `accept_admin`.
+
+## Operator alerts
+
+With `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ADMIN_CHAT_ID` on the worker, the
+operator chat gets: keeper SOL low, Authority PDA float low (it fronts ~0.04
+SOL of rent per market creation), a touch proof lost because the price print
+was overwritten, and failed settlements or treasury redemptions.
 
 ## Telegram alerts (optional)
 
@@ -87,8 +131,10 @@ is recorded before it is sent, so a restart never repeats one.
 The pm-AMM faucet gives test USDC but often no SOL, so the site tops up
 instant wallets itself from a devnet-only hot key: `FAUCET_SECRET_KEY` on
 Netlify (JSON byte array). Wallets under 0.05 SOL are topped up to 0.15 SOL
-(enough to trade and post a protected trade), once per wallet per 12h, and
-`FAUCET_DAILY_SOL` (default 3) per day overall, tracked in `faucet_claims`.
+(enough to trade and post a protected trade), once per wallet per 12h, three
+wallets per IP per 12h, and `FAUCET_DAILY_SOL` (default 3) per day overall,
+tracked in `faucet_claims`. The limits are checked and the claim recorded in one
+transaction; a claim whose transfer fails is released.
 Refill the key with devnet SOL when it runs low.
 
 ## Market rent

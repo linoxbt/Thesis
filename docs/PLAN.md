@@ -199,11 +199,12 @@ Workspace: `packages/chain` (IDLs, Pyth decoding, `provable()`, pm-AMM price),
       `POST /api/prove/:market` (Hermes-free: unsigned `prove_touch` tx from the
       onchain Pyth account, or 409 with the reason), `GET /api/og/thesis/:pda`
       (share card), `POST /api/faucet` (devnet only).
-- [ ] `POST /api/profiles/:wallet` (display name / X handle) needs a signed
-      message check; deferred to Phase 4 with the wallet UI.
-- [ ] `claim_seed_residuals` for sponsored markets: cut (spec cut line).
-- [ ] Supabase project + Railway service: not created yet; both take
-      `DATABASE_URL` / env only.
+- [x] `POST /api/profiles/:wallet` (display name / X handle) with a
+      wallet-signed message, replay-proof (Phase 4).
+- [x] Sponsored seeds come back: `treasury_redeem` claims the seed's LP
+      residuals and redeems the treasury's YES/NO after settlement (audit
+      fixes, below).
+- [x] Postgres and the worker on Railway (Supabase was dropped).
 
 **Phase 3 results**
 
@@ -340,3 +341,29 @@ stats, no console errors. All six screens fit a 390 px phone viewport.
 
 - Demo per spec §12, with the replay cut from a real touch proven during the week.
 - README: pitch, architecture, why pm-AMM, limitations, traction, program IDs.
+
+## Audit fixes (2026-11-18/19)
+
+A hostile audit (requirements 72, code quality 66, production readiness 35)
+was followed by fixing every finding:
+
+- **Program:** `treasury_redeem`; creator fees reserved from treasury spends;
+  1% minimum edge on treasury buys; DAO and outcome accounts pinned (ATAs, so
+  the cover cap holds); proof deadline (`end_ts` + grace); 15-minute link
+  window; 8-day max window; bounded grace/confidence; fixed creator share;
+  two-step admin; Config v2 with `migrate_config`; beneficiary for sponsored
+  markets. 34 LiteSVM tests. Devnet upgraded (slot 485 KB) and migrated.
+- **Worker:** proof retries re-read the live account and report lost
+  crossings; indexer cursor never skips an unserved transaction, failures go
+  to a retried dead-letter table; fees counted once per transaction; real
+  transactions and an advisory lock for migrations; TLS to Postgres; Telegram
+  flood control, blocked chats unlinked, private chats only; operator alerts
+  for keeper and Authority SOL, lost proofs, failed settles and redemptions;
+  keeper redeems settled sponsored markets; non-root image.
+- **Web:** Settle and in-grace Prove buttons, Sell, `/m/[market]`, Profile
+  positions, Protect reuses nearby pools and retries safely, Post freezes its
+  inputs and checks onchain before re-sending; atomic faucet limits with a
+  per-IP cap; single-use signed requests; rate limits; CSP and security
+  headers; stale-data and indexing states. 29 browser checks.
+- **Infra:** CI on every push; docs updated; the devnet proof limitation is
+  stated in the README and the app.
