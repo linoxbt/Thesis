@@ -36,7 +36,7 @@ import {
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { randomBytes } from "node:crypto";
-import type { Thesis } from "../target/types/thesis";
+import { THESIS_IDL, type ThesisIdl as Thesis } from "@thesis/chain";
 
 const RPC = process.env.RPC_URL ?? "https://api.devnet.solana.com";
 const PM_AMM = new PublicKey("GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y");
@@ -87,7 +87,7 @@ async function main() {
     commitment: "confirmed",
   });
   anchor.setProvider(provider);
-  const idl = JSON.parse(readFileSync("target/idl/thesis.json", "utf8"));
+  const idl = THESIS_IDL;
   const thesis = new Program<Thesis>(idl, provider);
   const pmIdl = JSON.parse(readFileSync("idls/pm_amm.json", "utf8"));
   const pm = new Program(pmIdl, provider);
