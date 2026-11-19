@@ -5,23 +5,39 @@ anyone can submit.
 
 A *thesis* is a public trade call with two live onchain markets on the
 [pm-AMM](https://predict-pm-amm.dev): a conviction market the crowd can back or
-challenge, and a protection market that pays out if price touches the trader's
-liquidation level. Both settle from a Pyth-signed price that anyone can submit,
-with no admin.
+challenge (the take profit), and a protection market that pays out if price
+touches the trader's liquidation level. Both resolve from a Pyth-signed price
+that anyone can submit; settlement needs no admin.
 
-Status: live on devnet. Web: https://thesis-calls.netlify.app (landing at `/`, app at `/app`), deployed from `main`. Program `9yVcFaDE…` on devnet; worker and Postgres on Railway. See [`docs/DEPLOY.md`](docs/DEPLOY.md). See [`docs/PLAN.md`](docs/PLAN.md).
+Status: live on devnet. Web: https://thesis-calls.netlify.app (landing at `/`,
+app at `/app`), deployed from `main`. Program `9yVcFaDE…` on devnet; worker and
+Postgres on Railway. See [`docs/DEPLOY.md`](docs/DEPLOY.md) and
+[`docs/PLAN.md`](docs/PLAN.md).
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `programs/thesis` | Anchor 1.0.1 program: config (`initialize_config`, `update_config`, `set_volatility`), markets (`create_touch_market` with onchain opening price, `prove_touch`, `settle`), theses (`create_thesis`, `trade`, `claim_creator_fees`), `treasury_buy_yes` |
-| `services/worker` | Watcher (proves touches) + keeper (settles); `pnpm worker` |
-| `idls/pm_amm.json` | pm-AMM IDL (MIT, [sparkfun-labs/pm-amm](https://github.com/sparkfun-labs/pm-amm) `d5b407b`) for `declare_program!` |
+| `programs/thesis` | Anchor 1.0.1 program (instructions below) |
+| `services/worker` | One process: watcher (proves touches), keeper (settles, redeems the treasury's positions), indexer (chain → Postgres), volatility keeper, Telegram alerts |
+| `apps/web` | Next.js 16 app: feed, trade pages, Post, Protect, Profile, Stats, and the API routes |
+| `packages/chain` | IDLs, Pyth decoding, the `prove_touch` rules mirrored offchain, pricing, position math |
+| `packages/db` | Postgres schema (migrations), reads, writes, abuse guards |
+| `idls/pm_amm.json` | Trimmed pm-AMM IDL for `declare_program!` (`scripts/trim-idl.js` from `idls/full`, MIT, [sparkfun-labs/pm-amm](https://github.com/sparkfun-labs/pm-amm)) |
 | `tests/harness` | LiteSVM tests against the real pm-AMM and Metaplex bytecode |
-| `tests/fixtures` | A real Pyth `PriceUpdateV2` account; programs dumped by `scripts/fetch-fixtures.sh` |
-| `scripts/devnet-spike.ts` | Full lifecycle on devnet (or a local validator) |
-| `docs/PLAN.md` | Phased build plan and Phase 0 results |
+| `scripts/` | Local stack, e2e, devnet seeding, migrations, preflight checks |
+
+### Program instructions
+
+| Group | Instructions |
+|---|---|
+| Config | `initialize_config`, `update_config` (bounded; proposes a new admin), `accept_admin`, `set_volatility`, `migrate_config` (one-off v1 → v2 resize) |
+| Markets | `create_touch_market` (opening price computed onchain; sponsored markets may name a beneficiary), `prove_touch` (until `end_ts` + grace), `settle` |
+| Theses | `create_thesis` (links markets within 15 min of opening), `trade` (fees attributed, cover capped per wallet), `claim_creator_fees` |
+| Treasury | `treasury_buy_yes` (keeper, after a proven touch, needs a 1% edge), `treasury_redeem` (anyone, after settlement: seed residuals + winnings back to the treasury) |
+
+Creator fees owed are reserved onchain (`creator_fees_owed`): sponsored seeds
+and treasury buys can't spend them.
 
 ## Program IDs
 
@@ -33,34 +49,46 @@ Status: live on devnet. Web: https://thesis-calls.netlify.app (landing at `/`, a
 
 ## Build and test
 
-Toolchain: Rust stable, Solana CLI 3.0.14, Anchor CLI 1.0.1, Node 22, pnpm.
+Toolchain: Rust stable, Solana CLI 3.0.14, Anchor CLI 1.0.1, Node 22, pnpm 10.
+CI (`.github/workflows/ci.yml`) runs all of the below except the e2e.
 
 ```bash
 pnpm install
-anchor build            # program + IDL (target/idl, target/types)
-cargo test -p thesis    # unit tests (Pyth decoding)
-scripts/fetch-fixtures.sh  # dump pm-AMM + Metaplex from devnet
-pnpm test               # LiteSVM spikes against pm-AMM bytecode
+cargo build-sbf --tools-version v1.52 --manifest-path programs/thesis/Cargo.toml
+scripts/fetch-fixtures.sh            # dump pm-AMM + Metaplex from devnet
+pnpm test                            # LiteSVM: 34 program tests
+npx tsc --noEmit -p tsconfig.json    # scripts, worker, packages
+(cd apps/web && npx tsc --noEmit)
+(cd packages/db && pnpm test)        # needs Postgres on :5433 (database thesis_test)
+pnpm test:worker                     # watcher, indexer, alerts, layout (Postgres on :5433)
 ```
+
+The database tests refuse to run against anything but a local server.
 
 `cargo build-sbf` needs platform tools v1.52 for the edition-2024 crates in the
-lockfile (`cargo build-sbf --tools-version v1.52`), the same as pm-AMM's own
-devnet build. The LiteSVM harness has its own workspace and lockfile because it
-needs a newer Cargo than the platform tools ship.
+lockfile, the same as pm-AMM's own devnet build. The LiteSVM harness has its own
+workspace and lockfile because it needs a newer Cargo than the platform tools
+ship. After changing the program: `anchor idl build -p thesis -o
+target/idl/thesis.json -t target/types/thesis.ts && scripts/sync-idl.sh`.
 
-## Devnet
+### End to end, locally
 
 ```bash
-solana config set -u devnet
-curl -X POST https://pm-amm-devnet.vercel.app/api/faucet \
-  -H 'content-type: application/json' -d "{\"wallet\":\"$(solana address)\"}"   # mUSDC
-anchor deploy --provider.cluster devnet      # ~2 SOL of program rent
-pnpm devnet:spike --distance-bps 60 --window 7200 --seed 25
+PG_URL=postgres://postgres@localhost:5433 scripts/local-stack.sh   # validator, worker, seed, web on :3100
+BASE_URL=http://localhost:3100 npx tsx scripts/ui-e2e.ts            # 29 browser checks
 ```
 
-The spike creates a sponsored TouchBelow market 0.6% under spot (opening price computed onchain), buys YES directly on
-the pm-AMM, proves a touch from Pyth's sponsored SOL/USD account if price
-crosses, and settles after the 120 s grace period.
+## Known limitations (devnet)
+
+- **Proofs come from one onchain price account.** The watcher reads Pyth's
+  sponsored SOL/USD account, which on devnet updates about every 30 minutes.
+  Only prints that land there can prove a touch: a wick between two prints
+  can't be proven. Posting exact prints from Pyth's Hermes service would close
+  the gap; it needs a Hermes API key.
+- **Instant wallets** are devnet keys kept in the browser's local storage.
+- **Keys:** the upgrade authority and config admin are one hot key. Before
+  mainnet, move both to a multisig (`update_config` then `accept_admin`, and
+  `solana program set-upgrade-authority`).
 
 ## License
 

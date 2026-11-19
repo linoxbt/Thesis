@@ -1,0 +1,73 @@
+# Typecheck, unit and database tests, the web build, and the program's
+# LiteSVM suite, on every push and pull request.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ts:
+    name: TypeScript (typecheck, db + worker tests, web build)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck (scripts, worker, packages)
+        run: npx tsc --noEmit -p tsconfig.json
+      - name: Typecheck (web)
+        run: npx tsc --noEmit
+        working-directory: apps/web
+      - name: Database tests
+        run: |
+          psql postgres://postgres@localhost:5433/postgres -c "create database thesis_test"
+          pnpm test
+        working-directory: packages/db
+      - name: Worker tests
+        run: pnpm test:worker
+      - name: Web build
+        run: npx next build
+        working-directory: apps/web
+        env:
+          NEXT_PUBLIC_CLUSTER: devnet
+          NEXT_TELEMETRY_DISABLED: "1"
+
+  program:
+    name: Program (SBF build + LiteSVM tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            tests/harness -> target
+      - name: Install the Solana CLI (Agave 3.0.14)
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v3.0.14/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+      - name: Build the program
+        run: cargo build-sbf --tools-version v1.52 --manifest-path programs/thesis/Cargo.toml
+      - name: Fetch pm-AMM and Metaplex bytecode from devnet
+        run: scripts/fetch-fixtures.sh
+      - name: LiteSVM tests
+        run: cargo test --tests -- --test-threads=1
+        working-directory: tests/harness

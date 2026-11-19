@@ -5,7 +5,7 @@ import { PublicKey } from "@solana/web3.js";
 import { useCallback, useEffect, useState } from "react";
 import { claimWinningsInstructions, positions, proveTransaction, settleInstructions, toTx } from "@/lib/client/actions";
 import { useNow } from "@/lib/client/api";
-import { explorerTx, USDC } from "@/lib/client/config";
+import { explorerTx, IS_DEVNET, USDC } from "@/lib/client/config";
 import { pct, pythToNumber, timeLeft, usd, usdc, when } from "@/lib/client/format";
 import { useTx } from "@/lib/client/tx";
 import { useConfig } from "@/lib/client/useConfig";
@@ -153,6 +153,12 @@ export function MarketPanel({
         </button>
       </div>
       {proveMsg && <p className="mt-1 px-1 text-xs text-muted">{proveMsg}</p>}
+      {IS_DEVNET && (
+        <p className="mt-1 px-1 text-[11px] leading-snug text-faint">
+          Proofs use Pyth&apos;s onchain SOL price, which updates about every 30 min on devnet: a wick between prints
+          can&apos;t be proven.
+        </p>
+      )}
     </>
   );
 
