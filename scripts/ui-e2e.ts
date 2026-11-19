@@ -166,6 +166,44 @@ async function main() {
     }
     check("prove endpoint rate-limits a flood from one IP", limited > 0, `${limited} of 35 refused`);
 
+    // 5e. Blink (Solana Actions): the call renders as Back / Challenge, and the
+    // transaction it hands out executes for this wallet (simulated on the validator).
+    const aj = await page.request.get(`${BASE}/actions.json`);
+    const rules = (await aj.json()).rules as { pathPattern: string; apiPath: string }[];
+    check("actions.json maps trade links to blinks (CORS open)", aj.headers()["access-control-allow-origin"] === "*" && rules.some((r) => r.pathPattern === "/t/*"));
+    const bg = await page.request.get(`${BASE}/api/actions/thesis/${pda}`);
+    const blink = await bg.json();
+    check(
+      "blink GET: title, icon and Back/Challenge actions",
+      bg.ok() && bg.headers()["x-action-version"] === "2.4" && /take profit/.test(blink.title) && blink.icon.endsWith(`/api/og/thesis/${pda}`) && blink.links.actions.length === 4,
+      String(blink.title),
+    );
+    const burner = (await page.evaluate(() => JSON.parse(localStorage.getItem("thesis-burner-v1") ?? "null"))) as number[] | null;
+    if (burner) {
+      const { Keypair, Transaction, Connection } = await import("@solana/web3.js");
+      const me = Keypair.fromSecretKey(Uint8Array.from(burner)).publicKey.toBase58();
+      const bp = await page.request.post(`${BASE}/api/actions/thesis/${pda}?side=no&amount=1`, { data: { account: me } });
+      const body = await bp.json();
+      let simErr: unknown = "no transaction";
+      if (body.transaction) {
+        const tx = Transaction.from(Buffer.from(body.transaction, "base64"));
+        const sim = await new Connection(process.env.RPC_URL ?? "http://127.0.0.1:8899", "confirmed").simulateTransaction(tx);
+        simErr = sim.value.err;
+      }
+      check("blink POST: an unsigned trade that executes for this wallet", bp.ok() && body.type === "transaction" && simErr === null, String(body.message ?? body.message ?? JSON.stringify(simErr)));
+      const bad = await page.request.post(`${BASE}/api/actions/thesis/${pda}?side=no&amount=999`, { data: { account: me } });
+      check("blink POST refuses an out-of-range amount", bad.status() === 400 && typeof (await bad.json()).message === "string");
+    }
+
+    // 5f. Leaderboard (calls are scored once they settle)
+    await page.goto(BASE + "/leaderboard");
+    const board = await page.waitForSelector('[data-testid="leaderboard"]', { timeout: 20_000 }).then(() => true).catch(() => false);
+    check("leaderboard renders (this week / all time)", board && (await page.locator('[data-testid="leaderboard-all"]').count()) === 1);
+    await page.click('[data-testid="leaderboard-all"]');
+    await page.screenshot({ path: `${OUT}/leaderboard.png`, fullPage: true });
+    await page.goto(thesisUrl);
+    await page.waitForSelector('[data-testid="panel-conviction"]');
+
     // 6. Profile and stats
     const wallet = (await page.evaluate(() => JSON.parse(localStorage.getItem("thesis-burner-v1") ?? "null"))) ? "burner" : "";
     await page.click('[data-testid="wallet-chip"]');

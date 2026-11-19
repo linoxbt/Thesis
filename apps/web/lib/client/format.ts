@@ -50,3 +50,9 @@ export function ago(ts: number, now = Date.now() / 1000): string {
 export function callLine(direction: string, strike: string | number, expo: number, endTs: number): string {
   return `SOL ${direction === "above" ? "↑" : "↓"} ${usd(pythToNumber(strike, expo))} by ${when(endTs)}`;
 }
+
+/** Skill score from bps of one call (10000 = +1.00): "+0.80", "−0.25". */
+export function fmtSkill(bps: number): string {
+  const v = Math.abs(bps) / 10_000;
+  return (bps > 0 ? "+" : bps < 0 ? "−" : "") + v.toFixed(2);
+}

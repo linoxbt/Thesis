@@ -2,7 +2,7 @@
 
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
-import { ArrowLeft, ArrowUpRight, BarChart3, PanelLeftClose, PanelLeftOpen, LayoutGrid, PenLine, Shield, User, Zap } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, BarChart3, PanelLeftClose, PanelLeftOpen, LayoutGrid, PenLine, Shield, Trophy, User, Zap } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -13,11 +13,13 @@ import { ago, pythToNumber, shortAddr, usd } from "@/lib/client/format";
 import { useSpot } from "@/lib/client/useConfig";
 import { useActiveWallet, useBurner } from "@/lib/client/wallet";
 
-const NAV = [
+const NAV: { href: string; label: string; short?: string; icon: typeof User; mobile?: boolean }[] = [
   { href: "/app", label: "Markets", icon: LayoutGrid },
-  { href: "/new", label: "Post a trade", icon: PenLine },
+  { href: "/leaderboard", label: "Leaderboard", short: "Leaders", icon: Trophy },
+  { href: "/new", label: "Post a trade", short: "Post", icon: PenLine },
   { href: "/protect", label: "Protect", icon: Shield },
-  { href: "/stats", label: "Stats", icon: BarChart3 },
+  // Five tabs fit a phone; Stats is linked from the leaderboard there.
+  { href: "/stats", label: "Stats", icon: BarChart3, mobile: false },
   { href: "/profile", label: "Profile", icon: User },
 ];
 
@@ -168,6 +170,7 @@ const TITLES: [RegExp, string][] = [
   [/^\/new/, "Post a trade"],
   [/^\/protect/, "Protect a position"],
   [/^\/stats/, "Traction"],
+  [/^\/leaderboard/, "Leaderboard"],
   [/^\/t\//, "Trade"],
   [/^\/u\//, "Profile"],
   [/^\/profile/, "Profile"],
@@ -296,10 +299,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       <nav className={"fixed inset-x-0 bottom-0 z-20 justify-around border-t border-line bg-bg/95 py-2 backdrop-blur lg:hidden " + (detail ? "hidden" : "flex")} data-testid="tab-bar">
-        {NAV.map((n) => (
+        {NAV.filter((n) => n.mobile !== false).map((n) => (
           <Link key={n.href} href={n.href} className={"flex flex-col items-center gap-0.5 text-[11px] " + (isActive(n.href) ? "text-ink" : "text-faint")}>
             <n.icon size={18} />
-            {n.label.replace(" a trade", "")}
+            {n.short ?? n.label}
           </Link>
         ))}
       </nav>

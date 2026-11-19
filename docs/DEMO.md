@@ -1,6 +1,8 @@
 # Demo script
 
 Target: a 3-minute video for the submission, recorded on the live devnet app.
+The story is proof of skill: calls priced by the crowd at posting, settled by
+an oracle, scored against those odds. Protection is a supporting feature.
 Everything shown is real and onchain; nothing is mocked.
 
 **Before recording**
@@ -26,10 +28,10 @@ Record the settled state after Friday evening too: the page then reads
 
 ## Shot list
 
-**0:00 — Hook (landing, 15 s).** "Every trader has a thesis. Thesis puts
-yours onchain: the crowd bets on your take profit, and your liquidation gets
-cover, settled by a price proof anyone can submit." Scroll once through the
-landing; click **Launch app**.
+**0:00 — Hook (landing, 15 s).** "Anyone can claim they called the move.
+Thesis makes you prove it: your call becomes a live market, the crowd prices
+it the moment you post, and an oracle settles it. Your record is scored
+against those odds, onchain, for good." Click **Launch app**.
 
 **0:15 — The feed (20 s).** Cards read like perp positions: Long SOL 20x,
 entry, take profit, liquidation, live odds. "Each card is two live markets on
@@ -47,22 +49,28 @@ through the conviction market, the protection market, the thesis, the cover.
 Then the share card: click **Share on X** to show the image that goes with
 the post.
 
-**1:45 — The trade page (25 s).** Conviction and protection panels with odds
+**1:45 — The trade page (20 s).** Conviction and protection panels with odds
 charts; the Sell tab (sell back part of the cover); "Saw the touch? Prove it":
 anyone can resolve it, no admin.
 
-**2:10 — The replay (30 s).** Open the real touched call. "SOL printed $74.60
+**2:05 — The replay (20 s).** Open the real touched call. "SOL printed $74.60
 on Pyth at 05:08 UTC. Our watcher saw it and submitted the signed price; the
 program checked feed, confidence and time window and marked it touched." Show
 the proof transaction on Explorer. "At the deadline it settles YES; YES pays
 $1, and the creator's record gets a hit."
 
-**2:40 — Profile and stats (15 s).** Profile: open positions read onchain,
-hit/miss record, fees earned, Telegram alerts. Stats: wallets, volume, touches
-proven.
+**2:25 — The leaderboard (15 s).** "Hit rate is easy to fake with safe
+calls. We score skill: a 20% call that hits is +0.80, a 90% call that misses
+is −0.90. The odds were set onchain when the call was posted, so nobody can
+pick them." Toggle This week / All time; open a creator's profile with their
+skill score and per-call history.
 
-**2:55 — Close (5 s).** "Thesis: post your trade, the crowd bets on it, your
-downside is covered by a proof anyone can submit." Show the URL.
+**2:40 — Trade from a link (15 s).** Paste the trade's link into a
+blink-aware wallet or https://dial.to: the call renders with Back $5 /
+Challenge $5 buttons, and one tap signs a real trade. "Every share is a
+market."
+
+**2:55 — Close (5 s).** "Thesis: prove you called it." Show the URL.
 
 ## Talking points (for Q&A or the write-up)
 

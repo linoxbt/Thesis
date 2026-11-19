@@ -380,3 +380,18 @@ was followed by fixing every finding:
   headers; stale-data and indexing states. 29 browser checks.
 - **Infra:** CI on every push; docs updated; the devnet proof limitation is
   stated in the README and the app.
+
+## Proof of skill (2026-11-19)
+
+Repositioned around "prove you called it" (landing, README, demo):
+
+- **Skill score + leaderboard** (`/leaderboard`, weekly and all-time): each
+  settled call scores `hit − opening probability` from the onchain odds; calls
+  opened when the latest Pyth print was already past the target are excluded.
+  Shown on profiles (with rank and per-call skill) and on trade pages.
+- **Blinks:** every call is a Solana Action (`/actions.json`,
+  `/api/actions/thesis/[pda]`): Back / Challenge from any blink-aware client,
+  routed through Thesis with a simulated quote and 1% slippage protection.
+- Protection stays, as a supporting feature; Stats moved off the phone tab bar.
+- Tests: db 11 (skill scoring and the exclusion), e2e 33 (blink GET/POST with
+  the transaction simulated for a real wallet, leaderboard).

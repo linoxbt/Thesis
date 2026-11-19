@@ -1,4 +1,5 @@
 import type { Db } from "./client";
+import { callSkill, creatorSkill } from "./skill";
 
 export type FeedSort = "hot" | "new" | "ending";
 
@@ -40,7 +41,7 @@ export async function feed(db: Db, opts: { sort: FeedSort; limit?: number; now?:
 }
 
 /** Everything the thesis page needs. */
-export async function thesisDetail(db: Db, pda: string) {
+export async function thesisDetail(db: Db, pda: string, teamWallets: string[] = []) {
   const t = (await db.query("select * from theses where pda = $1", [pda])).rows[0] as Record<string, unknown> | undefined;
   if (!t) return null;
   const markets = (
@@ -66,7 +67,7 @@ export async function thesisDetail(db: Db, pda: string) {
       [markets.map((m) => m.touch_market)],
     )
   ).rows;
-  const creator = await creatorSummary(db, t.creator as string);
+  const creator = await creatorSummary(db, t.creator as string, teamWallets);
   const conv = byKey.get(t.conviction_market);
   const spot = conv
     ? (
@@ -88,15 +89,16 @@ export async function thesisDetail(db: Db, pda: string) {
   };
 }
 
-async function creatorSummary(db: Db, wallet: string) {
+async function creatorSummary(db: Db, wallet: string, teamWallets: string[] = []) {
   const stats = (await db.query("select * from creator_stats where creator = $1", [wallet])).rows[0] ?? null;
   const profile = (await db.query("select display_name, x_handle from profiles where wallet = $1", [wallet])).rows[0] ?? null;
-  return { wallet, profile, stats };
+  const skill = await creatorSkill(db, wallet, teamWallets);
+  return { wallet, profile, stats, skill };
 }
 
-/** Profile page: raw numbers and thesis history (spec: no accuracy score in v1). */
-export async function profile(db: Db, wallet: string, creatorShareBps = 5000) {
-  const summary = await creatorSummary(db, wallet);
+/** Profile page: raw numbers, skill score and thesis history (with each call's skill). */
+export async function profile(db: Db, wallet: string, creatorShareBps = 5000, teamWallets: string[] = []) {
+  const summary = await creatorSummary(db, wallet, teamWallets);
   const cover = (
     await db.query<{ cover_cost: string; cover_paid: string }>(
       `select coalesce(sum(case when tr.side = 'buy_yes' then tr.usdc_amount else 0 end), 0)::bigint as cover_cost,
@@ -128,6 +130,7 @@ export async function profile(db: Db, wallet: string, creatorShareBps = 5000) {
     protection_bought_usdc: cover.cover_cost,
     protection_paid_out_usdc: cover.cover_paid,
     history,
+    call_skill: await callSkill(db, wallet),
     markets: await walletMarkets(db, wallet),
   };
 }

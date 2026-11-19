@@ -16,9 +16,9 @@ import { TxToasts } from "@/components/TxToasts";
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? process.env.URL ?? "https://thesis-calls.netlify.app"),
-  title: { default: "Thesis — calls, made tradable", template: "%s · Thesis" },
+  title: { default: "Thesis — prove you called it", template: "%s · Thesis" },
   description:
-    "Post a trade call on SOL. The crowd backs it or challenges it on a live market, and protection pays out if price touches your level. Settled by a Pyth price anyone can prove.",
+    "Post a SOL trade call. The crowd prices it the moment you post, a Pyth price anyone can submit settles it, and your record is scored against those odds onchain. Liquidation cover included.",
   applicationName: "Thesis",
 };
 

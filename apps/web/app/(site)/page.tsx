@@ -1,5 +1,5 @@
 import { THESIS_IDL } from "@thesis/chain";
-import { ArrowRight, ArrowUpRight, BadgeCheck, Check, Coins, Gauge, Plus, Shield, Sigma, Timer, Zap } from "lucide-react";
+import { ArrowRight, ArrowUpRight, BadgeCheck, Check, Coins, Gauge, Plus, Shield, Sigma, Timer, Trophy, Zap } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -12,7 +12,7 @@ import { ProductWindow } from "@/components/landing/ProductWindow";
 import { SiteNav } from "@/components/landing/SiteNav";
 
 export const metadata: Metadata = {
-  title: { absolute: "Thesis — calls, made tradable" },
+  title: { absolute: "Thesis — prove you called it" },
 };
 
 const PROGRAM_ID = THESIS_IDL.address;
@@ -73,6 +73,10 @@ const FAQ: [string, ReactNode][] = [
     </>,
   ],
   ["What does protection do?", "It's a touch market on your liquidation level. Each protection share pays 1 USDC if SOL touches that level before the deadline, so you can hedge the wick that would stop you out."],
+  [
+    "How is the skill score calculated?",
+    "Each settled call scores 1 if it hit, minus the probability the market gave it when it was posted (computed onchain, so nobody can choose it). A 20% call that hits earns +0.80; a 90% call that misses costs −0.90. Posting safe or random calls averages zero, so the leaderboard only rewards real edge. Calls opened when the price was already past the target don't count.",
+  ],
   ["What do creators earn?", "Every trade pays a 2% fee: half to the pm-AMM protocol, half to the Thesis treasury. The creator of the call can claim half of the treasury's share, a quarter of the whole fee, on every trade through their thesis."],
   ["Can a quick wick be missed?", "Yes, on devnet today. Touches are proven from Pyth's onchain SOL/USD price account, which updates about every 30 minutes on devnet, so only prints that land there count: a wick between two prints can't be proven. Posting Pyth's exact prints from its Hermes service closes that gap and is the next step before mainnet."],
   ["Is this real money?", "Not yet. Thesis runs on Solana devnet with test USDC. One click creates an instant wallet that funds itself, so you can try every flow without installing anything."],
@@ -100,20 +104,21 @@ export default function LandingPage() {
         <DotField className="sweep pointer-events-none absolute -right-10 top-16 hidden h-[560px] w-auto md:block" />
         <div className="relative mx-auto max-w-[1160px] px-5 pb-16 pt-32 sm:pt-36 lg:px-8">
           <h1 className="rise text-[54px] font-semibold leading-[0.98] tracking-[-0.045em] sm:text-[76px] lg:text-[88px]">
-            Calls, made
+            Prove you
             <br />
-            tradable.
+            called it.
           </h1>
           <p className="rise mt-7 max-w-[560px] text-[17px] font-medium leading-relaxed text-white/90" style={{ ["--d" as string]: "120ms" }}>
-            Post your SOL position: side, leverage, take profit, liquidation. It becomes a live market the crowd backs or
-            challenges, your liquidation gets cover, and a Pyth price anyone can submit settles both.
+            Anyone can claim they called the move. On Thesis your call is a live market: the crowd prices it the moment
+            you post, a Pyth price anyone can submit settles it, and your record is scored against those odds onchain,
+            for good. Your liquidation can be covered too.
           </p>
           <div className="rise mt-9 flex flex-wrap items-center gap-3" style={{ ["--d" as string]: "240ms" }}>
             <Link href="/app" className="inline-flex items-center gap-1.5 rounded-lg bg-white px-5 py-3 text-[15px] font-medium text-black transition-colors hover:bg-white/90">
               Launch app <ArrowUpRight size={16} />
             </Link>
-            <Link href="/protect" className="inline-flex items-center gap-2 rounded-lg bg-black/20 px-5 py-3 text-[15px] font-medium text-white transition-colors hover:bg-black/30" data-testid="hero-protect">
-              <Shield size={16} /> Protect a position
+            <Link href="/leaderboard" className="inline-flex items-center gap-2 rounded-lg bg-black/30 px-5 py-3 text-[15px] font-medium text-white backdrop-blur-sm transition-colors hover:bg-black/40" data-testid="hero-leaderboard">
+              <Trophy size={16} /> See the leaderboard
             </Link>
           </div>
         </div>

@@ -1,7 +1,9 @@
 # Thesis
 
-Post your trade. The crowd bets on it. Your downside is covered by a price proof
-anyone can submit.
+**Prove you called it.** Anyone can claim they called the move. On Thesis a
+trade call is a live market: the crowd prices it the moment it's posted, a
+Pyth price anyone can submit settles it, and the caller's record is scored
+against those odds onchain, for good.
 
 A *thesis* is a public trade call with two live onchain markets on the
 [pm-AMM](https://predict-pm-amm.dev): a conviction market the crowd can back or
@@ -28,6 +30,26 @@ and the stop is a hope. Thesis turns a call into two markets:
 
 Both resolve from a Pyth-signed price that anyone can submit, so the record
 of who called it is onchain and nobody can fudge it.
+
+### Skill, not hit rate
+
+Hit rate is easy to game: post near-certain calls and you're always right.
+Thesis scores each settled call as `(1 if hit, else 0) − opening probability`,
+using the odds the program computed onchain when the call was posted. Hitting
+a 20% call earns +0.80; missing a 90% call costs −0.90; fair-odds calls posted
+at random average zero. The leaderboard (weekly and all-time) ranks creators by
+this score. Calls opened when Pyth's latest print was already past the target
+are excluded, so a stale spot can't be used to post a call that has already
+won (`packages/db/src/skill.ts`).
+
+### Trade from anywhere: Blinks
+
+Every call is a Solana Action. Sharing `https://thesis-calls.netlify.app/t/<pda>`
+lets blink-aware wallets and clients render it with **Back $5 / Challenge $5**
+(or any amount) buttons; the action builds the same trade as the app, through
+Thesis so the creator is credited, with 1% slippage protection from a simulated
+quote (`/actions.json`, `/api/actions/thesis/[pda]`). Unfurling directly on X
+needs the domain registered with Dialect's blink registry.
 
 ## How it works
 

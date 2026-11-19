@@ -14,7 +14,7 @@ import { claimCreatorFeesInstructions, toTx } from "@/lib/client/actions";
 import { usePoll } from "@/lib/client/api";
 import { LoadState, StaleNote } from "@/components/LoadState";
 import { explorerTx } from "@/lib/client/config";
-import { ago, pythToNumber, shortAddr, usd, usdc, when } from "@/lib/client/format";
+import { ago, fmtSkill, pythToNumber, shortAddr, usd, usdc, when } from "@/lib/client/format";
 import { useTx } from "@/lib/client/tx";
 import { useConfig, useSpot } from "@/lib/client/useConfig";
 import { useActiveWallet } from "@/lib/client/wallet";
@@ -40,6 +40,7 @@ interface Detail {
     wallet: string;
     profile: { display_name: string | null; x_handle: string | null } | null;
     stats: { posted: string; hit: string; missed: string; volume_usdc: string; avg_opening_bps: number } | null;
+    skill?: { calls: number; score_bps: number; rank: number | null };
   };
 }
 
@@ -106,6 +107,12 @@ export default function ThesisPage({ params }: { params: Promise<{ pda: string }
               {s && (
                 <span className="num block text-[11px] text-faint">
                   {s.posted} posted · {s.hit} hit · {s.missed} missed
+                  {creator.skill && creator.skill.calls > 0 && (
+                    <span className={creator.skill.score_bps >= 0 ? "text-yes" : "text-bad"} data-testid="creator-skill">
+                      {" "}· skill {fmtSkill(creator.skill.score_bps)}
+                      {creator.skill.rank ? ` (#${creator.skill.rank})` : ""}
+                    </span>
+                  )}
                 </span>
               )}
             </span>
