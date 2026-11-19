@@ -8,4 +8,4 @@ RUN pnpm install --frozen-lockfile && chown -R node:node /app
 ENV NODE_ENV=production
 # The keeper key arrives via KEEPER_SECRET_KEY; nothing here needs root.
 USER node
-CMD ["pnpm", "exec", "tsx", "services/worker/src/index.ts"]
+CMD ["node_modules/.bin/tsx", "services/worker/src/index.ts"]

@@ -21,7 +21,17 @@ export type Verdict = { ok: true } | { ok: false; reason: string };
  * Mirrors every check of the onchain `prove_touch`, in the same order, so the
  * watcher only spends a transaction on a proof the program will accept.
  */
-export function provable(m: MarketView, t: PriceTick, maxConfBps: number, now = Math.floor(Date.now() / 1000)): Verdict {
+/**
+ * Mirrors `prove_touch`, check for check and in the same order. With
+ * `graceSecs`, also its deadline: no proof after `end_ts + grace`.
+ */
+export function provable(
+  m: MarketView,
+  t: PriceTick,
+  maxConfBps: number,
+  now = Math.floor(Date.now() / 1000),
+  graceSecs?: number,
+): Verdict {
   if (m.touched || m.settled) return { ok: false, reason: "AlreadyFinal" };
   if (!t.fullyVerified) return { ok: false, reason: "NotFullyVerified" };
   if (!t.feedId.equals(m.feedId)) return { ok: false, reason: "WrongFeed" };
@@ -29,6 +39,7 @@ export function provable(m: MarketView, t: PriceTick, maxConfBps: number, now = 
   if (t.conf * 10_000n > t.price * BigInt(maxConfBps)) return { ok: false, reason: "ConfTooWide" };
   if (t.publishTime < m.startTs || t.publishTime > m.endTs) return { ok: false, reason: "OutsideWindow" };
   if (t.publishTime > now + MAX_CLOCK_SKEW_SECS) return { ok: false, reason: "FuturePrice" };
+  if (graceSecs !== undefined && now > m.endTs + graceSecs) return { ok: false, reason: "ProofTooLate" };
   if (t.expo !== m.expo) return { ok: false, reason: "WrongExpo" };
   const crossed = m.direction === "below" ? t.price <= m.strike : t.price >= m.strike;
   return crossed ? { ok: true } : { ok: false, reason: "NoTouch" };

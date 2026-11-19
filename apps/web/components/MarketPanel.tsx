@@ -3,7 +3,7 @@
 import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { useCallback, useEffect, useState } from "react";
-import { claimWinningsInstructions, positions, proveTransaction, toTx } from "@/lib/client/actions";
+import { claimWinningsInstructions, positions, proveTransaction, settleInstructions, toTx } from "@/lib/client/actions";
 import { useNow } from "@/lib/client/api";
 import { explorerTx, USDC } from "@/lib/client/config";
 import { pct, pythToNumber, timeLeft, usd, usdc, when } from "@/lib/client/format";
@@ -41,6 +41,10 @@ const REASONS: Record<string, string> = {
   NotFullyVerified: "Pyth's latest print isn't fully verified.",
   AlreadyFinal: "Already proven or settled.",
   FuturePrice: "That price is ahead of the chain clock; try again in a few seconds.",
+  WrongFeed: "The price account isn't the SOL/USD feed this market uses.",
+  NonPositivePrice: "Pyth's latest print has no usable price.",
+  WrongExpo: "Pyth's latest print uses a different price scale than this market.",
+  ProofTooLate: "The proof window (market end plus grace) has closed.",
 };
 
 export function MarketPanel({
@@ -54,8 +58,8 @@ export function MarketPanel({
   kind: "conviction" | "protection";
   m: MarketRow;
   prices: { ts: string; yes_price_bps: number }[];
-  thesis: string;
-  creator: string;
+  thesis: string | null;
+  creator: string | null;
   onChange: () => void;
 }) {
   const { connection } = useConnection();
@@ -73,8 +77,12 @@ export function MarketPanel({
 
   const loadPos = useCallback(async () => {
     if (!wallet || !usdcMint) return setPos(null);
-    const p = await positions(connection, wallet.publicKey, new PublicKey(m.pm_market), usdcMint);
-    setPos({ yes: p.yes, no: p.no });
+    try {
+      const p = await positions(connection, wallet.publicKey, new PublicKey(m.pm_market), usdcMint);
+      setPos({ yes: p.yes, no: p.no });
+    } catch {
+      /* RPC hiccup: keep the last balances, retry on the next tick */
+    }
   }, [wallet, usdcMint, connection, m.pm_market]);
 
   useEffect(() => {
@@ -111,6 +119,42 @@ export function MarketPanel({
       /* toast */
     }
   };
+
+  const settle = async () => {
+    if (!wallet) return;
+    try {
+      await run("Settle the market", wallet, async () =>
+        toTx(
+          await settleInstructions(connection, {
+            cranker: wallet.publicKey,
+            touchMarket: new PublicKey(m.touch_market),
+            pmMarket: new PublicKey(m.pm_market),
+            thesis: thesis ? new PublicKey(thesis) : null,
+            thesisCreator: creator ? new PublicKey(creator) : null,
+          }),
+        ),
+      );
+      onChange();
+    } catch {
+      /* toast */
+    }
+  };
+  const settleButton = (
+    <button onClick={() => void settle()} disabled={!wallet} className="btn btn-ghost mt-3 w-full text-xs disabled:opacity-40" data-testid="settle">
+      Settle now (anyone can)
+    </button>
+  );
+  const proveRow = (
+    <>
+      <div className="mt-2 flex items-center justify-between px-1 text-xs text-faint">
+        <span>Saw the touch?</span>
+        <button onClick={() => void prove()} className="text-muted underline hover:text-ink disabled:opacity-40" disabled={!wallet} data-testid="prove">
+          Prove it
+        </button>
+      </div>
+      {proveMsg && <p className="mt-1 px-1 text-xs text-muted">{proveMsg}</p>}
+    </>
+  );
 
   const winning = m.settled ? (m.winning_side === 1 ? pos?.yes : pos?.no) ?? 0n : 0n;
   const open = !m.touched && !m.settled && endTs > now;
@@ -179,6 +223,7 @@ export function MarketPanel({
                 Settles {settleAt > now ? `in ${timeLeft(settleAt, now)}` : "any moment now"}. YES pays $1 per token at
                 settlement, never at the moment of the touch.
               </div>
+              {settleAt <= now && settleButton}
               {m.proof_tx && (
                 <a href={explorerTx(m.proof_tx)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-ink underline decoration-brand underline-offset-4">
                   Proof transaction ↗
@@ -190,20 +235,23 @@ export function MarketPanel({
               <TradeBox
                 kind={kind}
                 market={{ touchMarket: m.touch_market, pmMarket: m.pm_market, thesis, thesisCreator: creator }}
+                holdings={pos}
                 onDone={() => (onChange(), void loadPos())}
               />
-              <div className="mt-2 flex items-center justify-between px-1 text-xs text-faint">
-                <span>Saw the touch?</span>
-                <button onClick={() => void prove()} className="text-muted underline hover:text-ink" disabled={!wallet}>
-                  Prove it
-                </button>
+              {proveRow}
+            </>
+          ) : settleAt > now ? (
+            <>
+              <div className="rounded-2xl border border-line bg-panel-2 p-4 text-muted">
+                Window closed. A touch inside the window can still be proven for {timeLeft(settleAt, now)}; after that it
+                settles NO.
               </div>
-              {proveMsg && <p className="mt-1 px-1 text-xs text-muted">{proveMsg}</p>}
+              {proveRow}
             </>
           ) : (
             <div className="rounded-2xl border border-line bg-panel-2 p-4 text-muted">
-              Window closed. Settles {settleAt > now ? `in ${timeLeft(settleAt, now)}` : "any moment now"} (NO unless a
-              touch inside the window is proven first).
+              Window and grace period over: settles NO.
+              {settleButton}
             </div>
           )}
           {pos && (pos.yes > 0n || pos.no > 0n) && (

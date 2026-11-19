@@ -393,3 +393,13 @@ details[open] .faq-plus {
     }
   }
 }
+
+/* Desktop sidebar width, set before hydration (html.sb-collapsed from the head script). */
+@media (min-width: 1024px) {
+  .app-shell { grid-template-columns: 232px 1fr; }
+  html.sb-collapsed .app-shell { grid-template-columns: 68px 1fr; }
+}
+
+/* Devnet badge: amber, readable in both themes (test money, always visible). */
+.badge-devnet { background: rgb(245 165 36 / 0.16); color: #9a5b00; --tw-ring-color: rgb(245 165 36 / 0.45); }
+[data-theme="dark"] .badge-devnet { color: #fbc96b; }

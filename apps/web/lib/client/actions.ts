@@ -335,6 +335,40 @@ export async function claimCreatorFeesInstructions(
   ];
 }
 
+/**
+ * Settle a market once `end_ts + grace` has passed (anyone may; the keeper
+ * normally does). Thesis markets also update their creator's record.
+ */
+export async function settleInstructions(
+  connection: Connection,
+  a: { cranker: PublicKey; touchMarket: PublicKey; pmMarket: PublicKey; thesis: PublicKey | null; thesisCreator: PublicKey | null },
+): Promise<TransactionInstruction[]> {
+  const { thesis } = programs(connection);
+  const ids = pdas(thesis.programId);
+  // Only the market's origin thesis is passed (the program checks it).
+  const m = await thesis.account.touchMarket.fetch(a.touchMarket);
+  const linked = !m.originThesis.equals(PublicKey.default);
+  let creator = a.thesisCreator;
+  if (linked && (!a.thesis || !m.originThesis.equals(a.thesis))) {
+    creator = (await thesis.account.thesis.fetch(m.originThesis)).creator;
+  }
+  return [
+    await thesis.methods
+      .settle()
+      .accountsPartial({
+        cranker: a.cranker,
+        config: ids.config,
+        authority: ids.authority,
+        touchMarket: a.touchMarket,
+        pmMarket: a.pmMarket,
+        pmAmmProgram: PM_AMM_PROGRAM_ID,
+        thesis: linked ? m.originThesis : null,
+        creatorStats: linked && creator ? ids.creatorStats(creator) : null,
+      })
+      .instruction(),
+  ];
+}
+
 /** Token balances a wallet holds in one market (micro-units). */
 export async function positions(connection: Connection, owner: PublicKey, pmMarket: PublicKey, usdcMint: PublicKey) {
   const { yesMint, noMint } = pmAccounts(pmMarket);

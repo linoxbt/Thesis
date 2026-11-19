@@ -35,6 +35,13 @@ async function main() {
   const firstTheme = await page.evaluate(() => document.documentElement.dataset.theme);
   check("light is the default theme", firstTheme === "light", String(firstTheme));
   await page.screenshot({ path: `${OUT}/landing-desktop.png`, fullPage: true });
+  const home = await page.request.get(BASE + "/");
+  const h = home.headers();
+  check(
+    "security headers (CSP, frame denial, nosniff)",
+    /frame-ancestors 'none'/.test(h["content-security-policy"] ?? "") && h["x-frame-options"] === "DENY" && h["x-content-type-options"] === "nosniff",
+    (h["content-security-policy"] ?? "missing").slice(0, 80),
+  );
   await page.click('[data-testid="launch-app"]');
   await page.waitForURL(/\/app$/);
 
@@ -123,6 +130,42 @@ async function main() {
     await page.screenshot({ path: `${OUT}/share-menu.png` });
     await page.keyboard.press("Escape");
 
+    // 5b. Sell back part of the cover bought while posting (Sell tab, exact quote)
+    const prot = page.locator('[data-testid="panel-protection"]');
+    await prot.locator('[data-testid="mode-sell"]').waitFor({ timeout: 30_000 }).catch(() => {});
+    if (await prot.locator('[data-testid="mode-sell"]').count()) {
+      await prot.locator('[data-testid="mode-sell"]').click();
+      await prot.locator('input[inputmode="decimal"]').fill("0.5");
+      await page.waitForFunction(() => /receive/.test(document.querySelector('[data-testid="panel-protection"]')?.textContent ?? ""), null, { timeout: 30_000 });
+      await prot.locator('[data-testid="trade-submit"]').click();
+      const sold = await page.waitForSelector('[data-testid="tx-confirmed"]:has-text("Sell"), [data-testid="tx-failed"]', { timeout: 90_000 });
+      check("sell tab: sells cover back to the pool", (await sold.getAttribute("data-testid")) === "tx-confirmed", ((await sold.textContent()) ?? "").replace(/\s+/g, " ").slice(0, 100));
+    } else {
+      check("sell tab: sells cover back to the pool", false, "no Sell tab on the protection panel");
+    }
+
+    // 5c. Each market has its own page
+    const detail = await (await page.request.get(`${BASE}/api/theses/${pda}`)).json();
+    const protMarket = detail.protection?.touch_market as string | undefined;
+    if (protMarket) {
+      await page.goto(`${BASE}/m/${protMarket}`);
+      const ok = await page.waitForSelector('[data-testid="panel-protection"]', { timeout: 30_000 }).then(() => true).catch(() => false);
+      check("market page renders the cover market", ok && (await page.locator(`a[href="/t/${pda}"]`).count()) > 0);
+      await page.goto(thesisUrl);
+      await page.waitForSelector('[data-testid="panel-conviction"]');
+    }
+
+    // 5d. The prove endpoint is rate limited per IP
+    let limited = 0;
+    for (let i = 0; i < 35; i++) {
+      const r = await page.request.post(`${BASE}/api/prove/${protMarket ?? pda}`, {
+        data: { prover: protMarket ?? pda },
+        headers: { "x-forwarded-for": "203.0.113.77" },
+      });
+      if (r.status() === 429) limited++;
+    }
+    check("prove endpoint rate-limits a flood from one IP", limited > 0, `${limited} of 35 refused`);
+
     // 6. Profile and stats
     const wallet = (await page.evaluate(() => JSON.parse(localStorage.getItem("thesis-burner-v1") ?? "null"))) ? "burner" : "";
     await page.click('[data-testid="wallet-chip"]');
@@ -132,6 +175,8 @@ async function main() {
     await page.waitForTimeout(1500);
     const posted = await page.locator("text=Theses posted").locator("..").textContent();
     check("profile shows the new thesis", !!posted && /1/.test(posted), `${wallet} ${posted}`);
+    const positions = await page.waitForSelector('[data-testid="positions"] li', { timeout: 20_000 }).then(() => true).catch(() => false);
+    check("profile lists open positions (balances read onchain)", positions, positions ? `${await page.locator('[data-testid="positions"] li').count()} rows` : "none");
     const sol = await page.textContent('[data-testid="balance-sol"]');
     check("profile shows wallet balances", !!sol && /\d+\.\d{3}/.test(sol), `SOL ${sol}`);
 
@@ -164,7 +209,14 @@ async function main() {
     await page.goto(BASE + "/stats");
     await page.waitForSelector("text=Trading wallets");
     await page.screenshot({ path: `${OUT}/stats.png`, fullPage: true });
-    check("stats page renders", true);
+    const st = await (await page.request.get(`${BASE}/api/stats`)).json();
+    check("stats count this run's trades", Number(st.trades) > 0 && Number(st.volume_usdc) > 0 && Number(st.wallets) > 0, `trades ${st.trades}, volume ${st.volume_usdc}, wallets ${st.wallets}`);
+
+    // 6d. Protect: an open cover pool near the level is offered (no new market rent)
+    await page.goto(BASE + "/protect");
+    const nearby = await page.waitForSelector('[data-testid="protect-nearby"]', { timeout: 30_000 }).then(() => true).catch(() => false);
+    check("protect offers the existing cover pool near the level", nearby);
+    await page.screenshot({ path: `${OUT}/protect.png`, fullPage: true });
 
     // 7. Mobile
     const mobile = await browser.newContext({ ...devices["iPhone 13"] });

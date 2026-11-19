@@ -1,3 +1,4 @@
+import { THESIS_IDL } from "@thesis/chain";
 import { ArrowRight, ArrowUpRight, BadgeCheck, Check, Coins, Gauge, Plus, Shield, Sigma, Timer, Zap } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -14,8 +15,9 @@ export const metadata: Metadata = {
   title: { absolute: "Thesis — calls, made tradable" },
 };
 
-const PROGRAM_ID = "9yVcFaDEmBk1VU66tXxuvUujZXfiiT3ED1EpioVuug6h";
-const EXPLORER = `https://explorer.solana.com/address/${PROGRAM_ID}?cluster=devnet`;
+const PROGRAM_ID = THESIS_IDL.address;
+const CLUSTER = process.env.NEXT_PUBLIC_CLUSTER ?? "devnet";
+const EXPLORER = `https://explorer.solana.com/address/${PROGRAM_ID}${CLUSTER === "devnet" ? "?cluster=devnet" : ""}`;
 const SITE = "https://thesis-calls.netlify.app";
 
 const STACK = ["Solana", "Anchor 1.0", "Pyth pull oracle", "Wormhole-verified prices", "pm-AMM", "Onchain opening odds", "Permissionless proofs", "Postgres indexer"];

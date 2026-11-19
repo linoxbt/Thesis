@@ -104,9 +104,10 @@ export async function profile(db: Db, wallet: string, creatorShareBps = 5000) {
                 (case tr.side when 'buy_yes' then tr.token_amount when 'sell_yes' then -tr.token_amount else 0 end)
               else 0 end), 0)::bigint as cover_paid
          from trades tr
-         join theses t on t.protection_market = tr.touch_market
          join markets m on m.touch_market = tr.touch_market
-        where tr.wallet = $1`,
+        where tr.wallet = $1
+          -- Cover: any market that isn't a call's take profit (thesis protection or standalone Protect).
+          and not exists (select 1 from theses t where t.conviction_market = tr.touch_market)`,
       [wallet],
     )
   ).rows[0];
@@ -127,6 +128,7 @@ export async function profile(db: Db, wallet: string, creatorShareBps = 5000) {
     protection_bought_usdc: cover.cover_cost,
     protection_paid_out_usdc: cover.cover_paid,
     history,
+    markets: await walletMarkets(db, wallet),
   };
 }
 
@@ -173,9 +175,9 @@ export async function stats(db: Db, teamWallets: string[] = []): Promise<Tractio
                 (case tr.side when 'buy_yes' then tr.token_amount when 'sell_yes' then -tr.token_amount else 0 end)
               else 0 end), 0)::bigint as payouts_usdc
          from trades tr
-         join theses t on t.protection_market = tr.touch_market
          join markets m on m.touch_market = tr.touch_market
-        where not tr.is_treasury and not (tr.wallet = any($1))`,
+        where not tr.is_treasury and not (tr.wallet = any($1))
+          and not exists (select 1 from theses t where t.conviction_market = tr.touch_market)`,
       [team],
     )
   ).rows[0];
@@ -188,4 +190,69 @@ export async function stats(db: Db, teamWallets: string[] = []): Promise<Tractio
   // The list is capped at 100; the count is not.
   const proven = (await db.query<Row>("select count(*)::int as n from markets where touched")).rows[0];
   return { ...totals, ...theses, ...cover, touches_proven: Number(proven.n), touches } as TractionStats;
+}
+
+// ------------------------------------------------------------------ markets
+
+const MARKET_COLS = `m.touch_market, m.pm_market, m.direction, m.strike, m.expo, m.spot_at_open, m.start_ts, m.end_ts,
+  m.initial_price_bps, m.yes_price_bps, m.touched, m.touch_price, m.touch_publish_time, m.proof_tx, m.settled,
+  m.winning_side, m.creator, m.sponsored, m.seed_usdc,
+  coalesce(m.origin_thesis, (select t.pda from theses t where m.touch_market in (t.conviction_market, t.protection_market) limit 1)) as thesis,
+  (select t.creator from theses t where m.touch_market in (t.conviction_market, t.protection_market) limit 1) as thesis_creator,
+  exists (select 1 from theses t where t.conviction_market = m.touch_market) as is_conviction`;
+
+/** One market on its own (standalone Protect markets have no thesis page). */
+export async function marketDetail(db: Db, touchMarket: string) {
+  const m = (await db.query(`select ${MARKET_COLS} from markets m where m.touch_market = $1`, [touchMarket])).rows[0] as
+    | Record<string, unknown>
+    | undefined;
+  if (!m) return null;
+  const prices = (
+    await db.query(
+      `select ts, yes_price_bps from (select ts, yes_price_bps from price_points where touch_market = $1 order by ts desc limit 500) p order by ts`,
+      [touchMarket],
+    )
+  ).rows;
+  const trades = (
+    await db.query(
+      `select signature, wallet, side, usdc_amount, token_amount, price_after_bps, ts, via_thesis
+         from trades where touch_market = $1 order by ts desc, signature limit 50`,
+      [touchMarket],
+    )
+  ).rows;
+  return { market: m, prices, trades };
+}
+
+/**
+ * Open cover markets near a level: same direction, strike within `bps` of
+ * `strike`, ending no earlier than `minEndTs`. Lets Protect buy into an
+ * existing pool instead of paying rent for a new one.
+ */
+export async function nearbyCoverMarkets(
+  db: Db,
+  q: { direction: "above" | "below"; strike: bigint; bps: number; minEndTs: number; now: number; limit?: number },
+) {
+  return (
+    await db.query(
+      `select ${MARKET_COLS} from markets m
+        where m.direction = $1 and not m.touched and not m.settled and m.end_ts > $5 and m.end_ts >= $4
+          and abs(m.strike - $2::bigint) * 10000 <= $2::bigint * $3
+          and not exists (select 1 from theses t where t.conviction_market = m.touch_market)
+        order by abs(m.strike - $2::bigint), m.end_ts limit $6`,
+      [q.direction, q.strike.toString(), q.bps, q.minEndTs, q.now, Math.min(q.limit ?? 5, 20)],
+    )
+  ).rows;
+}
+
+/** Markets a wallet has traded, newest activity first (balances are read onchain). */
+export async function walletMarkets(db: Db, wallet: string, limit = 100) {
+  return (
+    await db.query(
+      `select ${MARKET_COLS}, x.last_ts from markets m
+         join (select touch_market, max(ts) as last_ts from trades where wallet = $1 group by touch_market) x
+           on x.touch_market = m.touch_market
+        order by x.last_ts desc limit $2`,
+      [wallet, limit],
+    )
+  ).rows;
 }

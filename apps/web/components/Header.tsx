@@ -5,7 +5,7 @@ import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { ArrowLeft, ArrowUpRight, BarChart3, PanelLeftClose, PanelLeftOpen, LayoutGrid, PenLine, Shield, User, Zap } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { IS_DEVNET } from "@/lib/client/config";
 import { Logo } from "./Brand";
 import { StatusBanner } from "./StatusBanner";
@@ -26,8 +26,8 @@ function ClusterBadge() {
   return (
     <span
       className={
-        "num whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] uppercase tracking-wide " +
-        (IS_DEVNET ? "bg-panel-3 text-muted ring-1 ring-line-2" : "bg-bad/10 text-bad ring-1 ring-bad/40")
+        "num whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide sm:px-2.5 sm:py-1 sm:text-[11px] " +
+        (IS_DEVNET ? "badge-devnet ring-1" : "bg-bad/10 text-bad ring-1 ring-bad/40")
       }
       title={IS_DEVNET ? "Devnet: test money, nothing has real value" : "Mainnet: real USDC"}
     >
@@ -54,6 +54,26 @@ export function WalletButton() {
   const { setVisible } = useWalletModal();
   const { funding, fundError, createBurner, forget, refund } = useBurner();
   const [open, setOpen] = useState(false);
+  const menu = useRef<HTMLDivElement>(null);
+  // The menu closes on any click outside it, or Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => menu.current && !menu.current.contains(e.target as Node) && setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const confirmForget = () => {
+    const ok = window.confirm(
+      "Forget this instant wallet? Its key exists only in this browser: its devnet funds and positions can't be recovered afterwards.",
+    );
+    if (ok) forget();
+    setOpen(false);
+  };
 
   if (!active) {
     return (
@@ -71,7 +91,7 @@ export function WalletButton() {
     );
   }
   return (
-    <div className="relative">
+    <div className="relative" ref={menu}>
       <button onClick={() => setOpen((o) => !o)} className="btn btn-ghost num text-sm" data-testid="wallet-chip">
         {active.kind === "burner" ? "⚡ " : ""}
         {shortAddr(active.publicKey.toBase58())}
@@ -100,7 +120,7 @@ export function WalletButton() {
               <button className="block w-full rounded-lg px-3 py-2 text-left hover:bg-panel-2" onClick={() => setVisible(true)}>
                 Use a real wallet instead
               </button>
-              <button className="block w-full rounded-lg px-3 py-2 text-left text-bad hover:bg-panel-2" onClick={() => (forget(), setOpen(false))}>
+              <button className="block w-full rounded-lg px-3 py-2 text-left text-bad hover:bg-panel-2" onClick={confirmForget}>
                 Forget this wallet
               </button>
             </>
@@ -161,33 +181,35 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isActive = (href: string) => path === href || path.startsWith(href + "/");
   // Detail pages (a trade, someone's profile) are full-screen on phones: no
   // tab bar, a back button instead.
-  const detail = /^\/(t|u)\//.test(path);
+  const detail = /^\/(t|u|m)\//.test(path);
   const router = useRouter();
   const back = () => (window.history.length > 1 ? router.back() : router.push("/app"));
   // Desktop sidebar: full or an icon rail; remembered per browser.
+  // The pre-hydration script sets html.sb-collapsed, which sizes the grid in
+  // CSS before React runs; the rail's contents follow once mounted.
   const [collapsed, setCollapsed] = useState(false);
+  const [mounted, setMounted] = useState(false);
   useEffect(() => {
-    try {
-      setCollapsed(localStorage.getItem(COLLAPSE_KEY) === "1");
-    } catch {}
+    setCollapsed(document.documentElement.classList.contains("sb-collapsed"));
+    setMounted(true);
   }, []);
   const toggle = () =>
     setCollapsed((c) => {
       try {
         localStorage.setItem(COLLAPSE_KEY, c ? "0" : "1");
       } catch {}
+      document.documentElement.classList.toggle("sb-collapsed", !c);
       return !c;
     });
   return (
     <div
       className={
-        "app-shell min-h-screen lg:grid lg:transition-[grid-template-columns] lg:duration-200 " +
-        (collapsed ? "lg:grid-cols-[68px_1fr]" : "lg:grid-cols-[232px_1fr]")
+        "app-shell min-h-screen lg:grid lg:transition-[grid-template-columns] lg:duration-200"
       }
       data-sidebar={collapsed ? "collapsed" : "open"}
     >
       <div className="hidden border-r border-line lg:block">
-      <aside className={"sticky top-0 z-30 flex h-screen flex-col py-5 " + (collapsed ? "items-stretch px-2.5" : "px-4")}>
+      <aside className={"sticky top-0 z-30 flex h-screen flex-col py-5 " + (collapsed ? "items-stretch px-2.5" : "px-4") + (mounted ? "" : " invisible")}>
         <div className={"flex items-center " + (collapsed ? "relative h-[26px]" : "justify-between")}>
           {collapsed ? (
             // Same place as when open (16px in, 20px down); the name extends
@@ -262,9 +284,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="hidden sm:inline">
-                <ClusterBadge />
-              </span>
+              <ClusterBadge />
               <WalletButton />
             </div>
           </div>

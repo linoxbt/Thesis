@@ -76,3 +76,11 @@ test("decodes a real devnet PriceUpdateV2 account", () => {
   assert.equal(t.publishTime, 1_794_993_029);
   assert.throws(() => decodePriceUpdateV2(Buffer.alloc(134)));
 });
+
+test("the proof deadline: end_ts + grace", () => {
+  const m = market({ endTs: NOW - 100 });
+  const t = tick({ publishTime: NOW - 150 });
+  assert.deepEqual(provable(m, t, 50, NOW, 120), { ok: true }, "inside grace");
+  assert.deepEqual(provable(m, t, 50, NOW, 60), { ok: false, reason: "ProofTooLate" });
+  assert.deepEqual(provable(m, t, 50, NOW), { ok: true }, "no grace given: deadline not checked");
+});
