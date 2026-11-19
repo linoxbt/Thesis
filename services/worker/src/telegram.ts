@@ -16,11 +16,22 @@ import type { Connection, PublicKey } from "@solana/web3.js";
 import {
   claimAlert, consumeLinkCode, releaseAlert, settleAlerts, touchAlerts, tradeAlerts, unlinkChat, type AlertThesis, type Db,
 } from "@thesis/db";
-import { fmtLev, positionOf } from "@thesis/chain/src/position";
+import { fmtLev, positionOf } from "@thesis/chain/position";
 import { log } from "./client";
 
 export interface TelegramApi {
   call<T = unknown>(method: string, params: Record<string, unknown>): Promise<T>;
+}
+
+/** A Bot API error, with Telegram's error code and any flood-wait. */
+export class TelegramError extends Error {
+  constructor(
+    message: string,
+    readonly code: number,
+    readonly retryAfterSecs?: number,
+  ) {
+    super(message);
+  }
 }
 
 export function telegramApi(token: string, fetchImpl: typeof fetch = fetch): TelegramApi {
@@ -31,8 +42,8 @@ export function telegramApi(token: string, fetchImpl: typeof fetch = fetch): Tel
         headers: { "content-type": "application/json" },
         body: JSON.stringify(params),
       });
-      const body = (await r.json()) as { ok: boolean; result?: T; description?: string };
-      if (!body.ok) throw new Error(`telegram ${method}: ${body.description ?? r.status}`);
+      const body = (await r.json()) as { ok: boolean; result?: T; description?: string; error_code?: number; parameters?: { retry_after?: number } };
+      if (!body.ok) throw new TelegramError(`telegram ${method}: ${body.description ?? r.status}`, body.error_code ?? r.status, body.parameters?.retry_after);
       return body.result as T;
     },
   };
@@ -117,7 +128,7 @@ export function tradeText(
 
 interface Update {
   update_id: number;
-  message?: { chat: { id: number }; from?: { username?: string }; text?: string };
+  message?: { chat: { id: number; type?: string }; from?: { username?: string }; text?: string };
 }
 
 export class TelegramBot {
@@ -148,8 +159,9 @@ export class TelegramBot {
           allowed_updates: ["message"],
         });
         for (const u of updates) {
-          this.offset = u.update_id + 1;
           await this.handle(u).catch((e) => log("telegram", `update ${u.update_id}: ${(e as Error).message}`));
+          // Acknowledged only once handled: a crash mid-update replays it.
+          this.offset = u.update_id + 1;
         }
       } catch (e) {
         log("telegram", `getUpdates: ${(e as Error).message}`);
@@ -162,6 +174,8 @@ export class TelegramBot {
   async handle(u: Update) {
     const m = u.message;
     if (!m?.text) return;
+    // Alerts name wallets and positions: only ever link a private chat.
+    if (m.chat.type && m.chat.type !== "private") return;
     const chat = m.chat.id;
     const [cmd, arg] = m.text.trim().split(/\s+/, 2);
     const reply = (text: string) => this.api.call("sendMessage", { chat_id: chat, text, parse_mode: "HTML", disable_web_page_preview: true });
@@ -190,6 +204,9 @@ export class TelegramBot {
 
 export class AlertNotifier {
   private timer?: NodeJS.Timeout;
+  private running = false;
+  /** No sends before this (Telegram flood control). */
+  private pausedUntil = 0;
 
   constructor(
     private api: TelegramApi,
@@ -208,20 +225,45 @@ export class AlertNotifier {
 
   /** One pass. Returns how many alerts were sent. */
   async tick(): Promise<number> {
+    if (this.running || Date.now() < this.pausedUntil) return 0;
+    this.running = true;
+    try {
+      return await this.pass();
+    } finally {
+      this.running = false;
+    }
+  }
+
+  private async pass(): Promise<number> {
     const site = this.opts.siteUrl;
     const out: { key: string; chat: string; text: string }[] = [];
     for (const r of await touchAlerts(this.db)) out.push({ key: `touch:${r.touch_market}:${r.wallet}`, chat: r.chat_id, text: touchText(site, r) });
     for (const r of await settleAlerts(this.db)) out.push({ key: `settle:${r.touch_market}:${r.wallet}`, chat: r.chat_id, text: settleText(site, r) });
     for (const r of await tradeAlerts(this.db)) out.push({ key: `trade:${r.signature}:${r.ix_index}:${r.wallet}`, chat: r.chat_id, text: tradeText(site, r) });
     let sent = 0;
+    const blocked = new Set<string>();
     for (const a of out) {
+      if (blocked.has(a.chat)) continue;
       if (!(await claimAlert(this.db, a.key))) continue;
       try {
         await this.api.call("sendMessage", { chat_id: a.chat, text: a.text, parse_mode: "HTML", disable_web_page_preview: true });
         sent++;
       } catch (e) {
+        const err = e as TelegramError;
+        if (err.code === 403) {
+          // The user blocked the bot or deleted the chat: stop alerting it.
+          blocked.add(a.chat);
+          const gone = await unlinkChat(this.db, Number(a.chat));
+          log("alerts", `chat ${a.chat} unreachable (403), unlinked ${gone.length} wallet(s)`);
+          continue; // keep the claim: this alert is moot
+        }
         await releaseAlert(this.db, a.key); // retry next pass
-        log("alerts", `${a.key}: ${(e as Error).message}`);
+        log("alerts", `${a.key}: ${err.message}`);
+        if (err.code === 429) {
+          this.pausedUntil = Date.now() + (err.retryAfterSecs ?? 30) * 1000;
+          log("alerts", `rate limited; pausing ${err.retryAfterSecs ?? 30}s`);
+          break;
+        }
       }
     }
     if (sent) log("alerts", `sent ${sent}`);

@@ -41,6 +41,14 @@ export async function telegramLink(db: Db, wallet: string): Promise<{ username: 
 }
 
 /** Records an alert key; true if it was new (send it), false if already sent. */
+/**
+ * Alerts older than this are never sent (a worker down for a week doesn't
+ * wake up and flood chats), and keeps each pass's scan bounded. Keys already
+ * in alerts_sent are filtered in SQL, so a pass only returns unsent alerts;
+ * the key formats here must match AlertNotifier's.
+ */
+export const ALERT_WINDOW_SECS = 3 * 86_400;
+
 export async function claimAlert(db: Db, key: string): Promise<boolean> {
   return (await db.query("insert into alerts_sent (key) values ($1) on conflict do nothing returning key", [key])).rows.length > 0;
 }
@@ -85,7 +93,10 @@ export async function touchAlerts(db: Db) {
          ${THESIS_JOIN}
          join telegram_links l on l.wallet = t.creator
            or l.wallet in (select wallet from trades tr where tr.touch_market = m.touch_market and tr.side = 'buy_yes')
-        where m.touched and m.touch_publish_time >= extract(epoch from l.linked_at)::bigint - 60`,
+        where m.touched and m.touch_publish_time >= extract(epoch from l.linked_at)::bigint - 60
+          and m.touch_publish_time >= extract(epoch from now())::bigint - $1
+          and not exists (select 1 from alerts_sent a where a.key = 'touch:' || m.touch_market || ':' || l.wallet)`,
+      [ALERT_WINDOW_SECS],
     )
   ).rows as unknown as (AlertRow & { touch_market: string; is_conviction: boolean; touch_price: string; touch_publish_time: string })[];
 }
@@ -106,7 +117,10 @@ export async function settleAlerts(db: Db) {
          ${THESIS_JOIN}
          join telegram_links l on l.wallet = t.creator
            or l.wallet in (select wallet from trades tr where tr.touch_market = m.touch_market)
-        where m.settled and m.end_ts >= extract(epoch from l.linked_at)::bigint`,
+        where m.settled and m.end_ts >= extract(epoch from l.linked_at)::bigint
+          and m.end_ts >= extract(epoch from now())::bigint - $1
+          and not exists (select 1 from alerts_sent a where a.key = 'settle:' || m.touch_market || ':' || l.wallet)`,
+      [ALERT_WINDOW_SECS],
     )
   ).rows as unknown as (AlertRow & { touch_market: string; is_conviction: boolean; winning_side: number; sides: string | null })[];
 }
@@ -123,7 +137,10 @@ export async function tradeAlerts(db: Db) {
          ${THESIS_JOIN}
          join telegram_links l on l.wallet = t.creator
         where tr.via_thesis and not tr.is_creator and not tr.is_treasury and tr.wallet <> t.creator
-          and tr.side in ('buy_yes', 'buy_no') and tr.ts >= extract(epoch from l.linked_at)::bigint`,
+          and tr.side in ('buy_yes', 'buy_no') and tr.ts >= extract(epoch from l.linked_at)::bigint
+          and tr.ts >= extract(epoch from now())::bigint - $1
+          and not exists (select 1 from alerts_sent a where a.key = 'trade:' || tr.signature || ':' || tr.ix_index || ':' || l.wallet)`,
+      [ALERT_WINDOW_SECS],
     )
   ).rows as unknown as (AlertRow & { signature: string; ix_index: number; side: string; usdc_amount: string; touch_market: string; is_conviction: boolean; price_after_bps: number | null })[];
 }

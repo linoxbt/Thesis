@@ -57,9 +57,14 @@ export async function thesisDetail(db: Db, pda: string) {
     )
   ).rows;
   const prices = (
-    await db.query("select touch_market, ts, yes_price_bps from price_points where touch_market = any($1) order by ts", [
-      markets.map((m) => m.touch_market),
-    ])
+    // The latest 500 points per market (one per 30 s is ~4 h at full rate).
+    await db.query(
+      `select touch_market, ts, yes_price_bps from (
+         select touch_market, ts, yes_price_bps, row_number() over (partition by touch_market order by ts desc) as n
+           from price_points where touch_market = any($1)) p
+        where n <= 500 order by ts`,
+      [markets.map((m) => m.touch_market)],
+    )
   ).rows;
   const creator = await creatorSummary(db, t.creator as string);
   const conv = byKey.get(t.conviction_market);
@@ -151,7 +156,7 @@ export async function stats(db: Db, teamWallets: string[] = []): Promise<Tractio
               coalesce(sum(usdc_amount), 0)::bigint as volume_usdc,
               coalesce(sum(usdc_amount) filter (where via_thesis), 0)::bigint as volume_via_thesis_usdc,
               coalesce(sum(fee_to_treasury), 0)::bigint as fees_to_treasury_usdc
-         from trades where not is_treasury and not (wallet = any($1))`,
+         from trades where not is_treasury and not is_creator and not (wallet = any($1))`,
       [team],
     )
   ).rows[0];
@@ -180,5 +185,7 @@ export async function stats(db: Db, teamWallets: string[] = []): Promise<Tractio
          from markets m where m.touched order by m.touch_publish_time desc limit 100`,
     )
   ).rows;
-  return { ...totals, ...theses, ...cover, touches_proven: touches.length, touches } as TractionStats;
+  // The list is capped at 100; the count is not.
+  const proven = (await db.query<Row>("select count(*)::int as n from markets where touched")).rows[0];
+  return { ...totals, ...theses, ...cover, touches_proven: Number(proven.n), touches } as TractionStats;
 }

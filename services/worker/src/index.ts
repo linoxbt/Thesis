@@ -12,6 +12,7 @@
  *   TREASURY_BUY_USDC   USDC the treasury buys right after a proven touch (default 0 = off)
  *   KEEPER_INTERVAL_MS  default 30000
  *   KEEPER_MIN_SOL      ops alert below this keeper balance (default 0.1)
+ *   PRIORITY_FEE_MICROLAMPORTS  optional priority fee on proofs and settlements
  *   AUTHORITY_MIN_SOL   ops alert below this Authority PDA float (default 0.1)
  *   DATABASE_URL        Postgres for the indexer; unset = no indexer. TLS for
  *                       remote hosts (DATABASE_SSL=off|verify to change)

@@ -2,6 +2,7 @@ import { ed25519 } from "@noble/curves/ed25519";
 import { PublicKey } from "@solana/web3.js";
 import { profile, saveSignedProfile } from "@thesis/db";
 import { cleanProfile, PROFILE_MAX_AGE_SECS, profileMessage } from "@/lib/profileMessage";
+import { fetchConfig } from "@/lib/chain";
 import { bad, db, env, hasDb, json, pubkey } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +14,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ wallet:
   if (!hasDb()) {
     return json({ wallet, profile: null, stats: null, fees_earned: "0", protection_bought_usdc: "0", protection_paid_out_usdc: "0", history: [], indexer: false });
   }
-  return json(await profile(db(), wallet, env.creatorShareBps), 200, 10);
+  // The onchain share (fixed once set); the env value only if the RPC is down.
+  const share = (await fetchConfig().catch(() => null))?.creator_share_bps ?? env.creatorShareBps;
+  return json(await profile(db(), wallet, share), 200, 10);
 }
 
 /**

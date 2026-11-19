@@ -115,12 +115,12 @@ test("profile: raw numbers, self volume, fees earned, cover", async () => {
   assert.equal(bob.protection_paid_out_usdc, "0", "protection market not settled YES");
 });
 
-test("stats exclude team wallets and the treasury, and list proofs", async () => {
+test("stats exclude team wallets, the treasury and creators' self-trades, and list proofs", async () => {
   const s = await stats(db, [TEAM]);
-  assert.equal(Number(s.wallets), 3, "Bob, Alice, Dave");
-  assert.equal(Number(s.trades), 4);
-  assert.equal(s.volume_usdc, "25000000");
-  assert.equal(s.volume_via_thesis_usdc, "21000000");
+  assert.equal(Number(s.wallets), 2, "Bob and Dave (Alice only traded her own call)");
+  assert.equal(Number(s.trades), 3);
+  assert.equal(s.volume_usdc, "20000000");
+  assert.equal(s.volume_via_thesis_usdc, "16000000");
   assert.equal(Number(s.theses), 3);
   assert.equal(Number(s.creators), 2);
   assert.equal(s.cover_bought_usdc, "6000000");

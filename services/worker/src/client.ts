@@ -1,6 +1,6 @@
 import * as anchor from "@anchor-lang/core";
 import { Program } from "@anchor-lang/core";
-import { Connection, Keypair, PublicKey } from "@solana/web3.js";
+import { ComputeBudgetProgram, Connection, Keypair, PublicKey, type TransactionInstruction } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { readFileSync } from "node:fs";
 import { THESIS_IDL, type MarketView, type ThesisIdl as Thesis } from "@thesis/chain";
@@ -24,6 +24,15 @@ export function makeCtx(rpcUrl: string, keeper: Keypair, idlPath?: string): Ctx 
   const program = new Program<Thesis>(idl, provider);
   const pda = (seed: string) => PublicKey.findProgramAddressSync([Buffer.from(seed)], program.programId)[0];
   return { connection, keeper, program, config: pda("config"), authority: pda("authority") };
+}
+
+/**
+ * Optional priority fee (PRIORITY_FEE_MICROLAMPORTS, micro-lamports per CU)
+ * so proofs and settlements still land when the network is busy.
+ */
+export function priorityFeeIxs(env = process.env.PRIORITY_FEE_MICROLAMPORTS): TransactionInstruction[] {
+  const fee = Number(env ?? "0");
+  return Number.isFinite(fee) && fee > 0 ? [ComputeBudgetProgram.setComputeUnitPrice({ microLamports: Math.floor(fee) })] : [];
 }
 
 export const pmPda = (seeds: (Buffer | Uint8Array)[]) => PublicKey.findProgramAddressSync(seeds, PM_AMM)[0];
