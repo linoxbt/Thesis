@@ -7,7 +7,7 @@ import { daoUsdc, makeCtx, pmAccounts } from "../services/worker/src/client";
 
 async function main() {
   const kp = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(`${homedir()}/.config/solana/id.json`, "utf8"))));
-  const ctx = makeCtx("http://127.0.0.1:8899", kp, "/home/user/Thesis/target/idl/thesis.json");
+  const ctx = makeCtx(process.env.RPC_URL ?? "http://127.0.0.1:8899", kp);
   const key = new PublicKey(process.argv[2]);
   const m = await ctx.program.account.touchMarket.fetch(key);
   const cfg = await ctx.program.account.config.fetch(ctx.config);
