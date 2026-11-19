@@ -58,12 +58,14 @@ async function main() {
   ok("pm-AMM DAO USDC account (fee recipient)", !!dao, dao ? daoUsdc.toBase58().slice(0, 8) + "…" : "missing: creating it costs ~0.002 SOL");
 
   const soLen = statSync(SO).size;
-  const maxLen = 440_000;
+  // Deploy with `--max-len <MAX_LEN>`: the binary plus ~10% headroom for upgrades
+  // (devnet had to be extended once already).
+  const maxLen = Number(process.env.MAX_LEN ?? Math.ceil((soLen * 1.1) / 10_000) * 10_000);
   const rent = await c.getMinimumBalanceForRentExemption(maxLen + 45);
   const configRent = await c.getMinimumBalanceForRentExemption(400);
   const deployer = process.argv[2] ? new PublicKey(process.argv[2]) : null;
   const need = rent * 2 + configRent + 0.5 * LAMPORTS_PER_SOL + 0.05 * LAMPORTS_PER_SOL;
-  ok("Program binary", soLen < maxLen, `${(soLen / 1000).toFixed(0)} KB (max-len ${maxLen / 1000} KB)`);
+  ok("Program binary fits the planned slot", soLen <= maxLen, `${(soLen / 1000).toFixed(0)} KB, deploy with --max-len ${maxLen}`);
   if (deployer) {
     const bal = await c.getBalance(deployer);
     ok("Deployer balance covers deploy", bal >= need, `${(bal / 1e9).toFixed(3)} / ${(need / 1e9).toFixed(3)} SOL`);

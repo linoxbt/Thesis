@@ -9,6 +9,17 @@ maps onto Phases 1–6; Phase 0 runs now.
 > Rule check first: ask the organisers whether code written before kickoff may be
 > submitted. If not, Phase 0 stays a throwaway spike and gets re-typed after kickoff.
 
+## Status (19 Nov 2026)
+
+Phases 0–4 are done, and the audit fixes are deployed (see the end of this
+file). Left:
+
+| Phase | What's left | Who |
+|---|---|---|
+| 5 — Mainnet + traction | Ask the organisers whether mainnet is expected; if so, follow `docs/MAINNET.md` (rehearsed) with keys, SOL and USDC. Recruit 10–15 traders to post real calls. | Owner (keys, funds, people); deploy steps scripted |
+| 6 — Demo + submission | Record the demo (`docs/DEMO.md`, real touch included), add real traction numbers to the README, submit ≥ 12 h before Dec 5. | Owner records and submits; script and README ready |
+| Optional | Telegram bot token (alerts), Netlify linked to GitHub (auto-deploys), delete the old Vercel project, Hermes source. | Owner |
+
 ## Phase overview
 
 | Phase | Spec days | Goal | Exit criterion |
@@ -42,9 +53,7 @@ automation → self-trade flag → settle share cards → LP rebate. Never the r
       $10 / $50 / $250 buys on $25 and $100 seeds.
 - [x] Full lifecycle script (`scripts/devnet-spike.ts`) passes on a local validator
       that clones pm-AMM, Metaplex, mUSDC and the Pyth SOL/USD account from devnet.
-- [ ] Devnet run: blocked on devnet SOL (public airdrops rate-limited). Fund the
-      deployer with ~3 SOL, then `anchor deploy --provider.cluster devnet` and
-      `pnpm devnet:spike`.
+- [x] Devnet run: deployed (`9yVcFaDE…`), live since Phase 3.
 
 **Findings already confirmed from pm-AMM source** (commit `d5b407b`)
 
@@ -87,10 +96,12 @@ new numbers for the demo.
 **People tasks (not code)**
 
 - [ ] Ask organisers: start date, team size, prior-code rule, mainnet expected?
-- [ ] Hermes API key (needed for the watcher and the "Prove it" button).
-- [ ] OrbitFlare signup (claim the free Developer week when the hackathon opens).
+- [x] Hermes API key: not needed. Proofs read Pyth's sponsored onchain account,
+      which updates every few seconds on mainnet (preflight); on devnet (~30 min)
+      a wick between prints can't be proven, which is stated in the app.
+- [ ] RPC provider (OrbitFlare or similar) for mainnet.
 - [ ] Line up 10–15 traders/KOLs to post a real thesis in Phase 5.
-- [ ] Screen designs (Lovable or Figma), pitch line, README skeleton.
+- [x] Screen designs, pitch line, README (Phase 4 and the audit pass).
 
 ## Phase 1 — Engine (Day 1–2)
 
@@ -109,9 +120,8 @@ new numbers for the demo.
 - [x] Resolver matrix: partial, wrong feed, before start, after end, wrong expo,
       wide confidence, non-positive price, no cross, wrong owner, second proof,
       proof after settle, settle before grace, late proof inside grace.
-- [ ] Devnet run of a near-spot market: still blocked on devnet SOL. Without a
-      Hermes key, the devnet config accepts a 1-hour-old spot so Pyth's
-      sponsored feed (updates ~every 30 min on devnet) can be the spot source.
+- [x] Devnet run of a near-spot market: the devnet config accepts a 1-hour-old
+      spot (Pyth's devnet feed updates ~every 30 min); house calls run live.
 
 **Phase 1 results** (`pnpm test`: 7 unit + 12 LiteSVM tests)
 
@@ -160,10 +170,10 @@ Worker (`services/worker`, TypeScript):
       as the proof. **No Hermes needed.** Limitation: only prints that land in
       that account can prove a touch (on devnet, about every 30 min).
 - [x] `provable()` mirrors every `prove_touch` check; unit-tested.
-- [ ] Hermes source (exact crossing print, posted through the receiver): needs
-      an API key; deferred. The interface is ready for it.
-- [ ] Keep near-spot devnet markets running so a real touch is recorded for
-      the demo: needs the devnet deploy (devnet SOL).
+- [ ] Hermes source (exact crossing print, posted through the receiver):
+      optional; only closes the devnet wick gap. The interface is ready for it.
+- [x] A real touch recorded for the demo: the house call SOL > $74.51 was
+      proven by the watcher at $74.60 on 19 Nov 2026 (`docs/DEMO.md`).
 
 **Phase 2 results**
 
@@ -306,7 +316,7 @@ position behind it, derived from onchain data only (`lib/position.ts`):
       protection buys moving the pool > 10 points are refused (Phase 0 finding).
 - [x] Every transaction: pending / confirmed / failed + explorer link; units on
       every number; devnet/mainnet badge; plain-language risk copy.
-- [ ] Display name / X handle on profiles (needs a signed-message check).
+- [x] Display name / X handle on profiles (wallet-signed, replay-proof).
 
 **Phase 4 results** (`scripts/ui-e2e.ts`, Playwright against a local validator
 cloning devnet pm-AMM, the worker, Postgres and `next start`): 10/10 — feed
@@ -331,10 +341,13 @@ stats, no console errors. All six screens fit a 390 px phone viewport.
       protected), 20 mUSDC each from the sponsor budget (300 → 220), labelled
       "House call (Thesis team)" in their text. No synthetic traders or trades;
       `TEAM_WALLETS` excludes the house wallet from `/stats`.
-- [ ] Mainnet deploy. Needs from the owner: a deployer / upgrade-authority key
-      they control (not the container's devnet key), ~5 SOL on it, USDC for
-      the treasury, and mainnet caps (e.g. max seed 25, max cover per wallet
-      100, sponsor budget 100, `max_spot_age_secs` 60).
+- [x] Mainnet runbook and rehearsal: `docs/MAINNET.md`, `scripts/init-mainnet.ts`
+      (mainnet caps, front-run check), `scripts/mainnet-rehearsal.sh` (deploy,
+      init, sponsored market, thesis and trade on a mainnet clone: passed).
+- [ ] Mainnet deploy, if the organisers expect it. Needs from the owner: keys
+      they control (deployer, admin into a multisig, separate keeper), ≈ 5.94
+      SOL peak (≈ 3.25 stays locked) for the 475 KB program in a 530 KB slot,
+      USDC for the treasury (≥ 100), and a mainnet RPC.
 - [ ] Traction: real traders posting calls (the 10–15 from Phase 0).
 
 ## Phase 6 — Demo + submission (Day 7)
