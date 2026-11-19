@@ -16,7 +16,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ wallet:
   }
   // The onchain share (fixed once set); the env value only if the RPC is down.
   const share = (await fetchConfig().catch(() => null))?.creator_share_bps ?? env.creatorShareBps;
-  return json(await profile(db(), wallet, share), 200, 10);
+  return json(await profile(db(), wallet, share, env.teamWallets), 200, 10);
 }
 
 /**

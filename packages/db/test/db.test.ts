@@ -2,7 +2,7 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { Pool } from "pg";
 import {
-  claimAlert, claimFaucet, marketDetail, nearbyCoverMarkets, walletMarkets, consumeLinkCode, createLinkCode, feed, rateLimit, releaseFaucetClaim, useSignatureOnce, insertCrossing, insertTrade, isLocalUrl, migrate, profile, saveSignedProfile, setMarketPrice,
+  callSkill, claimAlert, claimFaucet, creatorSkill, insertSpotSample, marketDetail, skillLeaderboard, nearbyCoverMarkets, walletMarkets, consumeLinkCode, createLinkCode, feed, rateLimit, releaseFaucetClaim, useSignatureOnce, insertCrossing, insertTrade, isLocalUrl, migrate, profile, saveSignedProfile, setMarketPrice,
   telegramLink, unlinkChat, setMarketTx, setThesisText, sha256Hex,
   stats, thesisDetail, upsertMarket, upsertProfile, upsertThesis, type MarketRow, type TradeRow,
 } from "../src";
@@ -195,4 +195,36 @@ test("market detail, nearby cover, and the markets a wallet traded", async () =>
   const bob = (await walletMarkets(db, "Bob")).map((r) => r.touch_market);
   assert.ok(bob.includes("P1"));
   assert.equal(await marketDetail(db, "nope"), null);
+});
+
+test("skill score: hits beyond the opening odds, calls opened past the target excluded", async () => {
+  const call = async (pda: string, creator: string, id: number, over: Partial<MarketRow>, outcome: number, endTs: number) => {
+    await upsertMarket(db, market({ touch_market: `M${pda}`, pm_market: `PM${pda}`, creator, origin_thesis: pda, end_ts: endTs, settled: true, winning_side: outcome === 1 ? 1 : 2, ...over }));
+    await upsertThesis(db, {
+      pda, creator, thesis_id: id, text_hash: sha256Hex(pda), conviction_market: `M${pda}`, protection_market: null,
+      created_ts: NOW - 3600, end_ts: endTs, volume_usdc: 0n, self_volume_usdc: 0n, fees_attributed: 0n, fees_claimed: 0n, outcome,
+    });
+  };
+  // The Pyth print just before these calls opened: SOL $76.00.
+  await insertSpotSample(db, { feed_id: "ef0d", publish_time: NOW - 3600 - 10, price: 7_600_000_000n, expo: -8 });
+  await call("K1", "Sage", 0, { direction: "above", strike: 7_700_000_000n, initial_price_bps: 2000 }, 1, NOW - 30 * 86_400); // +0.80, a month ago
+  await call("K2", "Sage", 1, { direction: "below", strike: 7_000_000_000n, initial_price_bps: 9000 }, 2, NOW - 100); // -0.90
+  await call("K3", "Sage", 2, { direction: "above", strike: 7_500_000_000n, initial_price_bps: 1000 }, 1, NOW - 100); // already past: excluded
+  await call("A1", "Ace", 0, { direction: "above", strike: 7_800_000_000n, initial_price_bps: 3000 }, 1, NOW - 100); // +0.70
+
+  const all = await skillLeaderboard(db, { teamWallets: [TEAM] });
+  const sage = all.find((r) => r.creator === "Sage")!;
+  assert.deepEqual([sage.calls, sage.hits, sage.score_bps, sage.excluded], [2, 1, -1000, 1]);
+  assert.equal(all[0].creator, "Ace", "best edge first");
+  assert.equal(all[0].score_bps, 7000);
+  assert.ok(!all.some((r) => r.creator === TEAM));
+
+  const week = await skillLeaderboard(db, { sinceTs: NOW - 7 * 86_400, teamWallets: [TEAM] });
+  assert.equal(week.find((r) => r.creator === "Sage")!.score_bps, -9000, "only calls that ended this week");
+
+  const ace = await creatorSkill(db, "Ace", [TEAM]);
+  assert.deepEqual([ace.rank, ace.score_bps], [1, 7000]);
+  const per = await callSkill(db, "Sage");
+  assert.deepEqual(per.K3, { skill_bps: 0, excluded: true });
+  assert.equal(per.K1.skill_bps, 8000);
 });
