@@ -14,6 +14,62 @@ app at `/app`), deployed from `main`. Program `9yVcFaDE…` on devnet; worker an
 Postgres on Railway. See [`docs/DEPLOY.md`](docs/DEPLOY.md) and
 [`docs/PLAN.md`](docs/PLAN.md).
 
+## Why
+
+Traders post calls all day ("long SOL, target $80, stop $70") and nothing
+holds them to it: no price on the conviction, no record of hits and misses,
+and the stop is a hope. Thesis turns a call into two markets:
+
+- **Conviction:** "SOL touches the take profit before the deadline." The
+  crowd backs it (YES) or challenges it (NO), so every call has a live price,
+  and the creator earns a share of the fees.
+- **Protection:** "SOL touches the liquidation price before the deadline." The
+  trader (or anyone) buys cover that pays $1 per share if it does.
+
+Both resolve from a Pyth-signed price that anyone can submit, so the record
+of who called it is onchain and nobody can fudge it.
+
+## How it works
+
+1. **Post:** the program opens both markets on pm-AMM with an opening price it
+   computes onchain (reflection principle: `P = 2Φ(−|ln(K/S)| / σ√τ)`), then
+   links them into a thesis.
+2. **Trade:** backs, challenges and cover go through `trade`, which attributes
+   fees to the thesis and caps cover per wallet.
+3. **Prove:** the first fully verified Pyth print at or past a strike inside
+   the window resolves the market's touch. Our watcher submits it; so can
+   anyone.
+4. **Settle:** after the deadline plus a grace period, the market settles (YES
+   if touched, else NO) and the creator's hit/miss record updates. The keeper
+   then brings the treasury's seed and any YES it bought back home.
+
+### Why pm-AMM
+
+A new call has no order book. pm-AMM gives every market liquidity from its
+first trade (the seed) and prices outcome tokens with a pool built for
+prediction markets, whose liquidity decays toward the deadline, which suits
+touch markets that end on a clock.
+
+### Architecture
+
+```
+ browser ──► Next.js on Netlify ── API routes ──► Postgres (Railway) ◄── indexer ┐
+    │            (reads, abuse guards)                                           │
+    └── signs ──► Solana: Thesis program ──CPI──► pm-AMM          worker (Railway)┤
+                       ▲  prove_touch / settle / treasury_redeem ◄── watcher, keeper
+                       └── Pyth SOL/USD (PriceUpdateV2)
+```
+
+### Traction
+
+Live numbers: https://thesis-calls.netlify.app/stats (team wallets and the
+treasury excluded). On devnet so far: house calls from the team, one touch
+proven live by the watcher (see [`docs/DEMO.md`](docs/DEMO.md)), and test
+trades. Real traders posting calls is the next milestone.
+
+Demo script: [`docs/DEMO.md`](docs/DEMO.md). Mainnet runbook:
+[`docs/MAINNET.md`](docs/MAINNET.md).
+
 ## Layout
 
 | Path | What |
