@@ -1,7 +1,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { createLinkCode, insertTrade, isLocalUrl, migrate, Pool, upsertMarket, upsertThesis, type MarketRow } from "@thesis/db";
-import { AlertNotifier, settleText, TelegramBot, touchText, tradeLine, tradeText, type TelegramApi } from "../src/telegram";
+import { AlertNotifier, TelegramError, settleText, TelegramBot, touchText, tradeLine, tradeText, type TelegramApi } from "../src/telegram";
 
 const SITE = "https://thesis.test";
 const NOW = Math.floor(Date.now() / 1000);
@@ -38,11 +38,17 @@ const DB_NAME = "thesis_test_alerts";
 let db: Pool;
 const sent: { method: string; params: Record<string, unknown> }[] = [];
 let failNext = false;
+let nextError: Error | null = null;
 const api: TelegramApi = {
   async call<R>(method: string, params: Record<string, unknown>) {
     if (failNext) {
       failNext = false;
       throw new Error("telegram down");
+    }
+    if (nextError) {
+      const e = nextError;
+      nextError = null;
+      throw e;
     }
     sent.push({ method, params });
     return [] as R;
@@ -105,4 +111,38 @@ test("notifier: sends each alert once, retries a failed send", async () => {
   assert.equal(await notifier.tick(), 0, "send failed");
   assert.equal(await notifier.tick(), 1, "retried");
   assert.match(String(sent[0].params.text), /Challenged/);
+});
+
+test("notifier: backs off on 429, unlinks a chat that blocked the bot", async () => {
+  const notifier = new AlertNotifier(api, db, { siteUrl: SITE, intervalMs: 60_000 });
+  await insertTrade(db, {
+    signature: "sig2", ix_index: 0, touch_market: "C1", thesis: "T1", wallet: "Carol", side: "buy_yes", usdc_amount: 5_000_000n,
+    token_amount: 9_000_000n, fee_to_treasury: 50_000n, price_after_bps: 4100, ts: NOW + 20, via_thesis: true, is_creator: false, is_treasury: false,
+  });
+  nextError = new TelegramError("telegram sendMessage: Too Many Requests", 429, 1);
+  sent.length = 0;
+  assert.equal(await notifier.tick(), 0, "rate limited");
+  assert.equal(await notifier.tick(), 0, "paused: no call at all");
+  assert.equal(sent.length, 0);
+  await new Promise((r) => setTimeout(r, 1_100));
+  assert.equal(await notifier.tick(), 1, "sent after the flood wait");
+
+  await insertTrade(db, {
+    signature: "sig3", ix_index: 0, touch_market: "C1", thesis: "T1", wallet: "Dan", side: "buy_no", usdc_amount: 5_000_000n,
+    token_amount: 9_000_000n, fee_to_treasury: 50_000n, price_after_bps: 3900, ts: NOW + 30, via_thesis: true, is_creator: false, is_treasury: false,
+  });
+  nextError = new TelegramError("telegram sendMessage: Forbidden: bot was blocked by the user", 403);
+  assert.equal(await notifier.tick(), 0);
+  const left = await db.query("select 1 from telegram_links where chat_id = 4242");
+  assert.equal(left.rows.length, 0, "blocked chat unlinked");
+  assert.equal(await notifier.tick(), 0, "nothing more for an unlinked chat");
+});
+
+test("bot ignores group chats", async () => {
+  const bot = new TelegramBot(api, db, { siteUrl: SITE });
+  const code = await createLinkCode(db, "Erin");
+  sent.length = 0;
+  await bot.handle({ update_id: 3, message: { chat: { id: -100123, type: "supergroup" }, text: `/start ${code}` } });
+  assert.equal(sent.length, 0, "no reply in a group");
+  assert.equal((await db.query("select 1 from telegram_links where wallet = 'Erin'")).rows.length, 0);
 });

@@ -1,7 +1,7 @@
 import { PublicKey, Transaction } from "@solana/web3.js";
 import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { settleable } from "@thesis/chain";
-import { creatorStatsPda, log, lpPositionPda, openMarkets, PM_AMM, pmAccounts, settledSponsoredMarkets, toView, type Ctx } from "./client";
+import { creatorStatsPda, log, lpPositionPda, priorityFeeIxs, openMarkets, PM_AMM, pmAccounts, settledSponsoredMarkets, toView, type Ctx } from "./client";
 
 /** pm-AMM NoResidualsToClaim (6011) or Thesis NothingToClaim. */
 const NOTHING_PENDING = /NoResidualsToClaim|0x177b|NothingToClaim/;
@@ -73,6 +73,7 @@ export class Keeper {
             thesis,
             creatorStats,
           })
+          .preInstructions(priorityFeeIxs())
           .rpc();
         this.settled.push({ market: id, signature: sig });
         log("keeper", `settled ${id} (${m.account.touched ? "YES" : "NO"}): ${sig}`);
@@ -154,6 +155,7 @@ export class Keeper {
       })
       .instruction();
     const tx = new Transaction().add(
+      ...priorityFeeIxs(),
       createAssociatedTokenAccountIdempotentInstruction(keeper.publicKey, treasuryYes, authority, yesMint),
       createAssociatedTokenAccountIdempotentInstruction(keeper.publicKey, treasuryNo, authority, noMint),
       ix,

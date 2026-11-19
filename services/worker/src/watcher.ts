@@ -2,7 +2,7 @@ import { ComputeBudgetProgram, PublicKey, Transaction, TransactionInstruction } 
 import { BN } from "@anchor-lang/core";
 import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { decodePriceUpdateV2, provable } from "@thesis/chain";
-import { daoUsdc, log, openMarkets, pmAccounts, toView, type Ctx, type TouchMarketAccount } from "./client";
+import { daoUsdc, log, priorityFeeIxs, openMarkets, pmAccounts, toView, type Ctx, type TouchMarketAccount } from "./client";
 import type { PriceSource } from "./sources";
 import type { PriceTick } from "@thesis/chain";
 
@@ -148,7 +148,8 @@ export class Watcher {
       .proveTouch()
       .accountsPartial({ prover: keeper.publicKey, config, touchMarket: key, priceUpdate: proof })
       .instruction();
-    const ixs: TransactionInstruction[] = [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }), prove];
+    const ixs: TransactionInstruction[] = [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }), ...priorityFeeIxs(), prove];
+    const proveOnly = ixs.length; // budget + fee + prove, before the buy
     const sponsored = m.seededBy.equals(authority);
     if (sponsored && this.opts.treasuryBuyMicroUsdc > 0 && this.usdcMint) {
       ixs.push(...(await this.treasuryBuy(key, m, this.usdcMint)));
@@ -156,12 +157,12 @@ export class Watcher {
     try {
       return await program.provider.sendAndConfirm!(new Transaction().add(...ixs));
     } catch (e) {
-      if (ixs.length <= 2) throw e;
+      if (ixs.length <= proveOnly) throw e;
       // The proof matters more than the buy: retry it alone.
       const logs = (e as { logs?: string[]; transactionLogs?: string[] }).logs ?? (e as { transactionLogs?: string[] }).transactionLogs;
       log("watcher", `bundle failed (${(e as Error).message.split("\n")[0]}); proving without the treasury buy`);
       if (logs?.length) log("watcher", `bundle logs:\n  ${logs.filter((l) => /Error|failed|consumed|log:/.test(l)).join("\n  ")}`);
-      return await program.provider.sendAndConfirm!(new Transaction().add(ixs[0], ixs[1]));
+      return await program.provider.sendAndConfirm!(new Transaction().add(...ixs.slice(0, proveOnly)));
     }
   }
 
