@@ -97,6 +97,11 @@ after the upgrade (it resizes Config and records the creator fees already
 owed); every instruction fails until it runs. Devnet was migrated on
 2026-11-18.
 
+A fresh deploy must be initialised right away, from the deploying key:
+`initialize_config` makes its signer the admin, so whoever calls it first owns
+the config. Check `admin` in the Config account afterwards, and redeploy to a
+new program id if it isn't yours. Set `max_spot_age_secs` to 60 on mainnet.
+
 Changing the admin is two steps: `update_config { admin }` proposes, and the
 new key signs `accept_admin`.
 

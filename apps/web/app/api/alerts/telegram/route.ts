@@ -49,7 +49,9 @@ export async function POST(req: Request) {
   const err = verify(wallet, action, b?.issued_at, b?.signature);
   if (err) return bad(err, 401);
   // Each signed request works once: a captured one can't be replayed to relink.
-  if (!(await useSignatureOnce(db(), String(b?.signature), `telegram:${action}`))) return bad("this signature was already used; sign again", 409);
+  // Keyed on the decoded bytes, so a re-encoded copy of the same signature is still a replay.
+  const canonical = Buffer.from(String(b?.signature), "base64").toString("base64");
+  if (!(await useSignatureOnce(db(), canonical, `telegram:${action}`))) return bad("this signature was already used; sign again", 409);
   if (action === "disconnect") return json({ ok: true, unlinked: await unlinkWallet(db(), wallet) });
   const code = await createLinkCode(db(), wallet);
   return json({ ok: true, url: `https://t.me/${BOT}?start=${code}` });

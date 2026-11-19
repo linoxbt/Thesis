@@ -21,7 +21,8 @@ export const dynamic = "force-dynamic";
  * (FAUCET_SECRET_KEY, a devnet-only hot key): wallets under 0.05 SOL are
  * topped up to 0.15 SOL, at most once per wallet per 12h, 3 per IP per 12h
  * and FAUCET_DAILY_SOL (default 3) per day overall. The limits are checked
- * and the claim recorded atomically; a failed transfer releases the claim.
+ * and the claim recorded atomically; a transfer that provably moved nothing
+ * releases the claim.
  * Local: set DEV_FAUCET_KEYPAIR to a funded keypair file; the route then
  * sends 0.15 SOL and 100 mUSDC itself.
  */
@@ -73,22 +74,30 @@ async function solDrip(wallet: PublicKey, ipHash: string | null): Promise<{ sol:
     dailyLamports: BigInt(Math.round(Number(process.env.FAUCET_DAILY_SOL ?? "3") * LAMPORTS_PER_SOL)),
   });
   if (!claim.ok) return { sol: 0, solSkipped: claim.reason };
+  const payer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(secret)));
+  const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: wallet, lamports: Number(want) }));
+  tx.feePayer = payer.publicKey;
+  let solSignature: string;
+  let blockhash: string;
+  let lastValidBlockHeight: number;
   try {
-    const payer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(secret)));
-    const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: wallet, lamports: Number(want) }));
-    tx.feePayer = payer.publicKey;
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+    ({ blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash());
     tx.recentBlockhash = blockhash;
     tx.sign(payer);
-    const solSignature = await connection.sendRawTransaction(tx.serialize());
-    const res = await connection.confirmTransaction({ signature: solSignature, blockhash, lastValidBlockHeight }, "confirmed");
-    if (res.value.err) throw new Error(`transfer failed: ${JSON.stringify(res.value.err)}`);
-    return { sol: Number(want) / LAMPORTS_PER_SOL, solSignature };
+    solSignature = await connection.sendRawTransaction(tx.serialize());
   } catch (e) {
-    // Nothing (provably) sent: give the claim back so the wallet can retry.
+    // Rejected before it could land: give the claim back so the wallet can retry.
     await releaseFaucetClaim(db(), claim.id).catch(() => {});
     throw e;
   }
+  // Sent: from here the claim stands even if confirming fails, since the SOL
+  // may still arrive and must count toward the limits.
+  const res = await connection.confirmTransaction({ signature: solSignature, blockhash, lastValidBlockHeight }, "confirmed");
+  if (res.value.err) {
+    await releaseFaucetClaim(db(), claim.id).catch(() => {}); // landed but failed: nothing moved
+    throw new Error(`transfer failed: ${JSON.stringify(res.value.err)}`);
+  }
+  return { sol: Number(want) / LAMPORTS_PER_SOL, solSignature };
 }
 
 async function localFaucet(wallet: PublicKey, keyPath: string) {
