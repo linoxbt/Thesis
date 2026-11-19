@@ -2,12 +2,14 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { Pool } from "pg";
 import {
-  claimAlert, consumeLinkCode, createLinkCode, faucetAllowance, feed, insertCrossing, insertTrade, migrate, profile, saveSignedProfile, setMarketPrice,
+  claimAlert, consumeLinkCode, createLinkCode, faucetAllowance, feed, insertCrossing, insertTrade, isLocalUrl, migrate, profile, saveSignedProfile, setMarketPrice,
   recordFaucetClaim, telegramLink, unlinkChat, setMarketTx, setThesisText, sha256Hex,
   stats, thesisDetail, upsertMarket, upsertProfile, upsertThesis, type MarketRow, type TradeRow,
 } from "../src";
 
 const URL = process.env.TEST_DATABASE_URL ?? "postgres://postgres@localhost:5433/thesis_test";
+// These tests drop schemas and databases: never point them at a shared server.
+if (!isLocalUrl(URL) && process.env.ALLOW_REMOTE_TEST_DB !== "1") throw new Error(`refusing to run destructive tests against ${URL}`);
 const db = new Pool({ connectionString: URL });
 const NOW = 1_800_000_000;
 const TEAM = "TeamWa11et";
@@ -27,7 +29,7 @@ const trade = (over: Partial<TradeRow>): TradeRow => ({
 
 before(async () => {
   await db.query("drop schema public cascade; create schema public;");
-  assert.deepEqual(await migrate(db), ["001_init.sql", "002_telegram.sql", "003_faucet.sql"]);
+  assert.deepEqual(await migrate(db), ["001_init.sql", "002_telegram.sql", "003_faucet.sql", "004_indexer.sql"]);
   assert.deepEqual(await migrate(db), [], "migrations are idempotent");
 
   // Alice: thesis T1 (conviction C1 above, protection P1 below), and T2 (missed, old).

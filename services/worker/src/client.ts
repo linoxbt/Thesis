@@ -59,7 +59,6 @@ export function toView(m: TouchMarketAccount): MarketView {
   };
 }
 
-/** Every TouchMarket not yet settled. */
 /** Byte offsets in a TouchMarket account (8-byte discriminator included). */
 export const TOUCH_SETTLED_OFFSET = 160;
 export const TOUCH_SEEDED_BY_OFFSET = 226;

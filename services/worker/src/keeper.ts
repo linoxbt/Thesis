@@ -23,6 +23,7 @@ export class Keeper {
   constructor(
     private readonly ctx: Ctx,
     private readonly intervalMs: number,
+    private readonly alert?: (key: string, text: string) => void,
   ) {}
 
   async start(): Promise<void> {
@@ -79,6 +80,7 @@ export class Keeper {
         const msg = (e as Error).message.split("\n")[0];
         this.settled.push({ market: id, error: msg });
         log("keeper", `settle ${id} failed: ${msg}`);
+        this.alert?.(`settle:${id}`, `⚠️ Settle failed for <code>${id}</code>: ${msg}`);
       }
     }
   }
@@ -121,6 +123,7 @@ export class Keeper {
         }
         this.redemptions.push({ market: id, error: msg });
         log("keeper", `redeem ${id} failed: ${msg}`);
+        this.alert?.(`redeem:${id}`, `⚠️ Treasury redeem failed for <code>${id}</code>: ${msg}`);
       }
     }
   }

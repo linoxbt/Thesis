@@ -211,3 +211,35 @@ export async function saveSignedProfile(
   );
   return r.rows.length > 0;
 }
+
+// ------------------------------------------------------------ indexer failures
+
+export interface IndexFailure {
+  signature: string;
+  cursor_key: string;
+  attempts: number;
+}
+
+/** Records (or re-records) a transaction the indexer failed to process. */
+export async function recordIndexFailure(db: Db, signature: string, cursorKey: string, error: string): Promise<void> {
+  await db.query(
+    `insert into indexer_failures (signature, cursor_key, error) values ($1,$2,$3)
+     on conflict (signature, cursor_key) do update
+       set error = excluded.error, attempts = indexer_failures.attempts + 1, last_tried = now(), resolved = false`,
+    [signature, cursorKey, error.slice(0, 2000)],
+  );
+}
+
+/** Unresolved failures still worth retrying. */
+export async function openIndexFailures(db: Db, maxAttempts = 5, limit = 50): Promise<IndexFailure[]> {
+  return (
+    await db.query<IndexFailure>(
+      "select signature, cursor_key, attempts from indexer_failures where not resolved and attempts < $1 order by first_seen limit $2",
+      [maxAttempts, limit],
+    )
+  ).rows;
+}
+
+export async function resolveIndexFailure(db: Db, signature: string, cursorKey: string): Promise<void> {
+  await db.query("update indexer_failures set resolved = true, last_tried = now() where signature = $1 and cursor_key = $2", [signature, cursorKey]);
+}
