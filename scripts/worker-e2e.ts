@@ -199,6 +199,25 @@ async function main() {
   }
   await watcher.stop();
   await keeper.stop();
+
+  // The keeper redeems in the same pass that settles (another pass catches it
+  // otherwise): the seed's residuals and the treasury's YES come home.
+  if (tm.settled && !keeper.redemptions.some((r) => r.signature)) await keeper.tick();
+  const redeemSig = keeper.redemptions.find((r) => r.signature)?.signature;
+  const treasuryUsdc = getAssociatedTokenAddressSync(MUSDC, authority, true).toBase58();
+  let redeemed = 0n;
+  if (redeemSig) {
+    const rtx = await connection.getTransaction(redeemSig, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
+    const keys = rtx!.transaction.message.getAccountKeys().staticAccountKeys.map((k) => k.toBase58());
+    const i = keys.indexOf(treasuryUsdc);
+    const amt = (bs: typeof rtx extends null ? never : NonNullable<NonNullable<typeof rtx>["meta"]>["preTokenBalances"]) =>
+      BigInt(bs?.find((b) => b.accountIndex === i)?.uiTokenAmount.amount ?? "0");
+    redeemed = amt(rtx!.meta!.postTokenBalances) - amt(rtx!.meta!.preTokenBalances);
+  }
+  const leftYes = await getAccount(connection, getAssociatedTokenAddressSync(yesMint, authority, true)).catch(() => null);
+  check(!!redeemSig, `keeper redeemed the treasury's position (${redeemSig?.slice(0, 12) ?? "none"}…)`);
+  check(redeemed > 0n && (leftYes?.amount ?? 0n) === 0n, `redemption paid the treasury ${(Number(redeemed) / 1e6).toFixed(2)} USDC; YES left ${leftYes?.amount ?? 0n}`);
+
   if (indexer) {
     await indexer.tick(); // catch the settle
     await indexer.stop();
@@ -206,10 +225,9 @@ async function main() {
 
   const th = await program.account.thesis.fetch(thesis);
   const st = await program.account.creatorStats.fetch(stats);
-  const treasuryYes = await getAccount(connection, getAssociatedTokenAddressSync(yesMint, authority, true)).catch(() => null);
   console.log("");
   check(tm.touched, `watcher proved the touch (price ${tm.touchPrice} at ${tm.touchPublishTime})`);
-  check(treasuryYes !== null && treasuryYes.amount > 0n, `treasury bought YES after the touch (${treasuryYes?.amount ?? 0n} units)`);
+  check(watcher.crossings.some((c) => c.signature), "treasury bought YES in the proof transaction (watcher bundle)");
   check(tm.settled && tm.winningSide === 1, "keeper settled YES");
   check(th.outcome === 1, "thesis outcome = hit");
   check(st.hit === hitsBefore + 1, "creator stats hit +1");

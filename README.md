@@ -85,6 +85,10 @@ BASE_URL=http://localhost:3100 npx tsx scripts/ui-e2e.ts            # 29 browser
   Only prints that land there can prove a touch: a wick between two prints
   can't be proven. Posting exact prints from Pyth's Hermes service would close
   the gap; it needs a Hermes API key.
+- **Stale opening spot on devnet.** Market creation accepts a spot print up
+  to `max_spot_age_secs` old: one hour on devnet (the feed updates every ~30
+  minutes), so a market can open against a price that has since moved past
+  its strike. Mainnet uses 60 seconds (`scripts/mainnet-preflight.ts`).
 - **Instant wallets** are devnet keys kept in the browser's local storage.
 - **Keys:** the upgrade authority and config admin are one hot key. Before
   mainnet, move both to a multisig (`update_config` then `accept_admin`, and
