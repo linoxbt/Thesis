@@ -52,8 +52,19 @@ export function BurnerProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!IS_DEVNET) return;
-    const raw = localStorage.getItem(KEY);
-    if (raw) setBurner(Keypair.fromSecretKey(Uint8Array.from(JSON.parse(raw))));
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem(KEY);
+      if (raw) setBurner(Keypair.fromSecretKey(Uint8Array.from(JSON.parse(raw))));
+    } catch {
+      // Unreadable (edited or truncated): set it aside rather than delete a key that may hold funds.
+      if (raw) {
+        try {
+          localStorage.setItem(`${KEY}-unreadable-${Date.now()}`, raw);
+          localStorage.removeItem(KEY);
+        } catch {}
+      }
+    }
   }, []);
 
   const fund = useCallback(async (kp: Keypair) => {

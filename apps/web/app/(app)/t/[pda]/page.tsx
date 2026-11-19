@@ -8,10 +8,11 @@ import { LineChart } from "@/components/LineChart";
 import { MarketPanel, type MarketRow } from "@/components/MarketPanel";
 import { PositionLevels, SidePill } from "@/components/Position";
 import { ShareButton } from "@/components/ShareButton";
-import { positionOf } from "@/lib/position";
+import { fmtLev, positionOf } from "@/lib/position";
 import { Avatar, StateBadge } from "@/components/ThesisCard";
 import { claimCreatorFeesInstructions, toTx } from "@/lib/client/actions";
 import { usePoll } from "@/lib/client/api";
+import { LoadState, StaleNote } from "@/components/LoadState";
 import { explorerTx } from "@/lib/client/config";
 import { ago, pythToNumber, shortAddr, usd, usdc, when } from "@/lib/client/format";
 import { useTx } from "@/lib/client/tx";
@@ -47,15 +48,14 @@ const SIDE: Record<string, string> = { buy_yes: "bought YES", buy_no: "bought NO
 /** Thesis page (spec 8, screen 2). */
 export default function ThesisPage({ params }: { params: Promise<{ pda: string }> }) {
   const { pda } = use(params);
-  const { data, error, reload } = usePoll<Detail>(`/api/theses/${pda}`, 10_000);
+  const { data, error, status, reload } = usePoll<Detail>(`/api/theses/${pda}`, 10_000);
   const { data: spot } = useSpot();
   const { config, usdcMint } = useConfig();
   const wallet = useActiveWallet();
   const { connection } = useConnection();
   const { run } = useTx();
 
-  if (error) return <p className="text-sm text-bad">{error}</p>;
-  if (!data) return <p className="text-sm text-muted">Loading…</p>;
+  if (!data) return <LoadState error={error} status={status} what="trade" />;
   const { thesis: t, conviction: c, protection: p, creator } = data;
   const endTs = Number(t.end_ts);
   const name = creator.profile?.display_name ?? shortAddr(t.creator);
@@ -96,6 +96,7 @@ export default function ThesisPage({ params }: { params: Promise<{ pda: string }
 
   return (
     <div className="space-y-5">
+      {error && <StaleNote error={error} />}
       <section className="glow relative overflow-hidden rounded-3xl border border-line px-6 py-7 sm:px-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Link href={`/u/${t.creator}`} className="flex items-center gap-2 text-sm text-muted hover:text-ink">
@@ -135,7 +136,7 @@ export default function ThesisPage({ params }: { params: Promise<{ pda: string }
           {Number(t.self_volume_usdc) > 0 && (
             <span className="rounded-full border border-line px-3 py-1.5 text-faint">creator's own trades {usdc(t.self_volume_usdc)}</span>
           )}
-          <ShareButton pda={t.pda} text={`${pos.side === "long" ? "Long" : "Short"} SOL${pos.lev !== null ? ` ${Math.round(pos.lev)}x` : ""}: take profit ${usd(pos.tp)} by ${when(endTs)}${pos.liq !== null ? `, liquidation ${usd(pos.liq)} covered` : ""}.${t.text ? ` ${t.text}` : ""}\nBack it or challenge it:`} />
+          <ShareButton pda={t.pda} text={`${pos.side === "long" ? "Long" : "Short"} SOL${pos.lev !== null ? ` ${fmtLev(pos.lev)}` : ""}: take profit ${usd(pos.tp)} by ${when(endTs)}${pos.liq !== null ? `, liquidation ${usd(pos.liq)} covered` : ""}.${t.text ? ` ${t.text}` : ""}\nBack it or challenge it:`} />
           {isCreator && claimable > 0n && (
             <button onClick={() => void claimFees()} className="btn btn-primary px-3 py-1.5 text-xs">
               Claim {usdc(claimable)} creator fees

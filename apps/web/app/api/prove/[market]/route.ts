@@ -1,7 +1,7 @@
 import { Transaction } from "@solana/web3.js";
 import { decodePriceUpdateV2, provable, SOL_USD_PRICE_ACCOUNT } from "@thesis/chain";
 import { configPda, connection, fetchConfig, fetchTouchMarket, program } from "@/lib/chain";
-import { bad, env, json, pubkey } from "@/lib/server";
+import { bad, env, json, limited, pubkey } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +15,8 @@ export const dynamic = "force-dynamic";
  * once a Hermes key is available.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ market: string }> }) {
+  const slow = await limited(req, "prove", 30, 60);
+  if (slow) return slow;
   const { market } = await params;
   const marketKey = pubkey(market);
   if (!marketKey) return bad("not a valid address");
@@ -30,7 +32,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ market:
   const info = await connection.getAccountInfo(priceAccount);
   if (!info) return bad("price account not found", 503);
   const tick = decodePriceUpdateV2(info.data);
-  const verdict = provable(m.view, tick, config.max_conf_bps);
+  const verdict = provable(m.view, tick, config.max_conf_bps, undefined, config.grace_secs);
   if (!verdict.ok) {
     return json(
       { provable: false, reason: verdict.reason, price: tick.price.toString(), publishTime: tick.publishTime },

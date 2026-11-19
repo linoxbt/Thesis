@@ -5,7 +5,8 @@ import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Check, Copy, ExternalLink, LogOut, RefreshCw, Wallet, Zap } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Positions } from "@/components/Positions";
 import { ProfileStats, type ProfileData } from "@/components/ProfileStats";
 import { Avatar } from "@/components/ThesisCard";
 import { usePoll } from "@/lib/client/api";
@@ -108,6 +109,13 @@ function SignedIn({ wallet }: { wallet: ActiveWallet }) {
         <WalletPanel wallet={wallet} />
       </div>
 
+      <section className="panel p-6">
+        <span className="label">Positions</span>
+        <div className="mt-3">
+          {data ? <Positions owner={addr} markets={data.markets ?? []} /> : <p className="text-sm text-muted">Loading…</p>}
+        </div>
+      </section>
+
       <Settings wallet={wallet} />
 
       <div>
@@ -156,13 +164,17 @@ function EditProfile({
     setXHandle(current?.x_handle ?? "");
   }, [current, touched]);
 
+  // Each signed edit must be newer than the last: two saves in one second
+  // would otherwise share a timestamp and the second be refused as a replay.
+  const lastIssued = useRef(0);
   const save = useCallback(async () => {
     const f = cleanProfile(displayName, xHandle);
     if ("error" in f) return setState({ kind: "error", msg: f.error });
     if (!wallet.signMessage) return setState({ kind: "error", msg: "This wallet can't sign messages." });
     setState({ kind: "saving" });
     try {
-      const issuedAt = Math.floor(Date.now() / 1000);
+      const issuedAt = Math.max(Math.floor(Date.now() / 1000), lastIssued.current + 1);
+      lastIssued.current = issuedAt;
       const addr = wallet.publicKey.toBase58();
       const sig = await wallet.signMessage(new TextEncoder().encode(profileMessage(addr, f, issuedAt)));
       const r = await fetch(`/api/profiles/${addr}`, {
@@ -171,6 +183,9 @@ function EditProfile({
         body: JSON.stringify({ display_name: f.displayName, x_handle: f.xHandle, issued_at: issuedAt, signature: Buffer.from(sig).toString("base64") }),
       });
       const body = await r.json().catch(() => ({}));
+      if (r.status === 401 && /expired/.test(String(body.error))) {
+        throw new Error("The signature's time is off from the server's. Check that your device clock is set automatically, then save again.");
+      }
       if (!r.ok) throw new Error(body.error ?? `HTTP ${r.status}`);
       setState({ kind: "saved" });
       setTouched(false);

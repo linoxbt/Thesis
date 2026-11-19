@@ -2,8 +2,8 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { Pool } from "pg";
 import {
-  claimAlert, consumeLinkCode, createLinkCode, faucetAllowance, feed, insertCrossing, insertTrade, isLocalUrl, migrate, profile, saveSignedProfile, setMarketPrice,
-  recordFaucetClaim, telegramLink, unlinkChat, setMarketTx, setThesisText, sha256Hex,
+  claimAlert, claimFaucet, marketDetail, nearbyCoverMarkets, walletMarkets, consumeLinkCode, createLinkCode, feed, rateLimit, releaseFaucetClaim, useSignatureOnce, insertCrossing, insertTrade, isLocalUrl, migrate, profile, saveSignedProfile, setMarketPrice,
+  telegramLink, unlinkChat, setMarketTx, setThesisText, sha256Hex,
   stats, thesisDetail, upsertMarket, upsertProfile, upsertThesis, type MarketRow, type TradeRow,
 } from "../src";
 
@@ -29,7 +29,7 @@ const trade = (over: Partial<TradeRow>): TradeRow => ({
 
 before(async () => {
   await db.query("drop schema public cascade; create schema public;");
-  assert.deepEqual(await migrate(db), ["001_init.sql", "002_telegram.sql", "003_faucet.sql", "004_indexer.sql"]);
+  assert.deepEqual(await migrate(db), ["001_init.sql", "002_telegram.sql", "003_faucet.sql", "004_indexer.sql", "005_web_guards.sql"]);
   assert.deepEqual(await migrate(db), [], "migrations are idempotent");
 
   // Alice: thesis T1 (conviction C1 above, protection P1 below), and T2 (missed, old).
@@ -154,13 +154,45 @@ test("telegram: one-time link codes, links, unlink, alert de-duplication", async
   assert.equal(await telegramLink(db, "Alice"), null);
 });
 
-test("faucet: one SOL drip per wallet per window, and a daily cap", async () => {
-  const opts = { perWalletHours: 12, dailyLamports: 300_000_000n };
-  assert.deepEqual(await faucetAllowance(db, "W1", 150_000_000n, opts), { ok: true });
-  await recordFaucetClaim(db, "W1", 150_000_000n);
-  assert.equal((await faucetAllowance(db, "W1", 150_000_000n, opts)).ok, false, "same wallet waits");
-  assert.equal((await faucetAllowance(db, "W2", 150_000_000n, opts)).ok, true);
-  await recordFaucetClaim(db, "W2", 150_000_000n);
-  const capped = await faucetAllowance(db, "W3", 150_000_000n, opts);
-  assert.equal(capped.ok, false, "daily cap reached");
+test("faucet: atomic per-wallet, per-IP and daily limits; a failed drip is released", async () => {
+  const limits = { perWalletHours: 12, perIpHours: 12, perIpMax: 2, dailyLamports: 450_000_000n };
+  const claim = (w: string, ip: string | null) => claimFaucet(db, w, ip, 150_000_000n, limits);
+  // Two simultaneous requests for one wallet: exactly one wins.
+  const [a, b] = await Promise.all([claim("W1", "ip1"), claim("W1", "ip1")]);
+  assert.equal([a, b].filter((r) => r.ok).length, 1, "no double drip under a race");
+  assert.equal((await claim("W2", "ip1")).ok, true);
+  const third = await claim("W3", "ip1");
+  assert.equal(third.ok, false, "per-IP cap");
+  const other = await claim("W3", "ip2");
+  assert.equal(other.ok, true);
+  assert.equal((await claim("W4", "ip3")).ok, false, "daily cap reached");
+  // The W3 transfer failed: its claim is released and W3 may try again.
+  if (other.ok) await releaseFaucetClaim(db, other.id);
+  assert.equal((await claim("W3", "ip3")).ok, true);
+});
+
+test("signatures are single-use; rate limits count per window", async () => {
+  assert.equal(await useSignatureOnce(db, "sigA", "telegram:connect"), true);
+  assert.equal(await useSignatureOnce(db, "sigA", "telegram:connect"), false, "replay refused");
+  const t = 1_800_000_000_000;
+  for (let i = 0; i < 3; i++) assert.equal(await rateLimit(db, "prove:ip1", 3, 60, t), true);
+  assert.equal(await rateLimit(db, "prove:ip1", 3, 60, t), false, "4th in the window");
+  assert.equal(await rateLimit(db, "prove:ip1", 3, 60, t + 60_000), true, "next window");
+});
+
+test("market detail, nearby cover, and the markets a wallet traded", async () => {
+  const d = await marketDetail(db, "P1");
+  assert.ok(d);
+  const m = d!.market as Record<string, unknown>;
+  assert.equal(m.thesis, "T1");
+  assert.equal(m.thesis_creator, "Alice");
+  assert.equal(m.is_conviction, false);
+  const strike = BigInt(String(m.strike));
+  const near = await nearbyCoverMarkets(db, { direction: m.direction as "below", strike: (strike * 10_020n) / 10_000n, bps: 50, minEndTs: NOW, now: NOW });
+  assert.deepEqual(near.map((r) => r.touch_market), ["P1"], "within 0.5%, open, not a take-profit market");
+  const far = await nearbyCoverMarkets(db, { direction: m.direction as "below", strike: (strike * 11_000n) / 10_000n, bps: 50, minEndTs: NOW, now: NOW });
+  assert.equal(far.length, 0);
+  const bob = (await walletMarkets(db, "Bob")).map((r) => r.touch_market);
+  assert.ok(bob.includes("P1"));
+  assert.equal(await marketDetail(db, "nope"), null);
 });

@@ -12,7 +12,7 @@ export const THEME_KEY = "thesis-theme";
  * preference, else light. "system" follows the device. Avoids a flash of the
  * wrong theme.
  */
-export const THEME_SCRIPT = `(function(){try{var p=localStorage.getItem("${THEME_KEY}");var t=p==="dark"?"dark":p==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):"light";document.documentElement.dataset.theme=t;}catch(e){document.documentElement.dataset.theme="light";}})();`;
+export const THEME_SCRIPT = `(function(){try{var p=localStorage.getItem("${THEME_KEY}");var t=p==="dark"?"dark":p==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):"light";document.documentElement.dataset.theme=t;if(localStorage.getItem("thesis-sidebar-collapsed")==="1")document.documentElement.classList.add("sb-collapsed");}catch(e){document.documentElement.dataset.theme="light";}})();`;
 
 function resolve(p: ThemePref): "light" | "dark" {
   if (p === "system") return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";

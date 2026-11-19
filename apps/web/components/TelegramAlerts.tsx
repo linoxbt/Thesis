@@ -1,7 +1,7 @@
 "use client";
 
 import { BellRing, Check, ExternalLink, Send } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { usePoll } from "@/lib/client/api";
 import type { ActiveWallet } from "@/lib/client/wallet";
 import { alertsMessage, type AlertsAction } from "@/lib/alertsMessage";
@@ -10,18 +10,21 @@ interface Status {
   configured: boolean;
   bot?: string;
   linked: boolean;
-  username?: string | null;
 }
 
 /**
  * Telegram alerts on the Profile page. Connecting signs a message with the
  * wallet (free), gets a one-time t.me link, and the bot links the chat when
- * you press Start. Status refreshes until it shows as connected.
+ * you press Start. Status refreshes quickly until it shows as connected.
  */
 export function TelegramAlerts({ wallet }: { wallet: ActiveWallet }) {
   const addr = wallet.publicKey.toBase58();
-  const { data, reload } = usePoll<Status>(`/api/alerts/telegram?wallet=${addr}`, 5_000);
   const [link, setLink] = useState<string | null>(null);
+  // Fast only while waiting for the user to press Start in Telegram.
+  const { data, reload } = usePoll<Status>(`/api/alerts/telegram?wallet=${addr}`, link ? 4_000 : 120_000);
+  useEffect(() => {
+    if (data?.linked && link) setLink(null); // linked: back to slow polling
+  }, [data?.linked, link]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -76,7 +79,7 @@ export function TelegramAlerts({ wallet }: { wallet: ActiveWallet }) {
       ) : data.linked ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-bg px-3 py-2.5">
           <span className="flex items-center gap-1.5 text-sm text-yes" data-testid="telegram-linked">
-            <Check size={14} /> Connected{data.username ? ` as @${data.username}` : ""}
+            <Check size={14} /> Connected
           </span>
           <button onClick={() => void run("disconnect")} disabled={busy} className="text-xs text-muted underline-offset-4 hover:text-bad hover:underline">
             Disconnect

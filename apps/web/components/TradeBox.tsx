@@ -23,13 +23,23 @@ interface Props {
   kind: "conviction" | "protection";
   initialSide?: "buy_yes" | "buy_no";
   compact?: boolean;
+  /** The wallet's YES/NO in this market; enables selling. */
+  holdings?: { yes: bigint; no: bigint } | null;
   onDone?: () => void;
+}
+
+/** Parses a USDC/token amount: digits with at most 6 decimals, else null. */
+export function parseAmount(s: string): bigint | null {
+  if (!/^\d*(\.\d{0,6})?$/.test(s) || s === "" || s === ".") return null;
+  const [w, f = ""] = s.split(".");
+  const v = BigInt(w || "0") * BigInt(USDC) + BigInt((f + "000000").slice(0, 6));
+  return v > 0n ? v : null;
 }
 
 /** Protection buys that move the pool more than this are refused (Phase 0 depth finding). */
 export const MAX_COVER_IMPACT_BPS = 1_000;
 
-export function TradeBox({ market, kind, initialSide = "buy_yes", compact, onDone }: Props) {
+export function TradeBox({ market, kind, initialSide = "buy_yes", compact, holdings, onDone }: Props) {
   const { connection } = useConnection();
   const wallet = useActiveWallet();
   const { createBurner } = useBurner();
@@ -41,10 +51,27 @@ export function TradeBox({ market, kind, initialSide = "buy_yes", compact, onDon
   const [quoting, setQuoting] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const micro = useMemo(() => {
-    const n = Number(amount);
-    return Number.isFinite(n) && n > 0 ? BigInt(Math.round(n * USDC)) : 0n;
-  }, [amount]);
+  const selling = side.startsWith("sell");
+  const held = selling ? (side === "sell_yes" ? holdings?.yes : holdings?.no) ?? 0n : null;
+  const canSell = !!holdings && (holdings.yes > 0n || (kind === "conviction" && holdings.no > 0n));
+  // Back to buying if the position is gone (sold out, or wallet switched).
+  useEffect(() => {
+    if (selling && !canSell) setSide(kind === "protection" ? "buy_yes" : initialSide);
+  }, [selling, canSell, kind, initialSide]);
+  const parsed = parseAmount(amount);
+  const overHeld = held !== null && parsed !== null && parsed > held;
+  const micro = parsed !== null && !overHeld ? parsed : 0n;
+  const setMode = (sell: boolean) => {
+    if (sell) {
+      const s: Side = kind === "conviction" && !(holdings?.yes ?? 0n) ? "sell_no" : "sell_yes";
+      setSide(s);
+      const h = s === "sell_yes" ? holdings?.yes : holdings?.no;
+      setAmount(h ? (Number(h) / USDC).toFixed(2) : "");
+    } else {
+      setSide(kind === "protection" ? "buy_yes" : initialSide);
+      setAmount("5");
+    }
+  };
 
   const args = useMemo(() => {
     if (!wallet || !usdcMint || micro === 0n) return null;
@@ -83,15 +110,19 @@ export function TradeBox({ market, kind, initialSide = "buy_yes", compact, onDon
   }, [args, connection]);
 
   const impact = quote && quote.priceAfter !== null && quote.priceBefore !== null ? Math.abs(quote.priceAfter - quote.priceBefore) : null;
-  const tooThin = kind === "protection" && impact !== null && impact > MAX_COVER_IMPACT_BPS;
+  const tooThin = kind === "protection" && !selling && impact !== null && impact > MAX_COVER_IMPACT_BPS;
 
   const submit = async () => {
     if (!wallet || !args || !quote || quote.error) return;
     setBusy(true);
     try {
       const minOutput = (quote.output * 99n) / 100n; // 1% slippage
-      const label =
-        kind === "protection" ? `Protect ${usdc(micro)}` : `${side === "buy_yes" ? "Back" : "Challenge"} ${usdc(micro)}`;
+      const tokens = (Number(micro) / USDC).toFixed(2);
+      const label = selling
+        ? `Sell ${tokens} ${side === "sell_yes" ? "YES" : "NO"}`
+        : kind === "protection"
+          ? `Protect ${usdc(micro)}`
+          : `${side === "buy_yes" ? "Back" : "Challenge"} ${usdc(micro)}`;
       await run(label, wallet, async () => toTx(await tradeInstructions(connection, { ...args, minOutput })));
       onDone?.();
     } catch {
@@ -116,10 +147,41 @@ export function TradeBox({ market, kind, initialSide = "buy_yes", compact, onDon
   }
 
   const tokenLabel = side.endsWith("yes") ? "YES" : "NO";
-  const btnClass = kind === "protection" ? "btn-primary" : side === "buy_yes" ? "btn-yes" : "bg-ink text-bg";
+  const btnClass = selling ? "bg-ink text-bg" : kind === "protection" ? "btn-primary" : side === "buy_yes" ? "btn-yes" : "bg-ink text-bg";
+  const inLabel = selling ? tokenLabel : "USDC";
+  const outLabel = selling ? "USDC" : tokenLabel;
   return (
     <div className={"rounded-2xl border border-line bg-panel-2 text-sm " + (compact ? "p-2.5" : "p-3")}>
-      {kind === "conviction" && (
+      {canSell && (
+        <div className="mb-2 flex gap-3 px-1 text-xs" role="tablist" aria-label="Buy or sell">
+          {([false, true] as const).map((sell) => (
+            <button
+              key={String(sell)}
+              role="tab"
+              aria-selected={selling === sell}
+              onClick={() => selling !== sell && setMode(sell)}
+              className={selling === sell ? "font-medium text-ink" : "text-faint hover:text-ink"}
+              data-testid={sell ? "mode-sell" : "mode-buy"}
+            >
+              {sell ? "Sell" : "Buy"}
+            </button>
+          ))}
+        </div>
+      )}
+      {selling && kind === "conviction" && (holdings?.yes ?? 0n) > 0n && (holdings?.no ?? 0n) > 0n && (
+        <div className="mb-2 grid grid-cols-2 gap-1 rounded-full border border-line bg-bg p-1">
+          {(["sell_yes", "sell_no"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => (setSide(s), setAmount((Number((s === "sell_yes" ? holdings!.yes : holdings!.no)) / USDC).toFixed(2)))}
+              className={"rounded-full py-1.5 text-xs font-medium " + (side === s ? "bg-ink text-bg" : "text-muted hover:text-ink")}
+            >
+              {s === "sell_yes" ? "Sell YES" : "Sell NO"}
+            </button>
+          ))}
+        </div>
+      )}
+      {!selling && kind === "conviction" && (
         <div className="mb-2 grid grid-cols-2 gap-1 rounded-full border border-line bg-bg p-1">
           {(["buy_yes", "buy_no"] as const).map((s) => (
             <button
@@ -141,12 +203,20 @@ export function TradeBox({ market, kind, initialSide = "buy_yes", compact, onDon
           value={amount}
           onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
           className="num w-full bg-transparent text-base outline-none"
-          aria-label="Amount in USDC"
+          aria-label={`Amount in ${inLabel}`}
+          aria-invalid={parsed === null || overHeld}
         />
+        {held !== null && (
+          <button type="button" onClick={() => setAmount((Number(held) / USDC).toFixed(6).replace(/\.?0+$/, ""))} className="text-[11px] text-muted underline hover:text-ink">
+            Max
+          </button>
+        )}
         <span className="num flex items-center gap-1.5 rounded-full bg-panel-3 px-2 py-1 text-xs text-ink">
-          <span className="h-3 w-3 rounded-full bg-[#2775ca]" /> USDC
+          {!selling && <span className="h-3 w-3 rounded-full bg-[#2775ca]" />} {inLabel}
         </span>
       </label>
+      {amount !== "" && parsed === null && <p className="mt-1 px-1 text-[11px] text-bad">Enter an amount, up to 6 decimals.</p>}
+      {overHeld && <p className="mt-1 px-1 text-[11px] text-bad">You hold {(Number(held) / USDC).toFixed(2)} {tokenLabel}.</p>}
       <div className="relative z-10 -my-1.5 flex justify-center">
         <span className="grid h-6 w-6 place-items-center rounded-full border border-line bg-panel-2 text-xs text-muted">↓</span>
       </div>
@@ -157,21 +227,28 @@ export function TradeBox({ market, kind, initialSide = "buy_yes", compact, onDon
         <span
           className={
             "num rounded-full px-2 py-1 text-xs " +
-            (kind === "protection" ? "bg-guard/15 text-guard" : tokenLabel === "YES" ? "bg-yes/15 text-yes" : "bg-panel-3 text-ink")
+            (selling ? "bg-panel-3 text-ink" : kind === "protection" ? "bg-guard/15 text-guard" : tokenLabel === "YES" ? "bg-yes/15 text-yes" : "bg-panel-3 text-ink")
           }
         >
-          {tokenLabel}
+          {outLabel}
         </span>
       </div>
       <div className="num mt-2 min-h-[2.25rem] space-y-0.5 px-1 text-[11px] text-faint">
         {!quoting && quote?.error && <div className="text-bad">{quote.error}</div>}
         {!quoting && quote && !quote.error && (
           <>
-            <div>
-              pays <span className="text-muted">{usdc(quote.output)}</span>{" "}
-              {kind === "protection" ? "if touched" : side === "buy_yes" ? "if it hits" : "if it misses"}
-              {quote.avgPriceBps !== null && <> · avg {pct(quote.avgPriceBps)}</>}
-            </div>
+            {selling ? (
+              <div>
+                you receive <span className="text-muted">{usdc(quote.output)}</span> now
+                {micro > 0n && <> · {pct(Number((quote.output * 10_000n) / micro))} per token</>}
+              </div>
+            ) : (
+              <div>
+                pays <span className="text-muted">{usdc(quote.output)}</span>{" "}
+                {kind === "protection" ? "if touched" : side === "buy_yes" ? "if it hits" : "if it misses"}
+                {quote.avgPriceBps !== null && <> · avg {pct(quote.avgPriceBps)}</>}
+              </div>
+            )}
             {quote.priceBefore !== null && quote.priceAfter !== null && (
               <div>
                 YES {pct(quote.priceBefore)} → <span className="text-muted">{pct(quote.priceAfter)}</span> · 2% fee incl.
@@ -191,7 +268,7 @@ export function TradeBox({ market, kind, initialSide = "buy_yes", compact, onDon
         className={"btn mt-2 w-full disabled:opacity-40 " + btnClass}
         data-testid="trade-submit"
       >
-        {busy ? "Sending…" : kind === "protection" ? "Protect" : side === "buy_yes" ? "Back it" : "Challenge it"}
+        {busy ? "Sending…" : selling ? `Sell ${tokenLabel}` : kind === "protection" ? "Protect" : side === "buy_yes" ? "Back it" : "Challenge it"}
       </button>
       {kind === "protection" && (
         <p className="mt-2 px-1 text-[11px] leading-snug text-faint">Price-touch protection, paid at window end. Not a liquidation guarantee.</p>

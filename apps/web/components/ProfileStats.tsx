@@ -17,6 +17,8 @@ export interface ProfileData {
   fees_earned: string;
   protection_bought_usdc: string;
   protection_paid_out_usdc: string;
+  /** Markets this wallet traded (balances are read onchain). */
+  markets?: import("./Positions").WalletMarket[];
   history: {
     pda: string;
     text: string | null;

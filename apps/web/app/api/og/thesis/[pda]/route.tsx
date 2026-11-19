@@ -1,6 +1,6 @@
 import { ImageResponse } from "next/og";
 import { thesisDetail } from "@thesis/db";
-import { bad, db, pubkey } from "@/lib/server";
+import { bad, db, hasDb, pubkey } from "@/lib/server";
 import { MARK_PATHS } from "@/components/Brand";
 import { fmtLev, fmtPct, positionOf } from "@/lib/position";
 
@@ -17,6 +17,7 @@ const SITE_HOST = (process.env.NEXT_PUBLIC_SITE_URL ?? process.env.URL ?? "https
 export async function GET(_req: Request, { params }: { params: Promise<{ pda: string }> }) {
   const { pda } = await params;
   if (!pubkey(pda)) return bad("not a valid address");
+  if (!hasDb()) return bad("the indexer is not running yet", 503);
   const d = await thesisDetail(db(), pda);
   if (!d || !d.conviction) return bad("thesis not found", 404);
   const c = d.conviction as Record<string, unknown>;
@@ -97,6 +98,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ pda: st
         </div>
       </div>
     ),
-    { width: 1200, height: 630 },
+    {
+      width: 1200,
+      height: 630,
+      // Rendering costs CPU; the CDN serves repeats. Odds lag by a minute at most.
+      headers: { "cache-control": "public, max-age=60, s-maxage=60, stale-while-revalidate=600" },
+    },
   );
 }

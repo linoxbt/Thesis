@@ -95,7 +95,7 @@ export class Watcher {
       }
       const tick = live.get(k);
       if (!tick) continue; // RPC hiccup: try again next refresh
-      if (tick.publishTime !== p.tick.publishTime && !provable(toView(m.account), tick, this.maxConfBps).ok) {
+      if (tick.publishTime !== p.tick.publishTime && !provable(toView(m.account), tick, this.maxConfBps, undefined, this.graceSecs).ok) {
         this.pending.delete(id);
         this.lost(id, p.tick, "the crossing print was overwritten before a proof landed");
         continue;
@@ -116,7 +116,7 @@ export class Watcher {
     for (const [id, m] of this.markets) {
       if (only && id !== only) continue;
       if (this.inflight.has(id)) continue;
-      const v = provable(toView(m.account), tick, this.maxConfBps);
+      const v = provable(toView(m.account), tick, this.maxConfBps, undefined, this.graceSecs);
       if (!v.ok) continue;
       if (!tick.proofAccount) {
         log("watcher", `${id} crossed at ${tick.publishTime} but this source has no onchain proof account`);

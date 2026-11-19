@@ -7,8 +7,9 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { MAX_COVER_IMPACT_BPS } from "@/components/TradeBox";
 import {
-  createMarketInstructions, createThesisInstruction, quoteTrade, sha256, toTx, tradeInstructions,
+  createMarketInstructions, createThesisInstruction, programs, quoteTrade, sha256, toTx, tradeInstructions,
 } from "@/lib/client/actions";
+import { ShareButton } from "@/components/ShareButton";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { explorerTx, IS_DEVNET, USDC } from "@/lib/client/config";
 import { pct, pythToNumber, usd, usdc } from "@/lib/client/format";
@@ -35,7 +36,25 @@ interface Step {
   note?: string;
 }
 
-/** Create (spec 8, screen 3): one screen, one button, a progress tracker. */
+interface Frozen {
+  dir: "above" | "below";
+  protDir: "above" | "below";
+  target: bigint;
+  liq: bigint;
+  liqUsd: number;
+  window: number;
+  seed: bigint;
+  cover: bigint;
+  protect: boolean;
+  text: string;
+}
+
+/**
+ * Create (spec 8, screen 3): one screen, one button, a progress tracker.
+ * Posting takes a few transactions; the inputs are frozen when it starts, and
+ * a retry never repeats a step that already landed onchain (each market and
+ * the thesis are looked up before being sent again).
+ */
 export default function CreatePage() {
   const { connection } = useConnection();
   const wallet = useActiveWallet();
@@ -55,6 +74,10 @@ export default function CreatePage() {
   const [cover, setCover] = useState("2");
   const [steps, setSteps] = useState<Step[] | null>(null);
   const [made, setMade] = useState<{ conviction?: { touch: PublicKey; pm: PublicKey }; protection?: { touch: PublicKey; pm: PublicKey }; thesis?: PublicKey; endTs?: number }>({});
+  /** Inputs as they were when the post started: a retry uses these, never edited ones. */
+  const [frozen, setFrozen] = useState<Frozen | null>(null);
+  /** Markets whose create was sent but not confirmed: checked onchain before re-sending. */
+  const [attempts, setAttempts] = useState<Partial<Record<"conviction" | "protection", { touch: PublicKey; pm: PublicKey }>>>({});
 
   const spotUsd = spot ? pythToNumber(spot.price, spot.expo) : null;
   const expo = spot?.expo ?? -8;
@@ -66,7 +89,20 @@ export default function CreatePage() {
     const l = Number(lev);
     if (l >= 1.5) setLiq(liqFromLeverage(side, spotUsd, l).toFixed(2));
   }, [spotUsd, dir, target, lev, side]);
+  // Whichever the user set last stays fixed as spot moves: a picked leverage
+  // moves the liquidation price; a typed liquidation price moves the leverage.
+  const [levFixed, setLevFixed] = useState(true);
+  useEffect(() => {
+    if (!spotUsd || steps !== null) return;
+    const l = Number(lev);
+    const q = Number(liq);
+    if (levFixed && l >= 1.5) setLiq(liqFromLeverage(side, spotUsd, l).toFixed(2));
+    else if (!levFixed && q > 0 && q !== spotUsd) setLev((spotUsd / Math.abs(spotUsd - q)).toFixed(1));
+    // Spot ticks drive this; the inputs' own handlers cover edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spotUsd]);
   const pickLev = (l: string) => {
+    setLevFixed(true);
     setLev(l);
     const n = Number(l);
     if (spotUsd && n >= 1.5) setLiq(liqFromLeverage(side, spotUsd, n).toFixed(2));
@@ -134,19 +170,35 @@ export default function CreatePage() {
     setSteps((xs) => xs?.map((s) => (s.key === key ? { ...s, ...patch } : s)) ?? null);
 
   const go = async () => {
-    if (!wallet || !usdcMint || blocked) return;
+    if (!wallet || !usdcMint) return;
+    if (!frozen && blocked) return;
+    const f: Frozen = frozen ?? {
+      dir,
+      protDir,
+      target: toPyth(target),
+      liq: toPyth(liq),
+      liqUsd: Number(liq),
+      window,
+      seed: seedMicro,
+      cover: coverMicro,
+      protect,
+      text: text.trim(),
+    };
+    setFrozen(f);
     const plan: Step[] = [
       { key: "conviction", label: "Create the conviction market", status: "todo" },
-      ...(protect ? [{ key: "protection" as const, label: "Create your protection market", status: "todo" as const }] : []),
+      ...(f.protect ? [{ key: "protection" as const, label: "Create your protection market", status: "todo" as const }] : []),
       { key: "thesis", label: "Post the thesis", status: "todo" },
-      ...(protect && coverMicro > 0n ? [{ key: "cover" as const, label: `Buy ${usdc(coverMicro)} of cover`, status: "todo" as const }] : []),
-      ...(text.trim() ? [{ key: "text" as const, label: "Save the text", status: "todo" as const }] : []),
+      ...(f.protect && f.cover > 0n ? [{ key: "cover" as const, label: `Buy ${usdc(f.cover)} of cover`, status: "todo" as const }] : []),
+      ...(f.text ? [{ key: "text" as const, label: "Save the text", status: "todo" as const }] : []),
     ];
     // Resume: keep finished steps.
     setSteps((prev) => plan.map((s) => prev?.find((p) => p.key === s.key && p.status === "done") ?? s));
     const state = { ...made };
-    const endTs = state.endTs ?? Math.floor(Date.now() / 1000) + window;
+    const endTs = state.endTs ?? Math.floor(Date.now() / 1000) + f.window;
     state.endTs = endTs;
+    const tried = { ...attempts };
+    const { thesis: thesisProgram } = programs(connection);
     try {
       for (const s of plan) {
         const done = steps?.find((p) => p.key === s.key && p.status === "done");
@@ -155,23 +207,43 @@ export default function CreatePage() {
         let sig: string | undefined;
         if (s.key === "conviction" || s.key === "protection") {
           const isProt = s.key === "protection";
+          // A previous send may have landed even though it looked like a failure.
+          const prior = tried[s.key];
+          if (prior && (await connection.getAccountInfo(prior.touch))) {
+            state[s.key] = prior;
+            setStep(s.key, { status: "done", note: "Already created onchain." });
+            setMade({ ...state });
+            continue;
+          }
           const r = await createMarketInstructions(connection, {
             creator: wallet.publicKey,
             usdcMint,
-            direction: isProt ? protDir : dir,
-            strike: toPyth(isProt ? liq : target),
+            direction: isProt ? f.protDir : f.dir,
+            strike: isProt ? f.liq : f.target,
             endTs,
-            seed: seedMicro,
-            name: `SOL ${isProt ? protDir : dir} ${isProt ? liq : target}`,
+            seed: f.seed,
+            name: `SOL ${isProt ? f.protDir : f.dir} ${pythToNumber((isProt ? f.liq : f.target).toString(), expo).toFixed(2)}`,
           });
+          tried[s.key] = { touch: r.touchMarket, pm: r.pmMarket };
+          setAttempts({ ...tried });
           sig = await run(s.label, wallet, async () => toTx(r.ixs));
           state[s.key] = { touch: r.touchMarket, pm: r.pmMarket };
         } else if (s.key === "thesis") {
+          // Already linked (an earlier send landed, or another tab posted it)?
+          const conv = await thesisProgram.account.touchMarket.fetch(state.conviction!.touch);
+          if (!conv.originThesis.equals(PublicKey.default)) {
+            state.thesis = conv.originThesis;
+            setStep(s.key, { status: "done", note: "Already posted onchain." });
+            setMade({ ...state });
+            continue;
+          }
+          // The thesis id comes from the creator's counter: if another tab took
+          // it meanwhile, the send fails and the retry reads the new counter.
           const r = await createThesisInstruction(connection, {
             creator: wallet.publicKey,
             conviction: state.conviction!.touch,
             protection: state.protection?.touch ?? null,
-            textHash: await sha256(text.trim()),
+            textHash: await sha256(f.text),
           });
           sig = await run(s.label, wallet, async () => toTx([r.ix]));
           state.thesis = r.thesis;
@@ -184,7 +256,7 @@ export default function CreatePage() {
             touchMarket: state.protection!.touch,
             pmMarket: state.protection!.pm,
             side: "buy_yes" as const,
-            amountIn: coverMicro,
+            amountIn: f.cover,
             minOutput: 0n,
           };
           const q = await quoteTrade(connection, args);
@@ -192,27 +264,30 @@ export default function CreatePage() {
           if (q.error || impact > MAX_COVER_IMPACT_BPS) {
             setStep(s.key, {
               status: "skipped",
-              note: q.error ?? `Skipped: ${usdc(coverMicro)} would move this new pool ${(impact / 100).toFixed(0)} points. Buy smaller cover on the thesis page, or seed more.`,
+              note: q.error ?? `Skipped: ${usdc(f.cover)} would move this new pool ${(impact / 100).toFixed(0)} points. Buy smaller cover on the thesis page, or seed more.`,
             });
             continue;
           }
           sig = await run(s.label, wallet, async () =>
             toTx(await tradeInstructions(connection, { ...args, minOutput: (q.output * 99n) / 100n })),
           );
-          setStep(s.key, { note: `Pays ${usdc(q.output)} if SOL touches ${usd(Number(liq))} before the end.` });
+          setStep(s.key, { note: `Pays ${usdc(q.output)} if SOL touches ${usd(f.liqUsd)} before the end.` });
         } else if (s.key === "text") {
-          // The indexer needs a few seconds to see the new thesis.
-          let ok = false;
-          for (let i = 0; i < 20 && !ok; i++) {
-            const r = await fetch(`/api/theses/${state.thesis!.toBase58()}/text`, {
+          // 404 until the indexer has seen the new thesis; any other error is final.
+          let r: Response | null = null;
+          for (let i = 0; i < 20; i++) {
+            r = await fetch(`/api/theses/${state.thesis!.toBase58()}/text`, {
               method: "POST",
               headers: { "content-type": "application/json" },
-              body: JSON.stringify({ text: text.trim() }),
+              body: JSON.stringify({ text: f.text }),
             });
-            ok = r.ok;
-            if (!ok) await new Promise((res) => setTimeout(res, 3000));
+            if (r.status !== 404 && r.status !== 503) break;
+            await new Promise((res) => setTimeout(res, 3000));
           }
-          if (!ok) throw new Error("Couldn't save the text yet; it can be added later.");
+          if (!r?.ok) {
+            const body = (await r?.json().catch(() => null)) as { error?: string } | null;
+            throw new Error(body?.error ?? "Couldn't save the text yet; retry in a moment.");
+          }
         }
         setStep(s.key, { status: "done", sig });
         setMade({ ...state });
@@ -223,7 +298,17 @@ export default function CreatePage() {
     setMade({ ...state });
   };
 
+  /** Back to an empty form (markets already created stay onchain, unlinked). */
+  const reset = () => {
+    setSteps(null);
+    setMade({});
+    setFrozen(null);
+    setAttempts({});
+  };
+
   const finished = steps?.every((s) => s.status === "done" || s.status === "skipped");
+  // The form is frozen from the first send until the post finishes (or is reset).
+  const locked = steps !== null && !finished;
 
   return (
     <div className="mx-auto max-w-xl space-y-4">
@@ -231,11 +316,12 @@ export default function CreatePage() {
         <span className="label">New trade</span>
         <h1 className="display mt-2 text-4xl">Post your trade</h1>
         <p className="mt-2 text-sm text-muted">
-          Your position becomes a market: the crowd backs or challenges your take profit, and your liquidation gets cover. One
-          confirm.
+          Your position becomes a market: the crowd backs or challenges your take profit, and your liquidation gets cover. A
+          few quick confirms, one per step.
         </p>
       </div>
-      <section className="space-y-3 panel p-5">
+      <fieldset disabled={locked} className="contents">
+      <section className={"space-y-3 panel p-5" + (locked ? " opacity-70" : "")}>
         <div className="flex items-center justify-between">
           <span className="num text-sm text-ink">SOL / USD</span>
           <span className="num text-xs text-muted">
@@ -350,7 +436,7 @@ export default function CreatePage() {
         </div>
       </section>
 
-      <section className="space-y-3 panel border-guard/25 p-5">
+      <section className={"space-y-3 panel border-guard/25 p-5" + (locked ? " opacity-70" : "")}>
         <label className="flex items-center justify-between text-sm font-semibold">
           <span>
             Cover my liquidation <span className="font-normal text-muted">(pays if SOL touches your liquidation price)</span>
@@ -372,6 +458,7 @@ export default function CreatePage() {
                 value={liq}
                 onChange={(e) => {
                   const v = e.target.value.replace(/[^0-9.]/g, "");
+                  setLevFixed(false);
                   setLiq(v);
                   if (spotUsd && Number(v) > 0 && Number(v) !== spotUsd) setLev((spotUsd / Math.abs(spotUsd - Number(v))).toFixed(1));
                 }}
@@ -402,6 +489,7 @@ export default function CreatePage() {
           </>
         )}
       </section>
+      </fieldset>
 
       <section className="panel p-5">
         {position && (
@@ -451,11 +539,16 @@ export default function CreatePage() {
         ) : (
           <button
             onClick={() => void go()}
-            disabled={blocked || (steps !== null && !steps.some((s) => s.status === "failed") && !finished)}
+            disabled={finished || (steps === null ? blocked : !steps.some((s) => s.status === "failed"))}
             className="btn btn-primary w-full py-2.5 disabled:opacity-40"
             data-testid="create-submit"
           >
             {steps?.some((s) => s.status === "failed") ? "Retry from the failed step" : "Post trade"}
+          </button>
+        )}
+        {locked && steps?.some((s) => s.status === "failed") && (
+          <button onClick={reset} className="mt-2 w-full text-center text-xs text-muted underline hover:text-ink" data-testid="create-reset">
+            Start over with new inputs
           </button>
         )}
         {steps && (
@@ -480,13 +573,21 @@ export default function CreatePage() {
           </ol>
         )}
         {finished && made.thesis && (
-          <Link
-            href={`/t/${made.thesis.toBase58()}`}
-            className="btn btn-ghost mt-4 block w-full text-center text-sm"
-            data-testid="view-thesis"
-          >
-            View your trade →
-          </Link>
+          <div className="mt-4 space-y-2 rounded-2xl border border-line bg-panel-2 p-4" data-testid="create-done">
+            <div className="text-sm text-ink">Your trade is live. Share it so people back it or challenge it.</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <ShareButton
+                pda={made.thesis.toBase58()}
+                text={`${dir === "above" ? "Long" : "Short"} SOL: take profit ${frozen ? usd(pythToNumber(frozen.target.toString(), expo)) : ""}. Back it or challenge it:`}
+              />
+              <Link href={`/t/${made.thesis.toBase58()}`} className="btn btn-ghost px-3 py-1.5 text-xs" data-testid="view-thesis">
+                View your trade →
+              </Link>
+              <button onClick={reset} className="ml-auto text-xs text-muted underline hover:text-ink">
+                Post another
+              </button>
+            </div>
+          </div>
         )}
       </section>
     </div>
