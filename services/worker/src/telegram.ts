@@ -238,25 +238,41 @@ export class OpsAlerts {
   constructor(
     private api: TelegramApi,
     private chatId: string,
-    private opts: { connection: Connection; keeper: PublicKey; minSol: number; cluster: string },
+    private opts: { connection: Connection; keeper: PublicKey; minSol: number; authority?: PublicKey; authorityMinSol?: number; cluster: string },
   ) {}
 
-  /** Sends at most once per key per `everyMs`. */
+  /** Sends at most once per key per `everyMs`; a failed send is retried next time. */
   async notify(key: string, text: string, everyMs = 3_600_000) {
     const now = Date.now();
-    if (now - (this.last.get(key) ?? 0) < everyMs) return;
-    this.last.set(key, now);
-    await this.api.call("sendMessage", { chat_id: this.chatId, text, parse_mode: "HTML" }).catch((e) => log("ops", (e as Error).message));
+    if (now - (this.last.get(key) ?? -Infinity) < everyMs) return;
+    try {
+      await this.api.call("sendMessage", { chat_id: this.chatId, text, parse_mode: "HTML" });
+      this.last.set(key, now);
+    } catch (e) {
+      log("ops", (e as Error).message);
+    }
+  }
+
+  /** Fire-and-forget form for the watcher and keeper. */
+  readonly alert = (key: string, text: string) => void this.notify(key, text);
+
+  async check() {
+    const { connection, keeper, minSol, authority, authorityMinSol = 0.1 } = this.opts;
+    const [k, a] = await connection.getMultipleAccountsInfo(authority ? [keeper, authority] : [keeper]);
+    const sol = (k?.lamports ?? 0) / 1e9;
+    if (sol < minSol) await this.notify("keeper-sol", `⚠️ Keeper low on SOL: ${sol.toFixed(3)} SOL (min ${minSol}). Top it up or proofs will stop.`);
+    if (authority) {
+      const float = (a?.lamports ?? 0) / 1e9;
+      if (float < authorityMinSol) {
+        await this.notify("authority-sol", `⚠️ Authority PDA float low: ${float.toFixed(3)} SOL (min ${authorityMinSol}). Market creation fronts ~0.04 SOL of rent from it; send SOL to <code>${authority.toBase58()}</code>.`);
+      }
+    }
   }
 
   async start() {
     await this.notify("start", `▶️ Thesis worker started (${this.opts.cluster}). Keeper <code>${this.opts.keeper.toBase58()}</code>`, 0);
-    const check = async () => {
-      const sol = (await this.opts.connection.getBalance(this.opts.keeper)) / 1e9;
-      if (sol < this.opts.minSol) await this.notify("keeper-sol", `⚠️ Keeper low on SOL: ${sol.toFixed(3)} SOL (min ${this.opts.minSol}). Top it up or proofs will stop.`);
-    };
-    await check().catch(() => {});
-    this.timer = setInterval(() => void check().catch(() => {}), 600_000);
+    await this.check().catch(() => {});
+    this.timer = setInterval(() => void this.check().catch(() => {}), 600_000);
   }
 
   async stop() {

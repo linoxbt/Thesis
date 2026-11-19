@@ -11,7 +11,10 @@
  *   PYTH_PRICE_ACCOUNT  default 7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE (sponsored SOL/USD)
  *   TREASURY_BUY_USDC   USDC the treasury buys right after a proven touch (default 0 = off)
  *   KEEPER_INTERVAL_MS  default 30000
- *   DATABASE_URL        Postgres (Supabase) for the indexer; unset = no indexer
+ *   KEEPER_MIN_SOL      ops alert below this keeper balance (default 0.1)
+ *   AUTHORITY_MIN_SOL   ops alert below this Authority PDA float (default 0.1)
+ *   DATABASE_URL        Postgres for the indexer; unset = no indexer. TLS for
+ *                       remote hosts (DATABASE_SSL=off|verify to change)
  *   INDEXER_INTERVAL_MS default 15000
  *   VOL_KEEPER          "on" (default when DATABASE_URL is set) | "off"
  *   TELEGRAM_BOT_TOKEN  enables Telegram alerts (needs DATABASE_URL)
@@ -44,58 +47,65 @@ async function main() {
   const account = new PublicKey(process.env.PYTH_PRICE_ACCOUNT ?? "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE");
   const source = new OnchainFeedSource(ctx.connection, account);
 
+  // Ops alerts first, so the other components can raise them.
+  let ops: OpsAlerts | undefined;
+  const tgToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (tgToken && process.env.TELEGRAM_ADMIN_CHAT_ID) {
+    ops = new OpsAlerts(telegramApi(tgToken), process.env.TELEGRAM_ADMIN_CHAT_ID, {
+      connection: ctx.connection,
+      keeper: keeper.publicKey,
+      minSol: Number(process.env.KEEPER_MIN_SOL ?? "0.1"),
+      authority: ctx.authority,
+      authorityMinSol: Number(process.env.AUTHORITY_MIN_SOL ?? "0.1"),
+      cluster: /mainnet/.test(rpc) ? "mainnet" : "devnet",
+    });
+  }
+  const alert = ops?.alert;
+
   const watcher = new Watcher(ctx, source, {
     treasuryBuyMicroUsdc: Math.round(Number(process.env.TREASURY_BUY_USDC ?? "0") * 1e6),
     refreshMs: 15_000,
+    alert,
   });
-  const keeperLoop = new Keeper(ctx, Number(process.env.KEEPER_INTERVAL_MS ?? "30000"));
+  const keeperLoop = new Keeper(ctx, Number(process.env.KEEPER_INTERVAL_MS ?? "30000"), alert);
 
   log("worker", `program ${ctx.program.programId.toBase58()} keeper ${keeper.publicKey.toBase58()} rpc ${rpc}`);
-  await watcher.start();
-  await keeperLoop.start();
+  // Each component starts on its own: one failing must not take down the rest.
+  await startSafely("ops", () => ops?.start());
+  await startSafely("watcher", () => watcher.start());
+  await startSafely("keeper", () => keeperLoop.start());
 
   let indexer: Indexer | undefined;
   let volKeeper: VolatilityKeeper | undefined;
   let bot: TelegramBot | undefined;
   let notifier: AlertNotifier | undefined;
-  let ops: OpsAlerts | undefined;
-  const tgToken = process.env.TELEGRAM_BOT_TOKEN;
   const siteUrl = (process.env.SITE_URL ?? "https://thesis-calls.netlify.app").replace(/\/$/, "");
   if (process.env.DATABASE_URL) {
     const db = connect();
-    const applied = await migrate(db);
+    const applied = await retry("migrate", () => migrate(db));
     if (applied.length) log("worker", `migrations applied: ${applied.join(", ")}`);
     indexer = new Indexer(ctx, db, {
       intervalMs: Number(process.env.INDEXER_INTERVAL_MS ?? "15000"),
       priceSampleSecs: 30,
       spotAccount: account,
     });
-    await indexer.start();
+    await startSafely("indexer", () => indexer!.start());
     if ((process.env.VOL_KEEPER ?? "on") !== "off") {
       volKeeper = new VolatilityKeeper(ctx, db);
-      await volKeeper.start();
+      await startSafely("volatility keeper", () => volKeeper!.start());
     }
     if (tgToken) {
       const api = telegramApi(tgToken);
       bot = new TelegramBot(api, db, { siteUrl });
       notifier = new AlertNotifier(api, db, { siteUrl, intervalMs: Number(process.env.ALERTS_INTERVAL_MS ?? "20000") });
-      await bot.start();
-      await notifier.start();
+      await startSafely("telegram bot", () => bot!.start());
+      await startSafely("telegram alerts", () => notifier!.start());
       log("worker", "telegram alerts on");
     } else {
       log("worker", "TELEGRAM_BOT_TOKEN not set: telegram alerts are off");
     }
   } else {
     log("worker", "DATABASE_URL not set: indexer and volatility keeper are off");
-  }
-  if (tgToken && process.env.TELEGRAM_ADMIN_CHAT_ID) {
-    ops = new OpsAlerts(telegramApi(tgToken), process.env.TELEGRAM_ADMIN_CHAT_ID, {
-      connection: ctx.connection,
-      keeper: keeper.publicKey,
-      minSol: Number(process.env.KEEPER_MIN_SOL ?? "0.1"),
-      cluster: /mainnet/.test(rpc) ? "mainnet" : "devnet",
-    });
-    await ops.start();
   }
 
   const shutdown = async () => {
@@ -112,6 +122,32 @@ async function main() {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 }
+
+/** Starts a component; a failure is logged, not fatal. */
+async function startSafely(name: string, start: () => Promise<void> | undefined): Promise<void> {
+  try {
+    await start();
+  } catch (e) {
+    log("worker", `${name} failed to start: ${(e as Error).message.split("\n")[0]}`);
+  }
+}
+
+/** Retries a startup step (e.g. the database still booting) with backoff. */
+async function retry<T>(name: string, fn: () => Promise<T>, attempts = 8): Promise<T> {
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (i >= attempts) throw e;
+      const wait = Math.min(30_000, 1_000 * 2 ** i);
+      log("worker", `${name} failed (attempt ${i}/${attempts}): ${(e as Error).message.split("\n")[0]}; retrying in ${wait / 1000}s`);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+}
+
+// A stray rejection is logged, never a silent crash loop.
+process.on("unhandledRejection", (e) => log("worker", `unhandled rejection: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`));
 
 main().catch((e) => {
   console.error(e);

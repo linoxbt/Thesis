@@ -1,7 +1,6 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { Pool } from "pg";
-import { createLinkCode, insertTrade, migrate, upsertMarket, upsertThesis, type MarketRow } from "@thesis/db";
+import { createLinkCode, insertTrade, isLocalUrl, migrate, Pool, upsertMarket, upsertThesis, type MarketRow } from "@thesis/db";
 import { AlertNotifier, settleText, TelegramBot, touchText, tradeLine, tradeText, type TelegramApi } from "../src/telegram";
 
 const SITE = "https://thesis.test";
@@ -33,6 +32,8 @@ test("touch, settle and trade texts", () => {
 // ---- bot + notifier against Postgres, with a fake Telegram API ----
 
 const BASE = process.env.TEST_PG_URL ?? "postgres://postgres@localhost:5433";
+// These tests drop schemas and databases: never point them at a shared server.
+if (!isLocalUrl(BASE) && process.env.ALLOW_REMOTE_TEST_DB !== "1") throw new Error(`refusing to run destructive tests against ${BASE}`);
 const DB_NAME = "thesis_test_alerts";
 let db: Pool;
 const sent: { method: string; params: Record<string, unknown> }[] = [];

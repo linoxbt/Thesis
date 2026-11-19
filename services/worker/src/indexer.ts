@@ -2,8 +2,9 @@ import { BorshCoder, EventParser, utils } from "@anchor-lang/core";
 import { PublicKey, type ConfirmedSignatureInfo, type VersionedTransactionResponse } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import {
-  getCursor, insertCrossing, insertFeeClaim, insertSpotSample, insertTrade, setCursor, setMarketPrice, setMarketTx,
-  setThesisCreatedTx, upsertMarket, upsertThesis, type Db, type TradeSide,
+  getCursor, insertCrossing, insertFeeClaim, insertSpotSample, insertTrade, openIndexFailures, recordIndexFailure,
+  resolveIndexFailure, setCursor, setMarketPrice, setMarketTx, setThesisCreatedTx, upsertMarket, upsertThesis, type Db,
+  type TradeSide,
 } from "@thesis/db";
 import { log, PM_AMM, type Ctx } from "./client";
 import { decodePmMarket, decodeSwapData, yesPriceBps } from "@thesis/chain";
@@ -58,13 +59,20 @@ export class Indexer {
   async tick(): Promise<void> {
     if (this.running) return;
     this.running = true;
+    // Each stage runs on its own: an RPC error in one must not skip the rest.
+    const stage = async (name: string, fn: () => Promise<void>) => {
+      try {
+        await fn();
+      } catch (e) {
+        log("indexer", `${name} failed: ${(e as Error).message.split("\n")[0]}`);
+      }
+    };
     try {
-      await this.syncAccounts();
-      await this.syncProgramTransactions();
-      await this.syncDirectSwaps();
-      if (this.opts.spotAccount) await this.sampleSpot(this.opts.spotAccount);
-    } catch (e) {
-      log("indexer", `pass failed: ${(e as Error).message}`);
+      await stage("accounts", () => this.syncAccounts());
+      await stage("program transactions", () => this.syncProgramTransactions());
+      await stage("direct swaps", () => this.syncDirectSwaps());
+      await stage("failed transactions", () => this.retryFailures());
+      if (this.opts.spotAccount) await stage("spot", () => this.sampleSpot(this.opts.spotAccount!));
     } finally {
       this.running = false;
     }
@@ -162,14 +170,56 @@ export class Indexer {
     return this.ctx.connection.getTransaction(sig, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
   }
 
-  async syncProgramTransactions(): Promise<void> {
-    const sigs = await this.newSignatures(this.ctx.program.programId, "program");
+  /**
+   * Walks new signatures oldest first, advancing the cursor after each. A
+   * transaction the RPC can't return yet stops the walk (the cursor stays, so
+   * the next pass retries it); one that fails to process is recorded in
+   * indexer_failures and skipped, so it can't stall everything behind it.
+   */
+  private async walk(cursorKey: string, sigs: ConfirmedSignatureInfo[], handle: (sig: string, tx: VersionedTransactionResponse) => Promise<void>): Promise<void> {
     for (const s of sigs) {
       if (!s.err) {
         const tx = await this.fetchTx(s.signature);
-        if (tx) await this.indexProgramTx(s.signature, tx);
+        if (!tx) {
+          log("indexer", `${s.signature} not served by the RPC yet; ${cursorKey} resumes there next pass`);
+          return;
+        }
+        try {
+          await handle(s.signature, tx);
+        } catch (e) {
+          const msg = (e as Error).message;
+          log("indexer", `${s.signature} (${cursorKey}) failed, recorded for retry: ${msg.split("\n")[0]}`);
+          await recordIndexFailure(this.db, s.signature, cursorKey, msg);
+        }
       }
-      await setCursor(this.db, "program", s.signature);
+      await setCursor(this.db, cursorKey, s.signature);
+    }
+  }
+
+  async syncProgramTransactions(): Promise<void> {
+    const sigs = await this.newSignatures(this.ctx.program.programId, "program");
+    await this.walk("program", sigs, (sig, tx) => this.indexProgramTx(sig, tx));
+  }
+
+  /** Retries recorded failures (every write is idempotent). */
+  async retryFailures(): Promise<void> {
+    for (const f of await openIndexFailures(this.db)) {
+      try {
+        const tx = await this.fetchTx(f.signature);
+        if (!tx) throw new Error("transaction not found");
+        if (f.cursor_key === "program") {
+          await this.indexProgramTx(f.signature, tx);
+        } else if (f.cursor_key.startsWith("pm:")) {
+          const pm = f.cursor_key.slice(3);
+          const row = (await this.db.query<{ touch_market: string }>("select touch_market from markets where pm_market = $1", [pm])).rows[0];
+          if (!row) throw new Error("market not indexed yet");
+          await this.indexDirectSwapTx(f.signature, tx, row.touch_market, pm);
+        }
+        await resolveIndexFailure(this.db, f.signature, f.cursor_key);
+        log("indexer", `recovered ${f.signature} (${f.cursor_key})`);
+      } catch (e) {
+        await recordIndexFailure(this.db, f.signature, f.cursor_key, (e as Error).message);
+      }
     }
   }
 
@@ -256,12 +306,11 @@ export class Indexer {
     ).rows;
     for (const m of markets) {
       const key = `pm:${m.pm_market}`;
-      for (const s of await this.newSignatures(new PublicKey(m.pm_market), key)) {
-        if (!s.err) {
-          const tx = await this.fetchTx(s.signature);
-          if (tx) await this.indexDirectSwapTx(s.signature, tx, m.touch_market, m.pm_market);
-        }
-        await setCursor(this.db, key, s.signature);
+      try {
+        const sigs = await this.newSignatures(new PublicKey(m.pm_market), key);
+        await this.walk(key, sigs, (sig, tx) => this.indexDirectSwapTx(sig, tx, m.touch_market, m.pm_market));
+      } catch (e) {
+        log("indexer", `swaps for ${m.touch_market} failed: ${(e as Error).message.split("\n")[0]}`);
       }
     }
   }
@@ -289,13 +338,22 @@ export class Indexer {
         bs.filter((b) => b.owner === owner && b.mint === mint).reduce((a, b) => a + BigInt(b.uiTokenAmount.amount), 0n);
       return sum(post) - sum(pre);
     };
-    const treasuryDelta = () => {
-      if (!this.treasury) return 0n;
-      const idx = keys.staticAccountKeys.findIndex((k) => k.equals(this.treasury!));
-      if (idx < 0) return 0n;
-      const amt = (bs: typeof pre) => BigInt(bs.find((b) => b.accountIndex === idx)?.uiTokenAmount.amount ?? "0");
-      return amt(post) - amt(pre);
-    };
+    // Token balances index the full key list (lookup-table keys included).
+    let treasuryFee = 0n;
+    if (this.treasury) {
+      const t = this.treasury.toBase58();
+      for (let i = 0; i < keys.length; i++) {
+        if (at(i) !== t) continue;
+        const amt = (bs: typeof pre) => BigInt(bs.find((b) => b.accountIndex === i)?.uiTokenAmount.amount ?? "0");
+        treasuryFee = amt(post) - amt(pre);
+        break;
+      }
+    }
+    // Balance deltas are per transaction: credit each (wallet, mint) and the
+    // treasury fee to the first swap only, so two swaps in one transaction
+    // aren't double-counted.
+    const counted = new Set<string>();
+    const once = (k: string, v: bigint) => (counted.has(k) ? 0n : (counted.add(k), v));
     for (const ix of ixs) {
       if (ix.program !== PM_AMM.toBase58()) continue;
       const swap = decodeSwapData(ix.data);
@@ -309,7 +367,8 @@ export class Indexer {
           swap.direction
         ] ?? "other";
       const tokenMint = side.endsWith("yes") ? yesMint : noMint;
-      const tokenDelta = delta(wallet, tokenMint);
+      const tokenDelta = once(`${wallet}:${tokenMint}`, delta(wallet, tokenMint));
+      const usdcDelta = once(`${wallet}:${usdc}`, delta(wallet, usdc));
       await insertTrade(this.db, {
         signature: sig,
         ix_index: ix.index,
@@ -317,12 +376,9 @@ export class Indexer {
         thesis: null,
         wallet,
         side,
-        usdc_amount: (() => {
-          const d = delta(wallet, usdc);
-          return d < 0n ? -d : d;
-        })(),
+        usdc_amount: usdcDelta < 0n ? -usdcDelta : usdcDelta,
         token_amount: tokenDelta < 0n ? -tokenDelta : tokenDelta,
-        fee_to_treasury: treasuryDelta(),
+        fee_to_treasury: once("treasury", treasuryFee),
         price_after_bps: null,
         ts: tx.blockTime ?? Math.floor(Date.now() / 1000),
         via_thesis: false,
