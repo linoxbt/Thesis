@@ -40,19 +40,17 @@ jobs:
     needs: contracts
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: |
-            qie/app/package-lock.json
-            qie/contracts/package-lock.json
+          cache: pnpm
+      # qie/app is a member of the root pnpm workspace.
+      - run: pnpm install --frozen-lockfile
       - run: npm ci --ignore-scripts
         working-directory: qie/contracts
-      - run: npm ci
-        working-directory: qie/app
       - name: Typecheck
-        run: npx tsc --noEmit
+        run: pnpm exec tsc --noEmit
         working-directory: qie/app
       - name: QIE Pass function tests
         run: node --test e2e/qie-pass.test.mjs
@@ -68,15 +66,15 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: "1"
         run: |
-          npm run build
-          npx serve out -l 3200 > /tmp/serve.log 2>&1 &
+          pnpm run build
+          npx -y serve out -l 3200 > /tmp/serve.log 2>&1 &
           sleep 3
       - name: Browser suite
         working-directory: qie/app
         run: |
-          npm i --no-save playwright@1
-          npx playwright install --with-deps chromium
-          OUT_DIR=/tmp/qie-e2e node e2e/ui.e2e.cjs
+          npm i --no-save --prefix /tmp/pw playwright@1
+          /tmp/pw/node_modules/.bin/playwright install --with-deps chromium
+          NODE_PATH=/tmp/pw/node_modules OUT_DIR=/tmp/qie-e2e node e2e/ui.e2e.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
