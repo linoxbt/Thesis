@@ -2,8 +2,9 @@
 FROM node:22-slim
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts && npm install --no-save --ignore-scripts ethers@6 && chown -R node:node /app
-COPY scripts/keeper.js scripts/keeper.js
+# Only the runtime dependency the keeper needs, at the lockfile's exact version.
+RUN npm ci --omit=dev --ignore-scripts && chown -R node:node /app
+COPY scripts/keeper.js scripts/keeper-abi.json scripts/
 USER node
-# KEEPER_KEY (secret), CALLS_ADDRESS and RPC_URL come from the environment.
+# KEEPER_KEY (secret), CALLS_ADDRESS and RPC_URL come from the environment; PORT enables /health.
 CMD ["node", "scripts/keeper.js"]

@@ -1,4 +1,5 @@
-// Writes the ABIs the app needs to ../app/lib/abi.ts (run after `hardhat compile`).
+// Writes the ABIs the app needs to ../app/lib/abi.ts and the keeper's to
+// scripts/keeper-abi.json (run after `hardhat compile`).
 const fs = require("node:fs");
 const path = require("node:path");
 const art = (p) => JSON.parse(fs.readFileSync(path.join(__dirname, "..", "artifacts", "contracts", p), "utf8")).abi;
@@ -17,6 +18,9 @@ export const ERC20_ABI = [
   { type: "function", name: "symbol", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
 ] as const;
 `;
+// The keeper ships on its own (Dockerfile.keeper), so it gets the ABI as JSON.
+fs.writeFileSync(path.join(__dirname, "keeper-abi.json"), JSON.stringify(calls, null, 2) + "\n");
+console.log("wrote qie/contracts/scripts/keeper-abi.json");
 fs.mkdirSync(path.join(__dirname, "..", "..", "app", "lib"), { recursive: true });
 fs.writeFileSync(path.join(__dirname, "..", "..", "app", "lib", "abi.ts"), out);
 console.log("wrote qie/app/lib/abi.ts");

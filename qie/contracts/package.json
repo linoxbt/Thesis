@@ -6,7 +6,9 @@
   "description": "Thesis on QIE: touch-call markets settled by the QIE Oracle, staked in QUSDC.",
   "scripts": {
     "build": "hardhat compile",
-    "test": "hardhat test"
+    "test": "hardhat test",
+    "keeper": "node scripts/keeper.js",
+    "abi": "hardhat compile && node scripts/export-abi.js"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
@@ -14,6 +16,7 @@
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.6.1",
-    "solady": "^0.1.26"
+    "solady": "^0.1.26",
+    "ethers": "6.17.0"
   }
 }
