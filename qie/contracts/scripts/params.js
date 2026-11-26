@@ -25,11 +25,13 @@ const LAUNCH_PARAMS = {
   minScoredVolume: 5n * USDC, // calls need 5 QUSDC of outside bets to count toward skill
 };
 
-// Typical gap between rounds (median, seconds), for the discrete-monitoring correction.
+// 7-day realised volatility and median gap between rounds (seconds, for the
+// discrete-monitoring correction), measured from QIE Oracle history on
+// 26 Nov 2026 (BTC 1730 rounds, ETH 1991, SOL 972). The keeper keeps them current.
 const FEEDS = {
-  BTC: { address: "0x9E596d809a20A272c788726f592c0d1629755440", volBps: 7_200, monitorSecs: 180 },
-  ETH: { address: "0x4bb7012Fbc79fE4Ae9B664228977b442b385500d", volBps: 8_200, monitorSecs: 180 },
-  SOL: { address: "0xe86999c8e6C8eeF71bebd35286bCa674E0AD7b21", volBps: 6_800, monitorSecs: 360 },
+  BTC: { address: "0x9E596d809a20A272c788726f592c0d1629755440", volBps: 7_100, monitorSecs: 177 },
+  ETH: { address: "0x4bb7012Fbc79fE4Ae9B664228977b442b385500d", volBps: 8_140, monitorSecs: 122 },
+  SOL: { address: "0xe86999c8e6C8eeF71bebd35286bCa674E0AD7b21", volBps: 6_800, monitorSecs: 239 },
 };
 
 const QUSDC = "0x3F43DA82eC9A4f5285F10FaF1F26EcA7319E5DA5";

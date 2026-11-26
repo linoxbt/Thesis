@@ -1,0 +1,85 @@
+# The QIE edition (qie/): contract + keeper tests, the app's typecheck, the
+# QIE Pass function tests, the static build, and the browser suite against a
+# local chain, on every push and pull request that touches qie/.
+name: QIE
+
+on:
+  push:
+    paths: ["qie/**", ".github/workflows/qie.yml"]
+  pull_request:
+    paths: ["qie/**", ".github/workflows/qie.yml"]
+
+concurrency:
+  group: qie-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    name: Contracts and keeper
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: qie/contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: qie/contracts/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npx hardhat compile
+      - name: The keeper's ABI matches the build
+        run: node scripts/export-abi.js && git diff --exit-code -- scripts/keeper-abi.json ../app/lib/abi.ts
+      - name: Unit, attack-case, invariant and keeper tests
+        run: npx hardhat test test/ThesisCalls.test.js test/keeper.test.js
+
+  app:
+    name: App (typecheck, function tests, build, browser suite)
+    runs-on: ubuntu-latest
+    needs: contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            qie/app/package-lock.json
+            qie/contracts/package-lock.json
+      - run: npm ci --ignore-scripts
+        working-directory: qie/contracts
+      - run: npm ci
+        working-directory: qie/app
+      - name: Typecheck
+        run: npx tsc --noEmit
+        working-directory: qie/app
+      - name: QIE Pass function tests
+        run: node --test e2e/qie-pass.test.mjs
+        working-directory: qie/app
+      - name: Local chain with demo calls
+        working-directory: qie/contracts
+        run: |
+          npx hardhat node > /tmp/hardhat.log 2>&1 &
+          for i in $(seq 1 30); do curl -s -X POST -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' http://127.0.0.1:8545 && break; sleep 1; done
+          npx hardhat run scripts/dev-chain.js --network localhost
+      - name: Build (local chain) and serve
+        working-directory: qie/app
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: |
+          npm run build
+          npx serve out -l 3200 > /tmp/serve.log 2>&1 &
+          sleep 3
+      - name: Browser suite
+        working-directory: qie/app
+        run: |
+          npm i --no-save playwright@1
+          npx playwright install --with-deps chromium
+          OUT_DIR=/tmp/qie-e2e node e2e/ui.e2e.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: /tmp/qie-e2e
+          if-no-files-found: ignore
