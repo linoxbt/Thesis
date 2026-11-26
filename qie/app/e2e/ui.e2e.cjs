@@ -59,6 +59,18 @@ async function main() {
     window.addEventListener("eip6963:requestProvider", announce);
     announce();
   });
+  // QIE ID lookups (mainnet-only): a stand-in for QIE's lookup service that knows
+  // tester.qie (the test wallet) and other.qie (someone else).
+  const NAMES = { "tester.qie": ACCOUNT, "other.qie": "0x1111111111111111111111111111111111111111" };
+  await ctx.route("https://mcp.qie.digital/**", async (route) => {
+    if (route.request().method() !== "POST") return route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "*" } });
+    const body = JSON.parse(route.request().postData() ?? "{}");
+    const { name: tool, arguments: a } = body.params ?? {};
+    let sc = {};
+    if (tool === "qie_resolve_name") sc = { status: "ok", name: a.name, address: NAMES[a.name] ?? null };
+    if (tool === "qie_reverse_lookup") sc = { status: "ok", address: a.address, name: Object.keys(NAMES).find((k) => NAMES[k].toLowerCase() === a.address.toLowerCase()) ?? null };
+    await route.fulfill({ status: 200, headers: { "content-type": "application/json", "access-control-allow-origin": "*" }, body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { structuredContent: sc, content: [] } }) });
+  });
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
@@ -82,12 +94,36 @@ async function main() {
   check("network badge visible", /QIE local/i.test((await page.textContent('[data-testid="network-badge"]')) ?? ""));
   await page.screenshot({ path: `${OUT}/home.png`, fullPage: true });
 
-  // 2. Connect (QIE Wallet found via EIP-6963)
-  // Already-approved wallets reconnect silently (eth_accounts); otherwise press Connect.
-  const first = await page.waitForSelector('[data-testid="connect"], [data-testid="account"]');
-  if ((await first.getAttribute("data-testid")) === "connect") await page.click('[data-testid="connect"]');
-  await page.waitForSelector('[data-testid="account"]');
-  check("connects through QIE Wallet discovery", /0xa0Ee/i.test((await page.textContent('[data-testid="account"]')) ?? ""));
+  // 2. Sign in. a) a QIE ID pointing at another wallet is refused
+  await page.click('[data-testid="connect"]');
+  await page.waitForSelector('[data-testid="signin-modal"]');
+  check("sign-in offers QIE Wallet and Reown", (await page.isVisible('[data-testid="signin-injected"]')) && (await page.isVisible('[data-testid="signin-reown"]')));
+  await page.click('[data-testid="signin-tab-qieid"]');
+  await page.fill('[data-testid="qieid-input"]', "other");
+  await page.waitForSelector('[data-testid="qieid-sign-injected"]', { timeout: 20_000 });
+  check("QIE ID resolves to its wallet", /other\.qie → 0x1111/.test((await page.textContent('[data-testid="qieid-status"]')) ?? ""));
+  await page.click('[data-testid="qieid-sign-injected"]');
+  await page.waitForSelector('[data-testid="signin-error"]', { timeout: 20_000 });
+  check("a QIE ID of another wallet is refused", /belongs to 0x1111/.test((await page.textContent('[data-testid="signin-error"]')) ?? ""));
+  // b) the right QIE ID signs in (EIP-4361 signature, no transaction)
+  await page.fill('[data-testid="qieid-input"]', "tester");
+  await page.waitForFunction(() => /tester\.qie → 0xa0Ee/i.test(document.querySelector('[data-testid="qieid-status"]')?.textContent ?? ""), null, { timeout: 20_000 });
+  await page.click('[data-testid="qieid-sign-injected"]');
+  await page.waitForSelector('[data-testid="account-qieid"]', { timeout: 20_000 });
+  check("signs in with a QIE ID and shows it", /tester\.qie/.test((await page.textContent('[data-testid="account"]')) ?? ""));
+  const session = await page.evaluate(() => JSON.parse(localStorage.getItem("thesis-qie-session") ?? "null"));
+  check("session holds a verified sign-in message", !!session && /Sign in to Thesis on QIE as tester\.qie/.test(session.message) && /^0x[0-9a-f]{130}$/i.test(session.signature));
+  // c) the session survives a reload
+  await page.reload();
+  await page.waitForSelector('[data-testid="account"]', { timeout: 20_000 });
+  check("stays signed in after a reload", true);
+  // d) sign out, then sign in with the wallet alone: the QIE ID is found for it
+  await page.click('[data-testid="account"]');
+  await page.click("text=Sign out");
+  await page.click('[data-testid="connect"]');
+  await page.click('[data-testid="signin-injected"]');
+  await page.waitForSelector('[data-testid="account-qieid"]', { timeout: 20_000 });
+  check("wallet sign-in picks up the wallet's QIE ID", /tester\.qie/.test((await page.textContent('[data-testid="account"]')) ?? ""));
 
   // 3. Back the SOL call with 5 QUSDC
   await page.goto(BASE + "/call/?id=0"); // old links redirect to the trade page

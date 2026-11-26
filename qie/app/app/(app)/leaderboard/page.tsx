@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { Address } from "viem";
 import { Avatar } from "@/components/ThesisCard";
+import { Who } from "@/components/Who";
 import { useData, useNow } from "@/lib/data";
-import { fmtSkill, pct, shortAddr } from "@/lib/format";
+import { fmtSkill, pct } from "@/lib/format";
 
 interface Row {
   creator: Address;
@@ -112,7 +113,7 @@ export default function LeaderboardPage() {
                     <td className="py-3">
                       <Link href={`/u/?a=${r.creator}`} className="flex items-center gap-2 hover:text-ink">
                         <Avatar addr={r.creator} size={26} />
-                        <span className="text-ink">{shortAddr(r.creator)}</span>
+                        <Who addr={r.creator} className="text-ink" />
                       </Link>
                     </td>
                     <td className={"py-3 text-right text-base " + (r.score_bps >= 0 ? "text-yes" : "text-bad")}>{fmtSkill(r.score_bps)}</td>

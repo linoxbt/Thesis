@@ -5,11 +5,12 @@ import Link from "next/link";
 import { useState } from "react";
 import type { Call, Feed } from "@/lib/chain";
 import { impliedYesBps, oddsHistory, useData, useNow, volumeSince } from "@/lib/data";
-import { pct, price, qusdc, shortAddr, timeLeft, when } from "@/lib/format";
+import { pct, price, qusdc, timeLeft, when } from "@/lib/format";
 import { positionOf } from "@/lib/position";
 import { PositionLevels, SidePill } from "./Position";
 import { Sparkline } from "./Sparkline";
 import { TradeBox } from "./TradeBox";
+import { Who } from "./Who";
 
 /** Address avatar: two letters on a tinted disc. */
 export function Avatar({ addr, size = 28 }: { addr: string; size?: number }) {
@@ -71,7 +72,7 @@ export function ThesisCard({ c, feed }: { c: Call; feed: Feed | undefined }) {
       <div className="flex items-center justify-between gap-2">
         <Link href={`/u/?a=${c.creator}`} className="flex min-w-0 items-center gap-2 text-sm text-muted hover:text-ink">
           <Avatar addr={c.creator} />
-          <span className="num truncate">{shortAddr(c.creator)}</span>
+          <Who addr={c.creator} className="truncate" />
         </Link>
         <div className="flex shrink-0 items-center gap-1.5">
           <StateBadge touched={c.touched} settled={c.settled} yesWon={c.yesWon} />

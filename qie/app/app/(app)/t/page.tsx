@@ -14,9 +14,10 @@ import { THESIS_CALLS_ABI } from "@/lib/abi";
 import { publicClient, readRounds } from "@/lib/chain";
 import { CALLS_ADDRESS, explorerAddress, explorerTx } from "@/lib/config";
 import { impliedYesBps, useData, useNow } from "@/lib/data";
-import { ago, fmtSkill, pct, price, qusdc, shortAddr, timeLeft, when } from "@/lib/format";
+import { ago, fmtSkill, pct, price, qusdc, timeLeft, when } from "@/lib/format";
 import { explain, useWallet } from "@/lib/wallet";
 import { useSkillRank } from "@/components/ProfileStats";
+import { Who } from "@/components/Who";
 
 export default function TradePage() {
   return (
@@ -96,7 +97,7 @@ function TradeView() {
           <Link href={`/u/?a=${c.creator}`} className="flex items-center gap-2 text-sm text-muted hover:text-ink">
             <Avatar addr={c.creator} size={32} />
             <span>
-              <span className="num text-ink">{shortAddr(c.creator)}</span>
+              <Who addr={c.creator} className="text-ink" />
               {s && (
                 <span className="num block text-[11px] text-faint">
                   {s.posted} posted · {s.hits} hit · {s.misses} missed
@@ -201,7 +202,7 @@ function TradeView() {
                   <tr key={tr.tx + tr.user} className="border-t border-line">
                     <td className="py-2">
                       <Link href={`/u/?a=${tr.user}`} className="text-muted hover:text-ink">
-                        {shortAddr(tr.user)}
+                        <Who addr={tr.user} />
                       </Link>
                       {tr.user.toLowerCase() === c.creator.toLowerCase() && <span className="ml-1 text-guard">creator</span>}
                     </td>

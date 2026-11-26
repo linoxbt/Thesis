@@ -7,6 +7,7 @@ import { Suspense } from "react";
 import { isAddress, type Address } from "viem";
 import { ProfileStats } from "@/components/ProfileStats";
 import { Avatar } from "@/components/ThesisCard";
+import { useQieName } from "@/components/Who";
 import { explorerAddress } from "@/lib/config";
 import { shortAddr } from "@/lib/format";
 import { useWallet } from "@/lib/wallet";
@@ -26,6 +27,11 @@ function PublicProfile() {
   if (!a || !isAddress(a)) return <p className="text-sm text-muted">That isn&apos;t a QIE address.</p>;
   const who = a as Address;
   const mine = !!w.account && w.account.toLowerCase() === who.toLowerCase();
+  return <PublicView who={who} mine={mine} />;
+}
+
+function PublicView({ who, mine }: { who: Address; mine: boolean }) {
+  const name = useQieName(who);
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -33,7 +39,9 @@ function PublicProfile() {
           <Avatar addr={who} size={56} />
           <div className="min-w-0">
             <span className="label">Profile</span>
-            <h1 className="display num mt-1 truncate text-4xl">{shortAddr(who)}</h1>
+            <h1 className={"display mt-1 truncate text-4xl " + (name ? "" : "num")} data-testid="profile-name">
+              {name ?? shortAddr(who)}
+            </h1>
             <div className="num mt-1 flex flex-wrap items-center gap-x-3 text-xs text-muted">
               <a href={explorerAddress(who)} target="_blank" rel="noreferrer" className="underline decoration-line-2 underline-offset-4 hover:text-ink">
                 {who}

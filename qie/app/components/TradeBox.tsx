@@ -100,7 +100,7 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
     return (
       <div className="rounded-2xl border border-line bg-panel-2 p-3 text-sm">
         <button onClick={() => w.connect().catch((e) => setErr(explain(e)))} className="btn btn-primary w-full" data-testid="trade-connect">
-          Connect a wallet to trade
+          Sign in to trade
         </button>
         {err && <p className="mt-2 text-xs text-bad">{err}</p>}
       </div>

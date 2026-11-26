@@ -308,7 +308,7 @@ export default function NewTrade() {
         </div>
         {!w.account ? (
           <button onClick={() => void w.connect().catch(() => {})} className="btn btn-primary w-full py-2.5">
-            Connect a wallet to post
+            Sign in to post
           </button>
         ) : (
           <button onClick={() => void go()} disabled={blocked || (!!steps && !failed)} className="btn btn-primary w-full py-2.5 disabled:opacity-40" data-testid="post-submit">

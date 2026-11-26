@@ -39,3 +39,6 @@ export const QUSDC_URL = "https://www.stable.qie.digital/";
 /** First block to read contract events from (the deploy block); 0 on a local chain. */
 export const DEPLOY_BLOCK = BigInt(process.env.NEXT_PUBLIC_DEPLOY_BLOCK ?? (NETWORK === "mainnet" ? "12187275" : "0"));
 export const ORACLE_URL = "https://www.qie.digital";
+
+/** Reown (WalletConnect) project ID, from dashboard.reown.com. Public by design; without it the Reown option is hidden. */
+export const REOWN_PROJECT_ID = process.env.NEXT_PUBLIC_REOWN_PROJECT_ID ?? "";

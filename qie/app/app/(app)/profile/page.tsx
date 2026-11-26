@@ -6,10 +6,11 @@ import { useCallback, useEffect, useState } from "react";
 import type { Abi, Address } from "viem";
 import { ProfileStats } from "@/components/ProfileStats";
 import { Avatar } from "@/components/ThesisCard";
+import { useQieName } from "@/components/Who";
 import { ThemeSetting } from "@/components/ThemeToggle";
 import { THESIS_CALLS_ABI } from "@/lib/abi";
 import { publicClient, readBalances, readPosition } from "@/lib/chain";
-import { CALLS_ADDRESS, explorerAddress, QIE_WALLET_URL, QUSDC_URL } from "@/lib/config";
+import { CALLS_ADDRESS, explorerAddress, QUSDC_URL } from "@/lib/config";
 import { useData } from "@/lib/data";
 import { callLine, qusdc, shortAddr } from "@/lib/format";
 import { explain, useWallet } from "@/lib/wallet";
@@ -32,17 +33,11 @@ function SignedOut() {
         <Wallet size={22} />
       </div>
       <h1 className="display mt-6 text-4xl">Your profile</h1>
-      <p className="mt-3 text-muted">Your wallet is your account. Connect one to see your calls, positions, skill and earnings.</p>
+      <p className="mt-3 text-muted">Sign in with your QIE ID, QIE Wallet or any wallet through Reown to see your calls, positions, skill and earnings.</p>
       <div className="mt-7 flex flex-wrap justify-center gap-2">
-        {w.available ? (
-          <button onClick={() => w.connect().catch((e) => setErr(explain(e)))} className="btn btn-primary">
-            Connect a wallet
-          </button>
-        ) : (
-          <a href={QIE_WALLET_URL} target="_blank" rel="noreferrer" className="btn btn-primary">
-            Get QIE Wallet
-          </a>
-        )}
+        <button onClick={() => w.connect().catch((e) => setErr(explain(e)))} className="btn btn-primary" data-testid="profile-signin">
+          Sign in
+        </button>
       </div>
       {err && <p className="mt-3 text-xs text-bad">{err}</p>}
       <div className="mt-10 text-left">
@@ -67,6 +62,7 @@ function Settings() {
 
 function SignedIn({ who }: { who: Address }) {
   const w = useWallet();
+  const name = useQieName(who) ?? w.qieName;
   return (
     <div className="space-y-6">
       <header className="panel flex flex-wrap items-center justify-between gap-5 p-6">
@@ -74,12 +70,17 @@ function SignedIn({ who }: { who: Address }) {
           <Avatar addr={who} size={60} />
           <div className="min-w-0">
             <span className="label">Profile</span>
-            <h1 className="display num mt-1 truncate text-3xl sm:text-4xl" data-testid="profile-name">
-              {shortAddr(who)}
+            <h1 className={"display mt-1 truncate text-3xl sm:text-4xl " + (name ? "" : "num")} data-testid="profile-name">
+              {name ?? shortAddr(who)}
             </h1>
             <div className="num mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
               {w.walletName && <span className="rounded-full bg-panel-3 px-2 py-0.5">{w.walletName}</span>}
               <CopyAddress addr={who} />
+              {!name && (
+                <a href="https://qiewallet.me" target="_blank" rel="noreferrer" className="underline decoration-line-2 underline-offset-4 hover:text-ink">
+                  Get a QIE ID
+                </a>
+              )}
             </div>
           </div>
         </div>

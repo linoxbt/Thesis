@@ -1,14 +1,14 @@
 "use client";
 
-import { ArrowLeft, ArrowUpRight, BarChart3, Coins, LayoutGrid, LogOut, PanelLeftClose, PanelLeftOpen, PenLine, Trophy, User } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, BadgeCheck, BarChart3, Coins, LayoutGrid, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, PenLine, Trophy, User } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { readBalances } from "@/lib/chain";
-import { IS_MAINNET, NETWORK, QIE_WALLET_URL, QUSDC_URL } from "@/lib/config";
+import { IS_MAINNET, NETWORK, QUSDC_URL } from "@/lib/config";
 import { useData } from "@/lib/data";
 import { ago, qusdc, shortAddr } from "@/lib/format";
-import { explain, useWallet } from "@/lib/wallet";
+import { useWallet } from "@/lib/wallet";
 import { Logo } from "./Brand";
 import { usdPx } from "./Position";
 import { StatusBanner } from "./StatusBanner";
@@ -62,7 +62,6 @@ export function WalletButton() {
   const { stakeToken } = useData();
   const [open, setOpen] = useState(false);
   const [bal, setBal] = useState<{ usd: bigint; gas: bigint } | null>(null);
-  const [err, setErr] = useState<string | null>(null);
   const menu = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -92,30 +91,30 @@ export function WalletButton() {
 
   if (!w.account) {
     return (
-      <div className="relative flex items-center gap-2">
-        {w.available ? (
-          <button onClick={() => w.connect().catch((e) => setErr(explain(e)))} className="btn btn-ghost whitespace-nowrap text-sm" data-testid="connect">
-            Connect
-          </button>
-        ) : (
-          <a href={QIE_WALLET_URL} target="_blank" rel="noreferrer" className="btn btn-primary whitespace-nowrap text-sm">
-            Get QIE Wallet
-          </a>
-        )}
-        {err && <span className="absolute right-0 top-full mt-1 w-56 text-right text-[11px] text-bad">{err}</span>}
-      </div>
+      <button onClick={() => void w.connect().catch(() => {})} className="btn btn-primary whitespace-nowrap text-sm" data-testid="connect">
+        <LogIn size={14} /> Sign in
+      </button>
     );
   }
   return (
     <div className="relative" ref={menu}>
       <button onClick={() => setOpen((o) => !o)} className="btn btn-ghost num text-sm" data-testid="account">
-        {shortAddr(w.account)}
+        {w.qieName ? (
+          <span className="flex items-center gap-1 font-sans" data-testid="account-qieid">
+            <BadgeCheck size={13} className="text-yes" /> {w.qieName}
+          </span>
+        ) : (
+          shortAddr(w.account)
+        )}
         {!w.chainOk && <span className="text-bad"> · wrong network</span>}
       </button>
       {open && (
         <div className="panel absolute right-0 z-30 mt-2 w-64 p-2 text-sm shadow-2xl">
           <div className="px-3 py-2 text-xs text-faint">
+            {w.qieName && <span className="block text-sm text-ink">{w.qieName}</span>}
+            <span className="num block">{shortAddr(w.account)}</span>
             {w.walletName}
+            {w.session && <span> · signed in until {new Date(w.session.expiresAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>}
             {bal && (
               <span className="num mt-1 block text-ink">
                 {qusdc(bal.usd)} QUSDC · {(Number(bal.gas) / 1e18).toFixed(3)} QIE
@@ -129,7 +128,7 @@ export function WalletButton() {
             Get QUSDC
           </a>
           <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-bad hover:bg-panel-2" onClick={() => (w.disconnect(), setOpen(false))}>
-            <LogOut size={13} /> Disconnect
+            <LogOut size={13} /> Sign out
           </button>
         </div>
       )}
