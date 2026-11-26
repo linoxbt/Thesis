@@ -10,7 +10,7 @@ Deadline: **30 November 2026, 23:59 CET** (demos Dec 1–5).
 | Track | **Consumer Apps & Social** (creator reputation, creator earnings, community calls) |
 | GitHub | https://github.com/linoxbt/Thesis (QIE edition in `qie/`; README: `qie/README.md`) |
 | Live demo | https://thesis-qie.netlify.app |
-| Contract (QIE mainnet, verified) | `0x40fBC7178cadFb6e4827B8098154476f02fFeF66` — https://mainnet.qie.digital/address/0x40fBC7178cadFb6e4827B8098154476f02fFeF66#code |
+| Contract (QIE mainnet, verified) | `0x6945294DD8E8Cab0A39aff48Df97EaAB67742AEf` — https://mainnet.qie.digital/address/0x6945294DD8E8Cab0A39aff48Df97EaAB67742AEf#code |
 
 ## QIE components (bonus scoring)
 
@@ -37,9 +37,10 @@ Callers earn half of every trade fee on their calls.
    QUSDC, post, share.
 3. **Back / challenge (25 s):** on a call page, the oracle-round chart with
    entry and target lines; back with 1 QUSDC; the quote; your position.
-4. **Resolution (25 s):** "Check the oracle": any round at or past the target
-   settles YES; winners claim. The contract scans every round itself before
-   bets and before NO, so the outcome can't be raced or missed.
+4. **Resolution (25 s):** "Check the oracle": the first round at or past the
+   target settles YES; winners claim. The contract scans every round itself,
+   in order, before bets, proofs and NO; bets placed in the round just before
+   the touch are refunded, so the outcome can't be raced or missed.
 5. **Leaderboard (15 s):** skill = hits beyond the odds, stored onchain.
 6. **Verified contract (10 s):** the source on mainnet.qie.digital.
 
@@ -47,10 +48,14 @@ Callers earn half of every trade fee on their calls.
 
 - [ ] **Accept ownership:** open the app with `0x747D…8404` → Profile →
       *Accept ownership* (the deployer stays owner until you do).
-- [ ] **Keeper key:** Railway → project *thesis* → service *qie-keeper* →
-      Variables → `KEEPER_KEY` = the private key of a QIE wallet you control
-      with ~0.5 QIE for gas. Any wallet can prove and settle; to let it post
-      volatility too, call `setKeeper(<its address>)` once you own the contract.
+- [x] **Keeper:** runs on Railway (*thesis* → *qie-keeper*) with the keeper
+      key `0xA47C…24fe` (it holds ~0.09 QIE for gas; top it up now and then).
+      To move the keeper role to a wallet of your own later: set `KEEPER_KEY`
+      on Railway to its key, then call `setKeeper(<its address>)` as owner.
+- [ ] **Rotate the QIE Pass secret key** (the old one was shared in a chat),
+      then update `QIE_PASS_SECRET_KEY` on Netlify.
+- [ ] **Optional:** pause the old v1 contract `0x40fB…eF66` from your owner
+      wallet (it has no calls; v2 replaced it).
 - [ ] **QUSDC** in your wallet, then post the first calls (seed ≥ 2 QUSDC) and
       share them so others trade: traction is a judging criterion and decides
       the second half of the prize.

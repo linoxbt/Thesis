@@ -83,7 +83,7 @@ on QIE mainnet, using the QIE stack end to end:
 
 | QIE component | Role |
 |---|---|
-| **QIE Blockchain** | `ThesisCalls` on mainnet: [`0x40fBC7178cadFb6e4827B8098154476f02fFeF66`](https://mainnet.qie.digital/address/0x40fBC7178cadFb6e4827B8098154476f02fFeF66#code) (verified source) |
+| **QIE Blockchain** | `ThesisCalls` on mainnet: [`0x6945294DD8E8Cab0A39aff48Df97EaAB67742AEf`](https://mainnet.qie.digital/address/0x6945294DD8E8Cab0A39aff48Df97EaAB67742AEf#code) (verified source) |
 | **QIE Oracle** | BTC, ETH and SOL feeds price each call at posting, settle it round by round (`getRoundData`), and supply realised volatility |
 | **QUSDC** | Seeds, stakes, payouts and fees |
 | **QIE Wallet** | Discovered via EIP-6963; one-click network switch and signing |

@@ -37,13 +37,12 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1, them
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <head>
-        {/* A plain inline script in the static HTML: runs before first paint, and
-            scripts/csp.mjs hashes it (next/script would inject it at runtime,
-            which a hash-based CSP blocks). */}
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
-      </head>
       <body className="min-h-screen font-sans antialiased">
+        {/* A plain inline script at the top of <body>: in the static HTML, so it
+            runs before first paint and scripts/csp.mjs hashes it (next/script
+            injects it at runtime, which a hash-based CSP blocks). Not in <head>:
+            Netlify injects a comment there, which <head> children can't hydrate around. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <Providers>{children}</Providers>
       </body>
     </html>
