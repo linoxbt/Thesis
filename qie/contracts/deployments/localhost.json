@@ -10,11 +10,11 @@
     },
     "ETH": {
       "address": "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707",
-      "price": "168599945366"
+      "price": "169136685894"
     },
     "SOL": {
       "address": "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6",
-      "price": "7092394079"
+      "price": "7086512296"
     }
   },
   "keeper": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"

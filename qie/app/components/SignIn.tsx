@@ -1,65 +1,114 @@
 "use client";
 
-import { ArrowRight, AtSign, BadgeCheck, Loader2, QrCode, Wallet, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { ArrowRight, AtSign, Loader2, QrCode, ShieldCheck, Smartphone, Wallet, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { Address } from "viem";
 import { QIE_WALLET_URL } from "@/lib/config";
-import { shortAddr } from "@/lib/format";
-import { normalizeQieId, resolveQieId } from "@/lib/qieid";
-import { explain, useWallet, type Via } from "@/lib/wallet";
+import { explain, QIE_PASS_URL, useWallet, type QieIdLogin } from "@/lib/wallet";
+
+type Flow =
+  | { step: "enter" }
+  | { step: "starting" }
+  | { step: "code"; qieId: string; code: string; expiresAt: number }
+  | { step: "done" }
+  | { step: "ended"; why: "rejected" | "expired" | "error"; message: string };
 
 const QIE_ID_URL = "https://qiewallet.me";
+const api = (action: string, init?: RequestInit) => fetch(`${QIE_PASS_URL}?action=${action}`, { credentials: "same-origin", ...init });
 
 /**
- * Sign in: QIE Wallet in the browser, Reown (WalletConnect) for any wallet by
- * QR code or on a phone, or a QIE ID, which is checked against the wallet that
- * signs. Signing in is one free signature (EIP-4361), never a transaction.
+ * Sign in with QIE ID (QIE Pass): the user enters their QIE ID, the page shows
+ * a 6-character code, and the user enters it in QIE Wallet to approve. Our
+ * server function talks to QIE and opens the session; the browser never sees
+ * the request ID or the partner secret. Or sign in with a wallet directly.
  */
 export function SignInDialog() {
   const w = useWallet();
+  const [mode, setMode] = useState<"qieid" | "wallets">("qieid");
+  const [qieId, setQieId] = useState("");
+  const [flow, setFlow] = useState<Flow>({ step: "enter" });
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [mode, setMode] = useState<"wallets" | "qieid">("wallets");
-  const [qieId, setQieId] = useState("");
-  const [resolved, setResolved] = useState<{ name: string; address: Address | null } | null>(null);
-  const [resolving, setResolving] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  const polling = useRef(false);
 
   useEffect(() => {
     if (!w.signInOpen) return;
     setErr(null);
     setBusy(null);
+    setNotice(null);
+    setFlow({ step: "enter" });
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && w.closeSignIn();
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [w.signInOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Look the QIE ID up as it's typed.
+  // Countdown and polling while a code is shown: every 2 s until it's no longer pending.
   useEffect(() => {
-    setResolved(null);
-    const name = normalizeQieId(qieId);
-    if (!name) return;
-    let live = true;
-    setResolving(true);
-    const t = setTimeout(() => {
-      resolveQieId(name)
-        .then((address) => live && setResolved({ name, address }))
-        .catch(() => live && setErr("Couldn't reach the QIE ID lookup. Try again."))
-        .finally(() => live && setResolving(false));
-    }, 350);
+    if (flow.step !== "code") return;
+    const tick = setInterval(() => setNow(Date.now()), 500);
+    const poll = setInterval(async () => {
+      if (polling.current) return;
+      polling.current = true;
+      try {
+        const r = await api("status");
+        const b = (await r.json().catch(() => ({}))) as Partial<QieIdLogin> & { status?: string; code?: string; message?: string; expiresAt?: string | number };
+        if (r.ok && b.status === "completed" && b.address) {
+          setFlow({ step: "done" });
+          w.adoptQieIdLogin({ address: b.address, qieId: b.qieId!, verified: !!b.verified, expiresAt: Number(b.expiresAt) });
+        } else if (r.ok && b.status === "rejected") {
+          setFlow({ step: "ended", why: "rejected", message: "Sign-in was declined in QIE Wallet." });
+        } else if (r.ok && b.status === "expired") {
+          setFlow({ step: "ended", why: "expired", message: "Sign-in timed out." });
+        } else if (!r.ok && r.status !== 502) {
+          setFlow({ step: "ended", why: "error", message: b.message ?? "Sign-in couldn't be completed." });
+        }
+        // pending, or QIE briefly unreachable (502): keep polling until the deadline.
+      } catch {
+        /* network blip: try again on the next tick */
+      } finally {
+        polling.current = false;
+      }
+    }, 2000);
     return () => {
-      live = false;
-      clearTimeout(t);
+      clearInterval(tick);
+      clearInterval(poll);
     };
+  }, [flow, w]);
+
+  // The deadline passing ends the wait even if QIE hasn't said so yet.
+  useEffect(() => {
+    if (flow.step === "code" && now > flow.expiresAt + 3000) setFlow({ step: "ended", why: "expired", message: "Sign-in timed out." });
+  }, [now, flow]);
+
+  const start = useCallback(async () => {
+    setErr(null);
+    setNotice(null);
+    setFlow({ step: "starting" });
+    try {
+      const r = await api("start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ qieId }) });
+      const b = (await r.json().catch(() => ({}))) as { code?: string; qieId?: string; expiresAt?: string; message?: string; retryAfterSeconds?: number };
+      if (r.status === 202 && b.code && b.expiresAt) {
+        setNow(Date.now());
+        setFlow({ step: "code", qieId: b.qieId ?? qieId, code: b.code, expiresAt: Date.parse(b.expiresAt) });
+        return;
+      }
+      setFlow({ step: "enter" });
+      setErr(b.message ?? (r.status === 404 ? "Sign in with QIE ID isn't available on this site yet." : "QIE couldn't start the sign-in. Try again."));
+    } catch {
+      setFlow({ step: "enter" });
+      setErr("Couldn't reach the sign-in service. Check your connection and try again.");
+    }
   }, [qieId]);
 
   if (!w.signInOpen || typeof document === "undefined") return null;
 
-  const go = async (via: Via, withId?: string) => {
+  const goWallet = async (key: string, via: "injected" | "reown") => {
     setErr(null);
-    setBusy(via + (withId ? "-id" : ""));
+    setBusy(key);
     try {
-      await w.signIn(via, withId);
+      await w.signIn(via);
     } catch (e) {
       const m = explain(e);
       setErr(/reset|closed|cancel/i.test(m) ? "Sign-in cancelled." : m);
@@ -69,12 +118,13 @@ export function SignInDialog() {
   };
 
   const spinner = <Loader2 size={15} className="animate-spin" />;
-  const option = (key: string, icon: React.ReactNode, title: string, sub: string, onClick: () => void, disabled = false, testid?: string) => (
+  const option = (key: string, icon: React.ReactNode, title: string, sub: string, onClick: () => void, disabled = false) => (
     <button
+      key={key}
       onClick={onClick}
       disabled={disabled || !!busy}
       className="flex w-full items-center gap-3 rounded-xl border border-line bg-panel px-4 py-3 text-left transition-colors hover:border-line-2 hover:bg-panel-2 disabled:cursor-not-allowed disabled:opacity-50"
-      data-testid={testid}
+      data-testid={`signin-${key}`}
     >
       <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-panel-3 text-ink">{busy === key ? spinner : icon}</span>
       <span className="min-w-0 flex-1">
@@ -84,11 +134,14 @@ export function SignInDialog() {
       <ArrowRight size={15} className="shrink-0 text-faint" />
     </button>
   );
+  const browserWallet = w.walletName && !["Reown · WalletConnect", "QIE ID"].includes(w.walletName) ? w.walletName : "QIE Wallet";
+  const left = flow.step === "code" ? Math.max(0, Math.ceil((flow.expiresAt - now) / 1000)) : 0;
+  const inFlow = flow.step === "code" || flow.step === "starting";
 
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 backdrop-blur-sm sm:items-center"
-      onClick={() => !busy && w.closeSignIn()}
+      onClick={() => !busy && !inFlow && w.closeSignIn()}
       role="dialog"
       aria-modal="true"
       aria-label="Sign in"
@@ -100,95 +153,113 @@ export function SignInDialog() {
             <X size={16} />
           </button>
         </div>
-        <p className="mb-4 text-xs text-muted">One signature proves the wallet is yours. It&apos;s free: no transaction, no gas.</p>
+        <p className="mb-4 text-xs text-muted">No password. Approve in QIE Wallet, or sign once with your wallet: free, no transaction.</p>
 
-        <div className="mb-4 grid grid-cols-2 gap-1 rounded-full border border-line bg-bg p-1 text-xs" role="tablist">
-          {(
-            [
-              ["wallets", "Wallet"],
-              ["qieid", "QIE ID"],
-            ] as const
-          ).map(([k, label]) => (
-            <button
-              key={k}
-              role="tab"
-              aria-selected={mode === k}
-              onClick={() => (setMode(k), setErr(null))}
-              className={"rounded-full py-1.5 font-medium " + (mode === k ? "bg-ink text-bg" : "text-muted hover:text-ink")}
-              data-testid={`signin-tab-${k}`}
+        {!inFlow && (
+          <div className="mb-4 grid grid-cols-2 gap-1 rounded-full border border-line bg-bg p-1 text-xs" role="tablist">
+            {(
+              [
+                ["qieid", "QIE ID"],
+                ["wallets", "Wallet"],
+              ] as const
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                role="tab"
+                aria-selected={mode === k}
+                onClick={() => (setMode(k), setErr(null))}
+                className={"rounded-full py-1.5 font-medium " + (mode === k ? "bg-ink text-bg" : "text-muted hover:text-ink")}
+                data-testid={`signin-tab-${k}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {mode === "qieid" ? (
+          flow.step === "code" ? (
+            <div className="text-center" data-testid="qieid-code-screen">
+              <div className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-2xl bg-panel-3 text-ink">
+                <Smartphone size={20} />
+              </div>
+              <p className="text-sm text-ink">Open QIE Wallet and enter this code</p>
+              <p className="mt-1 text-xs text-muted">
+                Signing in as <span className="text-ink">{flow.qieId}</span>. Check the request says it&apos;s from {typeof window !== "undefined" ? window.location.host : "this site"}.
+              </p>
+              <div className="num my-5 text-[44px] font-semibold leading-none tracking-[0.35em] text-ink" data-testid="qieid-code" aria-live="polite">
+                {flow.code}
+              </div>
+              <div className="num text-xs text-faint" data-testid="qieid-countdown">
+                <Loader2 size={12} className="-mt-0.5 mr-1 inline animate-spin" />
+                Waiting for approval · {Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")} left
+              </div>
+              <button onClick={() => setFlow({ step: "enter" })} className="mt-4 text-xs text-muted underline hover:text-ink">
+                Cancel
+              </button>
+            </div>
+          ) : flow.step === "ended" ? (
+            <div className="text-center" data-testid="qieid-ended">
+              <p className="text-sm text-ink" data-testid="qieid-ended-message">
+                {flow.message}
+              </p>
+              <button onClick={() => void start()} className="btn btn-primary mt-4 w-full" data-testid="qieid-restart">
+                Start again
+              </button>
+              <button onClick={() => setFlow({ step: "enter" })} className="mt-2 text-xs text-muted underline hover:text-ink">
+                Use a different QIE ID
+              </button>
+            </div>
+          ) : (
+            <form
+              className="space-y-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (qieId.trim()) void start();
+              }}
             >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {mode === "wallets" ? (
+              <label className="block text-sm">
+                <span className="text-muted">Your QIE ID</span>
+                <div className="field mt-1 flex items-center gap-2 px-3 py-2.5">
+                  <AtSign size={15} className="text-faint" />
+                  <input
+                    value={qieId}
+                    onChange={(e) => setQieId(e.target.value)}
+                    placeholder="yourname.qie"
+                    autoComplete="username"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    className="num w-full bg-transparent text-base outline-none"
+                    data-testid="qieid-input"
+                  />
+                </div>
+              </label>
+              <button type="submit" disabled={!qieId.trim() || flow.step === "starting"} className="btn btn-primary w-full disabled:opacity-40" data-testid="qieid-submit">
+                {flow.step === "starting" ? spinner : <ShieldCheck size={15} />} Sign in with QIE ID
+              </button>
+              {notice && <p className="text-xs text-muted">{notice}</p>}
+              <p className="text-xs text-faint">
+                You&apos;ll approve in QIE Wallet with a code shown here. Sign-in confirms your wallet; no identity data is shared.
+                No QIE ID?{" "}
+                <a href={QIE_ID_URL} target="_blank" rel="noreferrer" className="underline hover:text-ink">
+                  Get one
+                </a>
+                .
+              </p>
+            </form>
+          )
+        ) : (
           <div className="space-y-2">
             {w.available
-              ? option("injected", <Wallet size={16} />, w.walletName ?? "QIE Wallet", "Browser extension", () => void go("injected"), false, "signin-injected")
-              : option("get", <Wallet size={16} />, "Get QIE Wallet", "No browser wallet found on this device", () => window.open(QIE_WALLET_URL, "_blank", "noopener"), false, "signin-get-wallet")}
+              ? option("injected", <Wallet size={16} />, browserWallet, "Browser extension", () => void goWallet("injected", "injected"))
+              : option("get-wallet", <Wallet size={16} />, "Get QIE Wallet", "No browser wallet found on this device", () => window.open(QIE_WALLET_URL, "_blank", "noopener"))}
             {option(
               "reown",
               <QrCode size={16} />,
               "Reown · WalletConnect",
               w.reownAvailable ? "QIE Wallet app, MetaMask, Trust and 700+ wallets, by QR code or on your phone" : "Not set up on this site yet",
-              () => void go("reown"),
+              () => void goWallet("reown", "reown"),
               !w.reownAvailable,
-              "signin-reown",
-            )}
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <label className="block text-sm">
-              <span className="text-muted">Your QIE ID</span>
-              <div className="field mt-1 flex items-center gap-2 px-3 py-2.5">
-                <AtSign size={15} className="text-faint" />
-                <input
-                  value={qieId}
-                  onChange={(e) => setQieId(e.target.value)}
-                  placeholder="yourname.qie"
-                  autoComplete="username"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  className="num w-full bg-transparent text-base outline-none"
-                  data-testid="qieid-input"
-                />
-                {resolving && spinner}
-              </div>
-            </label>
-            <div className="min-h-[1.25rem] text-xs" data-testid="qieid-status">
-              {qieId && !normalizeQieId(qieId) && <span className="text-bad">A QIE ID looks like yourname.qie.</span>}
-              {resolved &&
-                (resolved.address ? (
-                  <span className="flex items-center gap-1.5 text-muted">
-                    <BadgeCheck size={13} className="text-yes" />
-                    <span className="text-ink">{resolved.name}</span> → <span className="num">{shortAddr(resolved.address)}</span>
-                  </span>
-                ) : (
-                  <span className="text-bad">
-                    {resolved.name} isn&apos;t registered.{" "}
-                    <a href={QIE_ID_URL} target="_blank" rel="noreferrer" className="underline">
-                      Get a QIE ID
-                    </a>
-                  </span>
-                ))}
-            </div>
-            {resolved?.address && (
-              <div className="space-y-2">
-                <p className="text-xs text-faint">Confirm with the wallet {resolved.name} points to:</p>
-                {w.available && option("injected-id", <Wallet size={16} />, `Sign with ${w.walletName ?? "QIE Wallet"}`, "Browser extension", () => void go("injected", resolved.name), false, "qieid-sign-injected")}
-                {w.reownAvailable && option("reown-id", <QrCode size={16} />, "Sign with Reown", "Any wallet, by QR code or on your phone", () => void go("reown", resolved.name), false, "qieid-sign-reown")}
-                {!w.available && !w.reownAvailable && <p className="text-xs text-bad">No wallet available to sign with on this device.</p>}
-              </div>
-            )}
-            {!qieId && (
-              <p className="text-xs text-faint">
-                No QIE ID yet?{" "}
-                <a href={QIE_ID_URL} target="_blank" rel="noreferrer" className="underline hover:text-ink">
-                  Get one at qiewallet.me
-                </a>
-                , or sign in with a wallet: your QIE ID shows automatically once it points to that wallet.
-              </p>
             )}
           </div>
         )}
@@ -199,8 +270,7 @@ export function SignInDialog() {
           </p>
         )}
         <p className="mt-4 text-[11px] leading-snug text-faint">
-          Signing in keeps you signed in on this browser for 7 days. Every bet, post and claim still asks your wallet to
-          confirm.
+          You stay signed in on this browser for 7 days. Every bet, post and claim still asks your wallet to confirm.
         </p>
       </div>
     </div>,

@@ -74,7 +74,7 @@ async function main() {
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
-  page.on("console", (m) => m.type() === "error" && !/favicon|404/.test(m.text()) && errors.push(m.text()));
+  page.on("console", (m) => m.type() === "error" && !/favicon|404|502 \(Bad Gateway\)/.test(m.text()) && errors.push(m.text())); // 502: the deliberate "QIE Pass down" stub
 
   // 0. Landing
   await page.goto(BASE + "/");
@@ -94,36 +94,55 @@ async function main() {
   check("network badge visible", /QIE local/i.test((await page.textContent('[data-testid="network-badge"]')) ?? ""));
   await page.screenshot({ path: `${OUT}/home.png`, fullPage: true });
 
-  // 2. Sign in. a) a QIE ID pointing at another wallet is refused
+  // 2. Sign in. The QIE Pass server function is stubbed (static test server):
+  // a simulated QIE that shows a code, then the user declines or approves in QIE Wallet.
+  const fn = { outcome: "pending", polls: 0, session: null, verifyWallet: "down" };
+  await ctx.route("**/.netlify/functions/qie-pass?**", async (route) => {
+    const action = new URL(route.request().url()).searchParams.get("action");
+    const json = (status, body) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+    if (action === "start") {
+      const { qieId } = JSON.parse(route.request().postData() ?? "{}");
+      if (!/^tester(\.qie)?$/.test(qieId)) return json(404, { code: "QIE_ID_NOT_FOUND", message: "That QIE ID isn't registered. Check the spelling and try again." });
+      fn.polls = 0;
+      return json(202, { qieId: "tester.qie", code: "482913", expiresAt: new Date(Date.now() + 120e3).toISOString() });
+    }
+    if (action === "status") {
+      if (++fn.polls < 2 || fn.outcome === "pending") return json(200, { status: "pending" });
+      if (fn.outcome === "rejected") return json(200, { status: "rejected" });
+      fn.session = { address: ACCOUNT, qieId: "tester.qie", verified: true, expiresAt: Date.now() + 7 * 864e5 };
+      return json(200, { status: "completed", ...fn.session });
+    }
+    if (action === "me") return fn.session ? json(200, fn.session) : json(401, { code: "NO_SESSION" });
+    if (action === "logout") return (fn.session = null), json(200, { ok: true });
+    if (action === "verify-wallet") return fn.verifyWallet === "down" ? json(502, { code: "QIE_UNREACHABLE" }) : json(200, { address: ACCOUNT, verified: false });
+    return json(404, {});
+  });
   await page.click('[data-testid="connect"]');
   await page.waitForSelector('[data-testid="signin-modal"]');
-  check("sign-in offers QIE Wallet and Reown", (await page.isVisible('[data-testid="signin-injected"]')) && (await page.isVisible('[data-testid="signin-reown"]')));
-  await page.click('[data-testid="signin-tab-qieid"]');
-  await page.fill('[data-testid="qieid-input"]', "other");
-  await page.waitForSelector('[data-testid="qieid-sign-injected"]', { timeout: 20_000 });
-  check("QIE ID resolves to its wallet", /other\.qie → 0x1111/.test((await page.textContent('[data-testid="qieid-status"]')) ?? ""));
-  await page.click('[data-testid="qieid-sign-injected"]');
-  await page.waitForSelector('[data-testid="signin-error"]', { timeout: 20_000 });
-  check("a QIE ID of another wallet is refused", /belongs to 0x1111/.test((await page.textContent('[data-testid="signin-error"]')) ?? ""));
-  // b) the right QIE ID signs in (EIP-4361 signature, no transaction)
+  check("sign-in opens on QIE ID", await page.isVisible('[data-testid="qieid-input"]'));
+  // a) an unknown QIE ID
+  await page.fill('[data-testid="qieid-input"]', "ghost");
+  await page.click('[data-testid="qieid-submit"]');
+  await page.waitForSelector('[data-testid="signin-error"]');
+  check("unknown QIE ID gets a clear message", /isn't registered/.test((await page.textContent('[data-testid="signin-error"]')) ?? ""));
+  // b) the code is shown; the user declines in QIE Wallet
+  fn.outcome = "rejected";
   await page.fill('[data-testid="qieid-input"]', "tester");
-  await page.waitForFunction(() => /tester\.qie → 0xa0Ee/i.test(document.querySelector('[data-testid="qieid-status"]')?.textContent ?? ""), null, { timeout: 20_000 });
-  await page.click('[data-testid="qieid-sign-injected"]');
-  await page.waitForSelector('[data-testid="account-qieid"]', { timeout: 20_000 });
-  check("signs in with a QIE ID and shows it", /tester\.qie/.test((await page.textContent('[data-testid="account"]')) ?? ""));
-  const session = await page.evaluate(() => JSON.parse(localStorage.getItem("thesis-qie-session") ?? "null"));
-  check("session holds a verified sign-in message", !!session && /Sign in to Thesis on QIE as tester\.qie/.test(session.message) && /^0x[0-9a-f]{130}$/i.test(session.signature));
-  // c) the session survives a reload
+  await page.click('[data-testid="qieid-submit"]');
+  await page.waitForSelector('[data-testid="qieid-code"]');
+  check("shows the 6-character code with a countdown", (await page.textContent('[data-testid="qieid-code"]')) === "482913" && /left/.test((await page.textContent('[data-testid="qieid-countdown"]')) ?? ""));
+  await page.screenshot({ path: `${OUT}/signin-code.png` });
+  await page.waitForSelector('[data-testid="qieid-ended"]', { timeout: 20_000 });
+  check("a declined sign-in says so and offers Start again", /declined/.test((await page.textContent('[data-testid="qieid-ended-message"]')) ?? ""));
+  // c) start again; the user approves: signed in, QIE Pass verified
+  fn.outcome = "approved";
+  await page.click('[data-testid="qieid-restart"]');
+  await page.waitForSelector('[data-testid="account-qiepass"]', { timeout: 20_000 });
+  check("approving in QIE Wallet signs in with the QIE ID", /tester\.qie/.test((await page.textContent('[data-testid="account"]')) ?? ""));
+  // d) the session survives a reload (server session cookie)
   await page.reload();
-  await page.waitForSelector('[data-testid="account"]', { timeout: 20_000 });
+  await page.waitForSelector('[data-testid="account-qiepass"]', { timeout: 20_000 });
   check("stays signed in after a reload", true);
-  // d) sign out, then sign in with the wallet alone: the QIE ID is found for it
-  await page.click('[data-testid="account"]');
-  await page.click("text=Sign out");
-  await page.click('[data-testid="connect"]');
-  await page.click('[data-testid="signin-injected"]');
-  await page.waitForSelector('[data-testid="account-qieid"]', { timeout: 20_000 });
-  check("wallet sign-in picks up the wallet's QIE ID", /tester\.qie/.test((await page.textContent('[data-testid="account"]')) ?? ""));
 
   // 3. Back the SOL call with 5 QUSDC
   await page.goto(BASE + "/call/?id=0"); // old links redirect to the trade page
@@ -170,6 +189,15 @@ async function main() {
   const claimed = await page.waitForSelector('[data-testid="tx-confirmed"]:has-text("Claim")', { timeout: 60_000 }).then(() => true).catch(() => false);
   check("the winner claims the payout", claimed);
   await page.screenshot({ path: `${OUT}/settled.png`, fullPage: true });
+
+  // 5b. Sign out, then sign in with the wallet directly (QIE Pass check down: still works, no badge)
+  await page.click('[data-testid="account"]');
+  await page.click("text=Sign out");
+  await page.click('[data-testid="connect"]');
+  await page.click('[data-testid="signin-tab-wallets"]');
+  await page.click('[data-testid="signin-injected"]');
+  await page.waitForSelector('[data-testid="account"]', { timeout: 20_000 });
+  check("wallet sign-in works too (no QIE Pass badge)", !(await page.isVisible('[data-testid="account-qiepass"]')) && /tester\.qie/.test((await page.textContent('[data-testid="account"]')) ?? ""));
 
   // 6. Leaderboard and profile
   await page.goto(BASE + "/leaderboard/");

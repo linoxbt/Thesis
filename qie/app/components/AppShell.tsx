@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowUpRight, BadgeCheck, BarChart3, Coins, LayoutGrid, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, PenLine, Trophy, User } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, BadgeCheck, BarChart3, Coins, LayoutGrid, LogIn, LogOut, ShieldCheck, PanelLeftClose, PanelLeftOpen, PenLine, Trophy, User } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -106,12 +106,18 @@ export function WalletButton() {
         ) : (
           shortAddr(w.account)
         )}
+        {w.session?.qiePass && <ShieldCheck size={14} className="ml-1 text-yes" aria-label="QIE Pass verified" data-testid="account-qiepass" />}
         {!w.chainOk && <span className="text-bad"> · wrong network</span>}
       </button>
       {open && (
         <div className="panel absolute right-0 z-30 mt-2 w-64 p-2 text-sm shadow-2xl">
           <div className="px-3 py-2 text-xs text-faint">
             {w.qieName && <span className="block text-sm text-ink">{w.qieName}</span>}
+            {w.session?.qiePass && (
+              <span className="my-1 inline-flex items-center gap-1 rounded-full bg-yes/10 px-2 py-0.5 text-[11px] text-yes ring-1 ring-yes/30">
+                <ShieldCheck size={12} /> QIE Pass verified
+              </span>
+            )}
             <span className="num block">{shortAddr(w.account)}</span>
             {w.walletName}
             {w.session && <span> · signed in until {new Date(w.session.expiresAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>}

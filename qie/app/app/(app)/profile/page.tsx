@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy, ExternalLink, Wallet } from "lucide-react";
+import { Check, Copy, ExternalLink, ShieldCheck, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { Abi, Address } from "viem";
@@ -33,7 +33,7 @@ function SignedOut() {
         <Wallet size={22} />
       </div>
       <h1 className="display mt-6 text-4xl">Your profile</h1>
-      <p className="mt-3 text-muted">Sign in with your QIE ID, QIE Wallet or any wallet through Reown to see your calls, positions, skill and earnings.</p>
+      <p className="mt-3 text-muted">Sign in with QIE Pass, QIE Wallet or any wallet through Reown to see your calls, positions, skill and earnings.</p>
       <div className="mt-7 flex flex-wrap justify-center gap-2">
         <button onClick={() => w.connect().catch((e) => setErr(explain(e)))} className="btn btn-primary" data-testid="profile-signin">
           Sign in
@@ -75,6 +75,11 @@ function SignedIn({ who }: { who: Address }) {
             </h1>
             <div className="num mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
               {w.walletName && <span className="rounded-full bg-panel-3 px-2 py-0.5">{w.walletName}</span>}
+              {w.session?.qiePass && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-yes/10 px-2 py-0.5 text-yes ring-1 ring-yes/30" data-testid="profile-qiepass">
+                  <ShieldCheck size={12} /> QIE Pass verified
+                </span>
+              )}
               <CopyAddress addr={who} />
               {!name && (
                 <a href="https://qiewallet.me" target="_blank" rel="noreferrer" className="underline decoration-line-2 underline-offset-4 hover:text-ink">
