@@ -204,6 +204,8 @@ async function main() {
   await page.waitForSelector('[data-testid="share-button"]');
   await page.click('[data-testid="share-button"]');
   await page.waitForSelector('[data-testid="share-card"]', { timeout: 20_000 });
+  // The <img> appears before the browser has decoded it: wait for the real size.
+  await page.waitForFunction(() => { const i = document.querySelector('[data-testid="share-card"]'); return !!i && i.complete && i.naturalWidth > 0; }, null, { timeout: 20_000 });
   const cardW = await page.$eval('[data-testid="share-card"]', (img) => img.naturalWidth);
   check("share dialog shows the generated 1200×630 card, with Download image", cardW === 1200 && (await page.isVisible('[data-testid="share-download"]')));
   await page.screenshot({ path: `${OUT}/share.png` });
