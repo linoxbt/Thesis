@@ -5,7 +5,8 @@ import { BaseError, ContractFunctionRevertedError, createWalletClient, custom, g
 import { createSiweMessage, generateSiweNonce } from "viem/siwe";
 import { publicClient } from "./chain";
 import { EXPLORER, qie, REOWN_PROJECT_ID, RPC_URL } from "./config";
-import { qieIdOf } from "./qieid";
+import { forgetQieId, qieIdOf } from "./qieid";
+import { QIE_ID_BOUGHT } from "./qieidWidget";
 
 interface Announced {
   info: { uuid: string; name: string; icon: string; rdns: string };
@@ -279,18 +280,34 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     };
   }, [active, account]);
 
-  // The connected account's QIE ID, for display.
+  // The connected account's QIE ID, for display; looked up again after one is bought in the widget.
+  const [boughtTick, setBoughtTick] = useState(0);
+  useEffect(() => {
+    const onBought = () => {
+      if (account) forgetQieId(account);
+      setBoughtTick((t) => t + 1);
+    };
+    window.addEventListener(QIE_ID_BOUGHT, onBought);
+    return () => window.removeEventListener(QIE_ID_BOUGHT, onBought);
+  }, [account]);
   useEffect(() => {
     setQieName(session?.name ?? null);
     if (!account) return;
     let live = true;
-    qieIdOf(account)
-      .then((n) => live && n && setQieName(n))
-      .catch(() => {});
+    // Newly minted IDs can take a moment to appear: retry a few times after a purchase.
+    const attempt = (n: number) =>
+      qieIdOf(account)
+        .then((name) => {
+          if (!live) return;
+          if (name) setQieName(name);
+          else if (boughtTick > 0 && n < 6) setTimeout(() => (forgetQieId(account), attempt(n + 1)), 5000);
+        })
+        .catch(() => {});
+    attempt(0);
     return () => {
       live = false;
     };
-  }, [account, session?.name]);
+  }, [account, session?.name, boughtTick]);
 
   const ensureChain = useCallback(async (p: EIP1193Provider) => {
     const current = String(await p.request({ method: "eth_chainId" })).toLowerCase();

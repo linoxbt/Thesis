@@ -403,3 +403,10 @@ details[open] .faq-plus {
 /* Devnet badge: amber, readable in both themes (test money, always visible). */
 .badge-devnet { background: rgb(245 165 36 / 0.16); color: #9a5b00; --tw-ring-color: rgb(245 165 36 / 0.45); }
 [data-theme="dark"] .badge-devnet { color: #fbc96b; }
+
+/* QIE ID widget (loader.qie.digital): on phones, sit above the bottom tab bar. */
+@media (max-width: 1023px) {
+  [data-qie-widget] > button { bottom: 80px !important; }
+  [data-qie-widget] > div[aria-hidden] { bottom: 156px !important; }
+  [data-qie-widget] > iframe { bottom: 152px !important; max-height: calc(100vh - 172px) !important; }
+}

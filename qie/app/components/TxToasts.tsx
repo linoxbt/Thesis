@@ -15,7 +15,7 @@ export function TxToasts() {
   const { toasts, dismiss } = useWallet();
   if (!toasts.length) return null;
   return (
-    <div className="fixed bottom-20 right-4 z-30 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2 lg:bottom-4" aria-live="polite">
+    <div className="fixed bottom-36 right-4 z-30 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2 lg:bottom-4 lg:right-24" aria-live="polite">
       {toasts.map((t) => (
         <div key={t.id} className={"rounded-2xl border bg-panel/95 p-3 text-sm shadow-2xl backdrop-blur " + STYLE[t.status]} data-testid={`tx-${t.status}`}>
           <div className="flex items-start justify-between gap-2">

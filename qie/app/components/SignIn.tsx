@@ -4,6 +4,7 @@ import { ArrowRight, AtSign, Loader2, QrCode, ShieldCheck, Smartphone, Wallet, X
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { QIE_WALLET_URL } from "@/lib/config";
+import { openQieIdWidget } from "@/lib/qieidWidget";
 import { explain, QIE_PASS_URL, useWallet, type QieIdLogin } from "@/lib/wallet";
 
 type Flow =
@@ -13,7 +14,6 @@ type Flow =
   | { step: "done" }
   | { step: "ended"; why: "rejected" | "expired" | "error"; message: string };
 
-const QIE_ID_URL = "https://qiewallet.me";
 const api = (action: string, init?: RequestInit) => fetch(`${QIE_PASS_URL}?action=${action}`, { credentials: "same-origin", ...init });
 
 /**
@@ -241,9 +241,9 @@ export function SignInDialog() {
               <p className="text-xs text-faint">
                 You&apos;ll approve in QIE Wallet with a code shown here. Sign-in confirms your wallet; no identity data is shared.
                 No QIE ID?{" "}
-                <a href={QIE_ID_URL} target="_blank" rel="noreferrer" className="underline hover:text-ink">
+                <button type="button" onClick={() => (w.closeSignIn(), openQieIdWidget())} className="underline hover:text-ink" data-testid="signin-get-qieid">
                   Get one
-                </a>
+                </button>
                 .
               </p>
             </form>

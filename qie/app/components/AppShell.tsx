@@ -8,6 +8,7 @@ import { readBalances } from "@/lib/chain";
 import { IS_MAINNET, NETWORK, QUSDC_URL } from "@/lib/config";
 import { useData } from "@/lib/data";
 import { ago, qusdc, shortAddr } from "@/lib/format";
+import { openQieIdWidget } from "@/lib/qieidWidget";
 import { useWallet } from "@/lib/wallet";
 import { Logo } from "./Brand";
 import { usdPx } from "./Position";
@@ -133,6 +134,11 @@ export function WalletButton() {
           <a href={QUSDC_URL} target="_blank" rel="noreferrer" className="block rounded-lg px-3 py-2 hover:bg-panel-2">
             Get QUSDC
           </a>
+          {!w.qieName && (
+            <button onClick={() => (setOpen(false), openQieIdWidget())} className="block w-full rounded-lg px-3 py-2 text-left hover:bg-panel-2" data-testid="wallet-menu-qieid">
+              Get a QIE ID
+            </button>
+          )}
           <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-bad hover:bg-panel-2" onClick={() => (w.disconnect(), setOpen(false))}>
             <LogOut size={13} /> Sign out
           </button>

@@ -7,6 +7,7 @@ import type { Abi, Address } from "viem";
 import { ProfileStats } from "@/components/ProfileStats";
 import { Avatar } from "@/components/ThesisCard";
 import { useQieName } from "@/components/Who";
+import { openQieIdWidget } from "@/lib/qieidWidget";
 import { ThemeSetting } from "@/components/ThemeToggle";
 import { THESIS_CALLS_ABI } from "@/lib/abi";
 import { publicClient, readBalances, readPosition } from "@/lib/chain";
@@ -82,9 +83,9 @@ function SignedIn({ who }: { who: Address }) {
               )}
               <CopyAddress addr={who} />
               {!name && (
-                <a href="https://qiewallet.me" target="_blank" rel="noreferrer" className="underline decoration-line-2 underline-offset-4 hover:text-ink">
+                <button onClick={openQieIdWidget} className="underline decoration-line-2 underline-offset-4 hover:text-ink" data-testid="profile-get-qieid">
                   Get a QIE ID
-                </a>
+                </button>
               )}
             </div>
           </div>

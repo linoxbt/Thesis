@@ -42,3 +42,8 @@ export const ORACLE_URL = "https://www.qie.digital";
 
 /** Reown (WalletConnect) project ID, from dashboard.reown.com. Public by design; without it the Reown option is hidden. */
 export const REOWN_PROJECT_ID = process.env.NEXT_PUBLIC_REOWN_PROJECT_ID ?? "";
+
+/** QIE ID widget (buy a .qie ID on this site; partner earns on each sale). */
+export const QIE_ID_WIDGET_ID = process.env.NEXT_PUBLIC_QIE_ID_WIDGET_ID ?? "qie-live-4aec64940f8c0fb529b7";
+export const QIE_ID_WIDGET_URL = "https://widget.qie.digital/";
+export const QIE_ID_HOSTED_URL = `${QIE_ID_WIDGET_URL}?widgetId=${QIE_ID_WIDGET_ID}`;

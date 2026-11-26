@@ -106,6 +106,20 @@ async function limited<T>(f: () => Promise<T>): Promise<T> {
   }
 }
 
+/** Forgets what's known about an address (after it gets a new QIE ID). */
+export function forgetQieId(address: string) {
+  const addr = address.toLowerCase();
+  reverse.delete(addr);
+  forward.clear();
+  try {
+    const all = JSON.parse(localStorage.getItem(CACHE_KEY) ?? "{}") as Record<string, unknown>;
+    delete all[addr];
+    localStorage.setItem(CACHE_KEY, JSON.stringify(all));
+  } catch {
+    /* nothing cached */
+  }
+}
+
 /** The QIE ID of an address, or null. Only a name that resolves back to the address is returned. */
 export function qieIdOf(address: string): Promise<string | null> {
   if (!isAddress(address)) return Promise.resolve(null);
