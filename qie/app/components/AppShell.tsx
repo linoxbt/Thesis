@@ -22,22 +22,6 @@ const NAV: { href: string; label: string; short?: string; icon: typeof User; mob
   { href: "/profile/", label: "Profile", icon: User },
 ];
 
-/** Which QIE network, always visible: mainnet means real QUSDC. */
-function ClusterBadge() {
-  return (
-    <span
-      className={
-        "num whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide sm:px-2.5 sm:py-1 sm:text-[11px] " +
-        (IS_MAINNET ? "bg-bad/10 text-bad ring-1 ring-bad/40" : "badge-devnet ring-1")
-      }
-      title={IS_MAINNET ? "QIE mainnet: real QUSDC" : `QIE ${NETWORK}: test funds, nothing has real value`}
-      data-testid="network-badge"
-    >
-      QIE {NETWORK}
-    </span>
-  );
-}
-
 /** Latest QIE Oracle prints: SOL always, BTC and ETH on wider screens. */
 function SpotTicker() {
   const { feeds } = useData();
@@ -282,7 +266,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <ClusterBadge />
+
               <WalletButton />
             </div>
           </div>

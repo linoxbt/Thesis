@@ -91,7 +91,7 @@ async function main() {
   check("home shows live oracle prices", /BTC \$[\d,]+/.test(prices ?? "") && /SOL \$\d/.test(prices ?? ""), (prices ?? "").replace(/\s+/g, " "));
   check("markets list the calls", (await page.locator('[data-testid="thesis-card"]').count()) >= 2);
   check("sidebar and tab bar shell", (await page.locator('[data-testid="sidebar-toggle"]').count()) >= 1);
-  check("network badge visible", /QIE local/i.test((await page.textContent('[data-testid="network-badge"]')) ?? ""));
+  check("no network badge in the header", (await page.locator('[data-testid="network-badge"]').count()) === 0);
   await page.screenshot({ path: `${OUT}/home.png`, fullPage: true });
 
   // 2. Sign in. The QIE Pass server function is stubbed (static test server):
