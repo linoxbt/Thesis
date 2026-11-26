@@ -4,6 +4,7 @@
 // token stands in for QUSDC; test accounts get 1,000 each; two demo calls.
 // Writes deployments/localhost.json and ../app/.env.local.
 const { ethers } = require("hardhat");
+const { LAUNCH_PARAMS } = require("./params");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -33,16 +34,13 @@ async function main() {
   const [owner, keeper, ...users] = await ethers.getSigners();
   const now = async () => (await ethers.provider.getBlock("latest")).timestamp;
   const token = await (await ethers.getContractFactory("MockToken")).deploy();
-  const calls = await (await ethers.getContractFactory("ThesisCalls")).deploy(await token.getAddress(), owner.address, keeper.address, 5_000, {
-    feeBps: 200, minSeed: 2n * USDC, maxSeed: 250n * USDC, minStake: 500_000n, minWindow: 30 * 60, maxWindow: 8 * 86_400, grace: 300,
-    maxOracleAge: 3 * 3600, maxVolAge: 14 * 86_400, minDistanceBps: 100, maxDistanceBps: 5_000, minOpenBps: 100, maxOpenBps: 9_900, betCutoffBps: 25,
-  });
+  const calls = await (await ethers.getContractFactory("ThesisCalls")).deploy(await token.getAddress(), owner.address, keeper.address, 5_000, LAUNCH_PARAMS);
   const feeds = {};
   for (const [asset, live] of Object.entries(LIVE)) {
     const f = await (await ethers.getContractFactory("MockFeed")).deploy(`${asset} / USDT`);
     const p = (await livePrice(live)) ?? { BTC: 6_000_000_000_000n, ETH: 170_000_000_000n, SOL: 7_000_000_000n }[asset];
     await f.push(p, await now());
-    await calls.setFeed(await f.getAddress(), true, VOL[asset]);
+    await calls.setFeed(await f.getAddress(), true, VOL[asset], 0);
     feeds[asset] = { address: await f.getAddress(), price: p.toString() };
     console.log(`${asset} feed ${await f.getAddress()} at $${(Number(p) / 1e8).toFixed(2)}`);
   }

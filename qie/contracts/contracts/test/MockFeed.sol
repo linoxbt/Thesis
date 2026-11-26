@@ -7,6 +7,9 @@ contract MockFeed {
     mapping(uint80 => Round) public rounds;
     uint80 public latest;
     string public description;
+    bool public broken; // a retired / failing feed: every read reverts
+
+    function setBroken(bool b) external { broken = b; }
 
     constructor(string memory description_) { description = description_; }
 
@@ -18,11 +21,13 @@ contract MockFeed {
     }
 
     function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80) {
+        require(!broken, "feed down");
         Round memory r = rounds[latest];
         return (latest, r.answer, r.updatedAt, r.updatedAt, latest);
     }
 
     function getRoundData(uint80 id) external view returns (uint80, int256, uint256, uint256, uint80) {
+        require(!broken, "feed down");
         Round memory r = rounds[id];
         require(r.updatedAt != 0, "No data present");
         return (id, r.answer, r.updatedAt, r.updatedAt, id);

@@ -28,7 +28,20 @@ interface IPriceFeed {
 /// bet and before settling NO, the contract itself scans every oracle round
 /// published since the call opened. A bet placed after a crossing round
 /// settles the call YES instead of being taken, and NO wins only once every
-/// round up to the deadline has been checked.
+/// round up to the deadline has been checked and the oracle has published a
+/// round after it.
+///
+/// Oracle rounds arrive irregularly (minutes to hours apart), so the latest
+/// print can lag the market. Three rules keep that lag from being traded:
+/// - posting and betting need the strike at least z*sigma*sqrt(age) away from
+///   the latest print (age = how old it is), so the market can't already be
+///   through it; opening odds are priced over the unseen time since that print;
+/// - stakes placed within VOID_WINDOW..2*VOID_WINDOW of the touching round
+///   (front-running the oracle's own update) are refunded instead of paid, and
+///   a touch that lands that soon after posting voids the whole call;
+/// - betting closes `closeBps` of the window before the deadline.
+/// If the oracle stops publishing, anyone can void the call after `voidAfter`
+/// and every stake is refunded (fees already paid are kept).
 contract ThesisCalls is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -36,6 +49,15 @@ contract ThesisCalls is ReentrancyGuard {
     uint256 public constant MAX_TEXT_BYTES = 280;
     /// @notice Oracle rounds checked per bet / settle; `sync` catches up longer gaps.
     uint256 public constant SCAN_PER_TX = 48;
+    /// @notice Stakes are bucketed by minute: a touching round voids the
+    /// stakes of its own bucket and the one before (60 to 120 s of bets).
+    uint256 public constant VOID_WINDOW = 60;
+
+    enum VoidReason {
+        None,
+        EarlyTouch, // touched within VOID_WINDOW of posting
+        OracleTimeout // no oracle round after the deadline within voidAfter
+    }
 
     // ------------------------------------------------------------ config
 
@@ -57,13 +79,17 @@ contract ThesisCalls is ReentrancyGuard {
         uint32 minWindow; // seconds
         uint32 maxWindow;
         uint32 grace; // after end_ts, to submit a late proof
-        uint32 maxOracleAge; // spot freshness at posting
+        uint32 maxOracleAge; // latest print freshness, for posting and betting
         uint32 maxVolAge; // volatility freshness at posting
         uint16 minDistanceBps; // strike distance from spot
         uint16 maxDistanceBps;
         uint16 minOpenBps; // opening odds bounds
         uint16 maxOpenBps;
         uint16 betCutoffBps; // no new bets while the latest price is this close to the strike
+        uint16 staleZTenths; // z for the z*sigma*sqrt(age) margin, in tenths (30 = 3.0)
+        uint16 closeBps; // betting closes this share of the window before the deadline
+        uint32 voidAfter; // after end: no oracle round past the deadline by then => void
+        uint64 minScoredVolume; // outside volume a call needs to count toward skill
     }
 
     Params public params;
@@ -71,6 +97,7 @@ contract ThesisCalls is ReentrancyGuard {
     struct Feed {
         bool enabled;
         uint32 volBps; // annualised volatility (6000 = 60%)
+        uint32 monitorSecs; // typical gap between oracle rounds (discrete-monitoring correction)
         uint64 volUpdatedAt;
     }
 
@@ -95,9 +122,23 @@ contract ThesisCalls is ReentrancyGuard {
         int256 touchPrice;
         uint80 checkedRound; // every round up to this one has been checked for a touch
         bool scanDone; // a round after `end` was reached: nothing left to check
+        bool voided; // settled as void: every stake refunded
+        uint16 feeBps; // fee for this call, fixed at posting
+        uint32 grace; // proof grace for this call, fixed at posting
+        uint64 closeAt; // betting closes at this time
+        uint64 oracleAt; // time of the print the opening odds used
+        uint64 touchAt; // time of the touching round
         uint256 yesPool; // net of fees
         uint256 noPool;
         uint256 volume; // gross bets
+        uint256 outsideVolume; // gross bets by others than the creator
+        uint256 voidYes; // stakes refunded because they were placed right before the touch
+        uint256 voidNo;
+    }
+
+    struct Stakes {
+        uint128 yes;
+        uint128 no;
     }
 
     Call[] internal calls;
@@ -105,13 +146,17 @@ contract ThesisCalls is ReentrancyGuard {
     mapping(uint256 => mapping(address => uint256)) public yesStake;
     mapping(uint256 => mapping(address => uint256)) public noStake;
     mapping(uint256 => mapping(address => bool)) public claimed;
+    /// @notice Net stakes per call per minute bucket, and per wallet.
+    mapping(uint256 => mapping(uint256 => Stakes)) public bucketStakes;
+    mapping(uint256 => mapping(address => mapping(uint256 => Stakes))) public userBucketStakes;
 
     struct Stats {
         uint32 posted;
         uint32 hits;
         uint32 misses;
-        int64 skillBps; // sum over settled calls of (hit ? 10000 : 0) - openBps
+        int64 skillBps; // sum over scored calls of (hit ? 10000 : 0) - openBps
         uint128 volume; // gross bets on their calls
+        uint32 scored; // settled calls with enough outside volume to count toward skill
     }
 
     mapping(address => Stats) public stats;
@@ -136,13 +181,15 @@ contract ThesisCalls is ReentrancyGuard {
     );
     event Bet(uint256 indexed id, address indexed user, bool yes, uint256 amount, uint256 fee, uint256 yesPool, uint256 noPool);
     event Touched(uint256 indexed id, uint80 roundId, int256 price, uint256 updatedAt, address prover);
-    event Settled(uint256 indexed id, bool yesWon, int64 skillDeltaBps, address indexed creator);
+    event Settled(uint256 indexed id, bool yesWon, int64 skillDeltaBps, address indexed creator, bool scored);
+    event Voided(uint256 indexed id, VoidReason reason);
+    event Synced(uint256 indexed id, uint80 checkedRound, bool caughtUp);
     event Claimed(uint256 indexed id, address indexed user, uint256 amount);
     event CreatorFeesClaimed(address indexed creator, uint256 amount);
     event TreasuryWithdrawn(address indexed to, uint256 amount);
-    event FeedSet(address indexed feed, bool enabled, uint32 volBps);
-    event VolatilitySet(address indexed feed, uint32 volBps);
-    event ParamsSet();
+    event FeedSet(address indexed feed, bool enabled, uint32 volBps, uint32 monitorSecs);
+    event VolatilitySet(address indexed feed, uint32 volBps, uint32 monitorSecs);
+    event ParamsSet(Params params);
     event PausedSet(bool paused);
     event KeeperSet(address keeper);
     event TreasurySet(address treasury);
@@ -176,6 +223,7 @@ contract ThesisCalls is ReentrancyGuard {
     error NothingToClaim();
     error SyncRequired();
     error NearStrike();
+    error AwaitingOracle();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert Unauthorized();
@@ -207,12 +255,13 @@ contract ThesisCalls is ReentrancyGuard {
                 || p.maxOracleAge == 0 || p.maxOracleAge > 1 days || p.maxVolAge == 0 || p.minDistanceBps == 0
                 || p.minDistanceBps > p.maxDistanceBps || p.maxDistanceBps > 9_000 || p.minOpenBps < 100
                 || p.minOpenBps > p.maxOpenBps || p.maxOpenBps > 9_900 || p.betCutoffBps > 500
-                || p.betCutoffBps >= p.minDistanceBps
+                || p.betCutoffBps >= p.minDistanceBps || p.staleZTenths < 10 || p.staleZTenths > 60
+                || p.closeBps > 5_000 || p.voidAfter < 1 days || p.voidAfter > 30 days || p.minScoredVolume == 0
         ) revert BadParams();
         // A pool must start with stake on both sides: seed * minOpenBps / BPS > 0.
         if ((uint256(p.minSeed) * p.minOpenBps) / BPS == 0) revert BadParams();
         params = p;
-        emit ParamsSet();
+        emit ParamsSet(p);
     }
 
     function setParams(Params calldata p) external onlyOwner {
@@ -220,20 +269,22 @@ contract ThesisCalls is ReentrancyGuard {
     }
 
     /// @notice Enable or disable an oracle feed (calls already open keep working).
-    function setFeed(address feed, bool enabled, uint32 volBps) external onlyOwner {
-        if (feed == address(0) || volBps < 1_000 || volBps > 30_000) revert BadParams();
+    function setFeed(address feed, bool enabled, uint32 volBps, uint32 monitorSecs) external onlyOwner {
+        if (feed == address(0) || volBps < 1_000 || volBps > 30_000 || monitorSecs > 1 days) revert BadParams();
         if (!feeds[feed].enabled && feeds[feed].volUpdatedAt == 0) feedList.push(feed);
-        feeds[feed] = Feed({enabled: enabled, volBps: volBps, volUpdatedAt: uint64(block.timestamp)});
-        emit FeedSet(feed, enabled, volBps);
+        feeds[feed] = Feed({enabled: enabled, volBps: volBps, monitorSecs: monitorSecs, volUpdatedAt: uint64(block.timestamp)});
+        emit FeedSet(feed, enabled, volBps, monitorSecs);
     }
 
-    /// @notice Keeper (or owner) posts a feed's annualised volatility, e.g. 7-day realised.
-    function setVolatility(address feed, uint32 volBps) external {
+    /// @notice Keeper (or owner) posts a feed's annualised volatility (7-day
+    /// realised) and its typical gap between oracle rounds.
+    function setVolatility(address feed, uint32 volBps, uint32 monitorSecs) external {
         if (msg.sender != keeper && msg.sender != owner) revert Unauthorized();
-        if (feeds[feed].volUpdatedAt == 0 || volBps < 1_000 || volBps > 30_000) revert BadParams();
+        if (feeds[feed].volUpdatedAt == 0 || volBps < 1_000 || volBps > 30_000 || monitorSecs > 1 days) revert BadParams();
         feeds[feed].volBps = volBps;
+        feeds[feed].monitorSecs = monitorSecs;
         feeds[feed].volUpdatedAt = uint64(block.timestamp);
-        emit VolatilitySet(feed, volBps);
+        emit VolatilitySet(feed, volBps, monitorSecs);
     }
 
     function setPaused(bool p) external onlyOwner {
@@ -284,54 +335,34 @@ contract ThesisCalls is ReentrancyGuard {
         returns (uint256 id)
     {
         Params memory p = params;
-        Feed memory f = feeds[feed];
-        if (!f.enabled) revert FeedNotEnabled();
-        if (block.timestamp - f.volUpdatedAt > p.maxVolAge) revert StaleVolatility();
         if (bytes(text).length > MAX_TEXT_BYTES) revert TextTooLong();
         if (seed < p.minSeed || seed > p.maxSeed) revert BadSeed();
-
-        (uint80 roundId, int256 spot,, uint256 updatedAt,) = IPriceFeed(feed).latestRoundData();
-        if (spot <= 0 || strike <= 0) revert BadPrice();
-        if (updatedAt > block.timestamp || block.timestamp - updatedAt > p.maxOracleAge) revert StaleOracle();
-        // The strike must be ahead of the latest price, by at least minDistanceBps:
-        // nobody can post a call the market has already reached.
-        if (above ? strike <= spot : strike >= spot) revert StrikeWrongSide();
-        uint256 dist = TouchMath.distanceBps(uint256(spot), uint256(strike));
-        if (dist < p.minDistanceBps || dist > p.maxDistanceBps) revert StrikeDistance();
-
         if (end <= block.timestamp) revert BadWindow();
-        uint256 tau = end - block.timestamp;
-        if (tau < p.minWindow || tau > p.maxWindow) revert BadWindow();
-        uint256 open = TouchMath.touchProbabilityBps(uint256(spot), uint256(strike), f.volBps, tau);
-        if (open < p.minOpenBps || open > p.maxOpenBps) revert OddsOutOfRange();
+        uint256 window = end - block.timestamp;
+        if (window < p.minWindow || window > p.maxWindow) revert BadWindow();
+        (uint256 open, int256 spot, uint80 roundId, uint256 updatedAt) = _price(feed, above, strike, end, p);
 
         stakeToken.safeTransferFrom(msg.sender, address(this), seed);
         uint256 yes = (seed * open) / BPS;
         uint256 no = seed - yes;
 
         id = calls.length;
-        calls.push(
-            Call({
-                creator: msg.sender,
-                feed: feed,
-                above: above,
-                touched: false,
-                settled: false,
-                yesWon: false,
-                openBps: uint16(open),
-                start: uint64(block.timestamp),
-                end: end,
-                strike: strike,
-                spotAtOpen: spot,
-                touchRound: 0,
-                touchPrice: 0,
-                checkedRound: roundId,
-                scanDone: false,
-                yesPool: yes,
-                noPool: no,
-                volume: 0
-            })
-        );
+        Call storage c = calls.push();
+        c.creator = msg.sender;
+        c.feed = feed;
+        c.above = above;
+        c.openBps = uint16(open);
+        c.start = uint64(block.timestamp);
+        c.end = end;
+        c.strike = strike;
+        c.spotAtOpen = spot;
+        c.checkedRound = roundId;
+        c.feeBps = p.feeBps;
+        c.grace = p.grace;
+        c.closeAt = uint64(end - (window * p.closeBps) / BPS);
+        c.oracleAt = uint64(updatedAt);
+        c.yesPool = yes;
+        c.noPool = no;
         if (bytes(text).length > 0) callText[id] = text;
         yesStake[id][msg.sender] = yes;
         noStake[id][msg.sender] = no;
@@ -342,36 +373,83 @@ contract ThesisCalls is ReentrancyGuard {
         emit CallCreated(id, msg.sender, feed, above, strike, spot, uint64(block.timestamp), end, uint16(open), seed, text);
     }
 
-    /// @notice Back (yes) or challenge (no) a call. A 2% fee (params.feeBps) is
+    /// @dev Every check a new call must pass, and its opening odds. The odds
+    /// run from the latest print (not from now): the market has moved unseen
+    /// since then, so that time counts as part of the window.
+    function _price(address feed, bool above, int256 strike, uint64 end, Params memory p)
+        internal
+        view
+        returns (uint256 open, int256 spot, uint80 roundId, uint256 updatedAt)
+    {
+        Feed memory f = feeds[feed];
+        if (!f.enabled) revert FeedNotEnabled();
+        if (block.timestamp - f.volUpdatedAt > p.maxVolAge) revert StaleVolatility();
+        (roundId, spot,, updatedAt,) = IPriceFeed(feed).latestRoundData();
+        if (spot <= 0 || strike <= 0) revert BadPrice();
+        if (updatedAt > block.timestamp || block.timestamp - updatedAt > p.maxOracleAge) revert StaleOracle();
+        // The strike must be ahead of the latest price, by at least minDistanceBps
+        // and by more than the market can plausibly have moved since that print:
+        // nobody can post a call the market has already reached.
+        if (above ? strike <= spot : strike >= spot) revert StrikeWrongSide();
+        uint256 dist = TouchMath.distanceBps(uint256(spot), uint256(strike));
+        uint256 stale = TouchMath.staleMoveBps(f.volBps, block.timestamp - updatedAt, p.staleZTenths);
+        if (dist < p.minDistanceBps || dist < stale || dist > p.maxDistanceBps) revert StrikeDistance();
+        open = TouchMath.touchProbabilityBps(uint256(spot), uint256(strike), f.volBps, end - updatedAt, f.monitorSecs);
+        if (open < p.minOpenBps || open > p.maxOpenBps) revert OddsOutOfRange();
+    }
+
+    /// @notice Back (yes) or challenge (no) a call. A fee (the call's feeBps) is
     /// split between the call's creator and the treasury; the rest joins the pool.
     /// Before taking it, every oracle round since the last check is scanned: if
     /// one already touched the strike, the call settles YES and nothing is taken.
+    /// Betting closes at `closeAt`, while the latest print is too old, and while
+    /// the strike is within z*sigma*sqrt(age) (at least betCutoffBps) of it.
     function bet(uint256 id, bool yes, uint256 amount) external nonReentrant whenNotPaused {
         Call storage c = _call(id);
-        if (c.settled || block.timestamp >= c.end) revert CallClosed();
+        if (c.settled || block.timestamp >= c.closeAt) revert CallClosed();
         if (amount < params.minStake) revert StakeTooSmall();
         bool caughtUp = _scan(id, c, SCAN_PER_TX);
-        if (c.touched) return; // settled YES just now; the bet is not taken
+        if (c.settled) return; // touched (or voided) just now; the bet is not taken
         if (!caughtUp) revert SyncRequired();
-        (, int256 last,,,) = IPriceFeed(c.feed).latestRoundData();
-        if (last > 0 && TouchMath.distanceBps(uint256(last), uint256(c.strike)) < params.betCutoffBps) revert NearStrike();
+        (uint256 needBps, uint256 distBps) = _betGap(c);
+        if (distBps < needBps) revert NearStrike();
         stakeToken.safeTransferFrom(msg.sender, address(this), amount);
 
-        uint256 fee = (amount * params.feeBps) / BPS;
+        uint256 fee = (amount * c.feeBps) / BPS;
         uint256 toCreator = (fee * creatorShareBps) / BPS;
         creatorFeesOwed[c.creator] += toCreator;
         treasuryFees += fee - toCreator;
         uint256 net = amount - fee;
+        uint256 bucket = block.timestamp / VOID_WINDOW;
+        Stakes storage b = bucketStakes[id][bucket];
+        Stakes storage ub = userBucketStakes[id][msg.sender][bucket];
         if (yes) {
             c.yesPool += net;
             yesStake[id][msg.sender] += net;
+            b.yes += uint128(net);
+            ub.yes += uint128(net);
         } else {
             c.noPool += net;
             noStake[id][msg.sender] += net;
+            b.no += uint128(net);
+            ub.no += uint128(net);
         }
         c.volume += amount;
+        if (msg.sender != c.creator) c.outsideVolume += amount;
         stats[c.creator].volume += uint128(amount);
         emit Bet(id, msg.sender, yes, amount, fee, c.yesPool, c.noPool);
+    }
+
+    /// @dev Distance the strike needs from the latest print to take a bet, and
+    /// the distance it has. Reverts if the print is too old to bet on at all.
+    function _betGap(Call storage c) internal view returns (uint256 needBps, uint256 distBps) {
+        (, int256 last,, uint256 updatedAt,) = IPriceFeed(c.feed).latestRoundData();
+        if (last <= 0 || updatedAt > block.timestamp) revert BadPrice();
+        uint256 age = block.timestamp - updatedAt;
+        if (age > params.maxOracleAge) revert StaleOracle();
+        needBps = TouchMath.staleMoveBps(feeds[c.feed].volBps, age, params.staleZTenths);
+        if (needBps < params.betCutoffBps) needBps = params.betCutoffBps;
+        distBps = TouchMath.distanceBps(uint256(last), uint256(c.strike));
     }
 
     /// @notice Anyone: prove the call touched with an oracle round published
@@ -379,7 +457,7 @@ contract ThesisCalls is ReentrancyGuard {
     function proveTouch(uint256 id, uint80 roundId) external nonReentrant {
         Call storage c = _call(id);
         if (c.touched || c.settled) revert AlreadyFinal();
-        if (block.timestamp > uint256(c.end) + params.grace) revert ProofTooLate();
+        if (block.timestamp > uint256(c.end) + c.grace) revert ProofTooLate();
         (, int256 price,, uint256 updatedAt,) = IPriceFeed(c.feed).getRoundData(roundId);
         if (price <= 0 || updatedAt == 0) revert BadPrice();
         if (updatedAt < c.start || updatedAt > c.end) revert RoundOutsideWindow();
@@ -394,19 +472,32 @@ contract ThesisCalls is ReentrancyGuard {
         Call storage c = _call(id);
         if (c.settled) return true;
         caughtUp = _scan(id, c, maxRounds == 0 ? SCAN_PER_TX : maxRounds);
+        emit Synced(id, c.checkedRound, caughtUp);
     }
 
     /// @notice Anyone, after the deadline and grace period: settles NO, but
-    /// only once every oracle round up to the deadline has been checked (a
-    /// crossing round found on the way settles it YES instead).
+    /// only once every oracle round up to the deadline has been checked and
+    /// the oracle has published a round after it (a crossing round found on
+    /// the way settles it YES instead).
     function settle(uint256 id) external nonReentrant {
         Call storage c = _call(id);
         if (c.settled) revert AlreadyFinal();
-        if (block.timestamp <= uint256(c.end) + params.grace) revert TooEarly();
+        if (block.timestamp <= uint256(c.end) + c.grace) revert TooEarly();
         bool caughtUp = _scan(id, c, SCAN_PER_TX);
         if (c.settled) return; // a touch was found
         if (!caughtUp) revert SyncRequired();
+        if (!c.scanDone) revert AwaitingOracle(); // no round after the deadline yet
         _settle(id, c, false);
+    }
+
+    /// @notice Anyone: if the oracle has not published a round after the
+    /// deadline within `voidAfter` (outage, broken or retired feed), the call is
+    /// void and every stake is refunded. Needs nothing from the feed.
+    function voidCall(uint256 id) external nonReentrant {
+        Call storage c = _call(id);
+        if (c.settled) revert AlreadyFinal();
+        if (block.timestamp <= uint256(c.end) + params.voidAfter) revert TooEarly();
+        _void(id, c, VoidReason.OracleTimeout);
     }
 
     /// @dev Walks rounds after `checkedRound`, at most `maxRounds`. Rounds the
@@ -441,7 +532,21 @@ contract ThesisCalls is ReentrancyGuard {
         c.touched = true;
         c.touchRound = roundId;
         c.touchPrice = price;
+        c.touchAt = uint64(updatedAt);
         emit Touched(id, roundId, price, updatedAt, msg.sender);
+        // A touch this soon after posting means the call was posted into a move
+        // the oracle hadn't printed yet: void it, nobody wins or scores.
+        if (updatedAt < uint256(c.start) + VOID_WINDOW) {
+            _void(id, c, VoidReason.EarlyTouch);
+            return;
+        }
+        // Stakes placed in the touching round's minute or the one before could
+        // have front-run the oracle update: refund them instead of paying them.
+        uint256 b0 = updatedAt / VOID_WINDOW;
+        Stakes memory s0 = bucketStakes[id][b0];
+        Stakes memory s1 = bucketStakes[id][b0 - 1];
+        c.voidYes = uint256(s0.yes) + s1.yes;
+        c.voidNo = uint256(s0.no) + s1.no;
         _settle(id, c, true);
     }
 
@@ -452,16 +557,31 @@ contract ThesisCalls is ReentrancyGuard {
         Stats storage s = stats[c.creator];
         if (yesWon) s.hits += 1;
         else s.misses += 1;
-        s.skillBps += delta;
-        emit Settled(id, yesWon, delta, c.creator);
+        // Only calls others actually traded count toward skill: a call nobody
+        // bet on cost its creator nothing, so it proves nothing.
+        bool scored = c.outsideVolume >= params.minScoredVolume;
+        if (scored) {
+            s.skillBps += delta;
+            s.scored += 1;
+        } else {
+            delta = 0;
+        }
+        emit Settled(id, yesWon, delta, c.creator, scored);
     }
 
-    /// @notice Winners take the whole pot pro rata to their winning stake.
+    function _void(uint256 id, Call storage c, VoidReason reason) internal {
+        c.settled = true;
+        c.voided = true;
+        emit Voided(id, reason);
+    }
+
+    /// @notice Winners take the whole pot pro rata to their winning stake;
+    /// refunded stakes (void call, or placed right before the touch) come back.
     function claim(uint256 id) external nonReentrant returns (uint256 amount) {
         Call storage c = _call(id);
         if (!c.settled) revert NotSettled();
         if (claimed[id][msg.sender]) revert NothingToClaim();
-        amount = _payout(c, c.yesWon ? yesStake[id][msg.sender] : noStake[id][msg.sender], c.yesWon);
+        amount = _claimable(id, c, msg.sender);
         if (amount == 0) revert NothingToClaim();
         claimed[id][msg.sender] = true;
         stakeToken.safeTransfer(msg.sender, amount);
@@ -487,6 +607,24 @@ contract ThesisCalls is ReentrancyGuard {
         uint256 side = yesSide ? c.yesPool : c.noPool;
         if (stake == 0 || side == 0) return 0;
         return (stake * (c.yesPool + c.noPool)) / side;
+    }
+
+    /// @dev What `user` gets from a settled call (ignores `claimed`).
+    function _claimable(uint256 id, Call storage c, address user) internal view returns (uint256) {
+        uint256 y = yesStake[id][user];
+        uint256 n = noStake[id][user];
+        if (c.voided) return y + n;
+        if (!c.yesWon) return _payout(c, n, false);
+        // YES: stakes placed right before the touch are refunded, the rest
+        // share the pot left once those refunds are taken out.
+        uint256 b0 = uint256(c.touchAt) / VOID_WINDOW;
+        Stakes memory u0 = userBucketStakes[id][user][b0];
+        Stakes memory u1 = userBucketStakes[id][user][b0 - 1];
+        uint256 refund = uint256(u0.yes) + u1.yes + u0.no + u1.no;
+        uint256 stake = y - (uint256(u0.yes) + u1.yes);
+        uint256 side = c.yesPool - c.voidYes;
+        uint256 pot = c.yesPool + c.noPool - c.voidYes - c.voidNo;
+        return refund + (stake == 0 ? 0 : (stake * pot) / side);
     }
 
     function callCount() external view returns (uint256) {
@@ -515,7 +653,7 @@ contract ThesisCalls is ReentrancyGuard {
     /// @notice What a bet would add to the pool and pay if its side wins (if no one else bets).
     function quote(uint256 id, bool yes, uint256 amount) external view returns (uint256 net, uint256 payoutIfWin) {
         Call storage c = _call(id);
-        net = amount - (amount * params.feeBps) / BPS;
+        net = amount - (amount * c.feeBps) / BPS;
         uint256 side = (yes ? c.yesPool : c.noPool) + net;
         payoutIfWin = (net * (c.yesPool + c.noPool + net)) / side;
     }
@@ -532,6 +670,27 @@ contract ThesisCalls is ReentrancyGuard {
         hasClaimed = claimed[id][user];
         payoutIfYes = _payout(c, yes, true);
         payoutIfNo = _payout(c, no, false);
+    }
+
+    /// @notice What `user` can claim from call `id` now (0 if open, claimed or lost).
+    function claimable(uint256 id, address user) external view returns (uint256) {
+        Call storage c = _call(id);
+        if (!c.settled || claimed[id][user]) return 0;
+        return _claimable(id, c, user);
+    }
+
+    /// @notice Whether call `id` takes bets right now, and if not, why:
+    /// the distance the strike needs from the latest print and the distance
+    /// it has (bets need dist >= need), and the print's age.
+    function betStatus(uint256 id) external view returns (bool open, uint256 needBps, uint256 distBps, uint256 oracleAge) {
+        Call storage c = _call(id);
+        (, int256 last,, uint256 updatedAt,) = IPriceFeed(c.feed).latestRoundData();
+        oracleAge = updatedAt > block.timestamp ? 0 : block.timestamp - updatedAt;
+        if (last > 0) distBps = TouchMath.distanceBps(uint256(last), uint256(c.strike));
+        needBps = TouchMath.staleMoveBps(feeds[c.feed].volBps, oracleAge, params.staleZTenths);
+        if (needBps < params.betCutoffBps) needBps = params.betCutoffBps;
+        open = !paused && !c.settled && block.timestamp < c.closeAt && oracleAge <= params.maxOracleAge && last > 0
+            && distBps >= needBps;
     }
 
     function creatorCount() external view returns (uint256) {
@@ -556,11 +715,20 @@ contract ThesisCalls is ReentrancyGuard {
     }
 
     /// @notice Opening odds a call would get right now (for the Post form).
-    function previewOpenBps(address feed, int256 strike, uint64 end) external view returns (uint256 openBps, int256 spot) {
-        Feed memory f = feeds[feed];
-        if (!f.enabled) revert FeedNotEnabled();
-        (, spot,,,) = IPriceFeed(feed).latestRoundData();
-        if (spot <= 0 || strike <= 0 || end <= block.timestamp) revert BadPrice();
-        openBps = TouchMath.touchProbabilityBps(uint256(spot), uint256(strike), f.volBps, end - block.timestamp);
+    /// Reverts with the same error createCall would.
+    function previewOpenBps(address feed, bool above, int256 strike, uint64 end) external view returns (uint256 openBps, int256 spot) {
+        Params memory p = params;
+        if (end <= block.timestamp) revert BadWindow();
+        uint256 window = end - block.timestamp;
+        if (window < p.minWindow || window > p.maxWindow) revert BadWindow();
+        (openBps, spot,,) = _price(feed, above, strike, end, p);
+    }
+
+    /// @notice The least strike distance a new call on `feed` needs right now, in bps.
+    function minDistanceNow(address feed) external view returns (uint256) {
+        (,,, uint256 updatedAt,) = IPriceFeed(feed).latestRoundData();
+        uint256 age = updatedAt > block.timestamp ? 0 : block.timestamp - updatedAt;
+        uint256 stale = TouchMath.staleMoveBps(feeds[feed].volBps, age, params.staleZTenths);
+        return stale > params.minDistanceBps ? stale : params.minDistanceBps;
     }
 }

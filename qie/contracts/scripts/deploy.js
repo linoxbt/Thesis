@@ -8,31 +8,7 @@
 const { ethers, network } = require("hardhat");
 const fs = require("node:fs");
 
-const QUSDC = "0x3F43DA82eC9A4f5285F10FaF1F26EcA7319E5DA5";
-const FEEDS = {
-  BTC: { address: "0x9E596d809a20A272c788726f592c0d1629755440", volBps: 7_200 }, // 7-day realised, measured 26 Nov 2026
-  ETH: { address: "0x4bb7012Fbc79fE4Ae9B664228977b442b385500d", volBps: 8_200 },
-  SOL: { address: "0xe86999c8e6C8eeF71bebd35286bCa674E0AD7b21", volBps: 6_800 },
-};
-const USDC = 1_000_000n;
-
-// Launch limits: small, raised later with setParams.
-const PARAMS = {
-  feeBps: 200, // 2% per bet: half to the call's creator, half to the treasury
-  minSeed: 2n * USDC,
-  maxSeed: 250n * USDC,
-  minStake: 500_000n, // 0.5 QUSDC
-  minWindow: 30 * 60,
-  maxWindow: 8 * 86_400,
-  grace: 300,
-  maxOracleAge: 3 * 3600, // QIE Oracle rounds arrive minutes to ~an hour apart
-  maxVolAge: 14 * 86_400,
-  minDistanceBps: 100, // 1% from the latest price
-  maxDistanceBps: 5_000,
-  minOpenBps: 100,
-  maxOpenBps: 9_900,
-  betCutoffBps: 25,
-};
+const { LAUNCH_PARAMS: PARAMS, FEEDS, QUSDC } = require("./params");
 
 async function main() {
   const [deployer] = await ethers.getSigners();
@@ -60,10 +36,11 @@ async function main() {
       console.log(`skip ${name}: no oracle at ${f.address} on this network`);
       continue;
     }
-    await (await calls.setFeed(f.address, true, f.volBps)).wait();
-    console.log(`feed ${name} enabled (${f.volBps / 100}% vol)`);
+    await (await calls.setFeed(f.address, true, f.volBps, f.monitorSecs)).wait();
+    console.log(`feed ${name} enabled (${f.volBps / 100}% vol, rounds ~${f.monitorSecs}s apart)`);
   }
-  const out = { network: network.name, chainId: network.config.chainId, ThesisCalls: address, stakeToken: stake, treasury, keeper, feeds: FEEDS, deployedAt: new Date().toISOString() };
+  const block = (await calls.deploymentTransaction()?.wait())?.blockNumber ?? null;
+  const out = { network: network.name, deployBlock: block, owner: deployer.address, chainId: network.config.chainId, ThesisCalls: address, stakeToken: stake, treasury, keeper, params: Object.fromEntries(Object.entries(PARAMS).map(([k, v]) => [k, String(v)])), feeds: FEEDS, deployedAt: new Date().toISOString() };
   fs.writeFileSync(`deployments/${network.name}.json`, JSON.stringify(out, null, 2) + "\n");
   console.log(`wrote deployments/${network.name}.json`);
 }
