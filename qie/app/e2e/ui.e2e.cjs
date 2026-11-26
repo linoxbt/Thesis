@@ -119,7 +119,8 @@ async function main() {
   });
   await page.click('[data-testid="connect"]');
   await page.waitForSelector('[data-testid="signin-modal"]');
-  check("sign-in opens on QIE ID", await page.isVisible('[data-testid="qieid-input"]'));
+  check("sign-in offers QIE Pass and Wallet, no tabs", (await page.isVisible('[data-testid="signin-qiepass"]')) && (await page.isVisible('[data-testid="signin-wallet"]')) && (await page.locator('[data-testid="signin-modal"] [role="tab"]').count()) === 0);
+  await page.click('[data-testid="signin-qiepass"]');
   // a) an unknown QIE ID
   await page.fill('[data-testid="qieid-input"]', "ghost");
   await page.click('[data-testid="qieid-submit"]');
@@ -194,8 +195,7 @@ async function main() {
   await page.click('[data-testid="account"]');
   await page.click("text=Sign out");
   await page.click('[data-testid="connect"]');
-  await page.click('[data-testid="signin-tab-wallets"]');
-  await page.click('[data-testid="signin-injected"]');
+  await page.click('[data-testid="signin-wallet"]');
   await page.waitForSelector('[data-testid="account"]', { timeout: 20_000 });
   check("wallet sign-in works too (no QIE Pass badge)", !(await page.isVisible('[data-testid="account-qiepass"]')) && /tester\.qie/.test((await page.textContent('[data-testid="account"]')) ?? ""));
 

@@ -6,11 +6,11 @@
   "feeds": {
     "BTC": {
       "address": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
-      "price": "6049365011929"
+      "price": "6060307956563"
     },
     "ETH": {
       "address": "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707",
-      "price": "169136685894"
+      "price": "169526265833"
     },
     "SOL": {
       "address": "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6",
