@@ -2,7 +2,7 @@
 
 import { CALLS_ADDRESS, explorerAddress, explorerTx, NETWORK } from "@/lib/config";
 import { useData, useNow } from "@/lib/data";
-import { callLine, price, qusdc, when } from "@/lib/format";
+import { callLine, pct, price, qusdc, when } from "@/lib/format";
 import { usdPx } from "@/components/Position";
 
 function Tile({ label, value, sub }: { label: string; value: string; sub?: string }) {
@@ -17,7 +17,7 @@ function Tile({ label, value, sub }: { label: string; value: string; sub?: strin
 
 /** Public traction, straight from the contract and its events. */
 export default function StatsPage() {
-  const { ready, historyReady, calls, events, feedOf } = useData();
+  const { ready, historyReady, calls, events, feedOf, creatorShareBps } = useData();
   const now = useNow(60_000);
   if (!ready || !historyReady) return <p className="text-sm text-muted">Reading from QIE…</p>;
   const wallets = new Set([...events.trades.map((t) => t.user.toLowerCase()), ...calls.map((c) => c.creator.toLowerCase())]);
@@ -26,7 +26,8 @@ export default function StatsPage() {
   const fees = events.trades.reduce((s, t) => s + t.fee, 0n);
   const paid = events.claims.reduce((s, c) => s + c.amount, 0n);
   const open = calls.filter((c) => !c.settled && c.end > now).reduce((s, c) => s + c.yesPool + c.noPool, 0n);
-  const touched = calls.filter((c) => c.touched);
+  const voided = calls.filter((c) => c.voided).length;
+  const touched = calls.filter((c) => c.touched && !c.voided);
   const txOf = new Map(events.touches.map((t) => [t.id, t]));
   return (
     <div className="space-y-4">
@@ -44,12 +45,12 @@ export default function StatsPage() {
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-4" data-testid="stats">
         <Tile label="Trading wallets" value={String(wallets.size)} />
         <Tile label="Trades" value={String(events.trades.length)} />
-        <Tile label="Volume" value={qusdc(volume, 0)} sub="QUSDC, seeds included" />
-        <Tile label="Fees" value={qusdc(fees)} sub="QUSDC, half to creators" />
+        <Tile label="Volume" value={qusdc(volume, 0)} sub="QUSDC bet (seeds not included)" />
+        <Tile label="Fees" value={qusdc(fees)} sub={`QUSDC, ${pct(creatorShareBps, 0)} to creators`} />
         <Tile label="Calls posted" value={String(calls.length)} sub={`by ${creators.size} creator${creators.size === 1 ? "" : "s"}`} />
         <Tile label="In open pots" value={qusdc(open, 0)} sub="QUSDC" />
         <Tile label="Paid out" value={qusdc(paid, 0)} sub="QUSDC claimed" />
-        <Tile label="Touches proven" value={String(touched.length)} />
+        <Tile label="Touches proven" value={String(touched.length)} sub={voided ? `${voided} void (refunded)` : undefined} />
       </div>
       <section className="panel p-5">
         <span className="label">Proofs</span>

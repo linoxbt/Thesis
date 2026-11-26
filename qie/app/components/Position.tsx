@@ -1,11 +1,11 @@
 import { usd as usdBase } from "@/lib/format";
-import { fmtLev, fmtPct, markMove, type Position } from "@/lib/position";
+import { fmtPct, markMove, type Position } from "@/lib/position";
 
 /** Dollar prices: whole dollars from $1,000 up (BTC, ETH), cents below. */
 export const usdPx = (v: number) => usdBase(v, v >= 1000 ? 0 : 2);
 const usd = usdPx;
 
-/** "LONG 20x" / "SHORT" pill, as on a perp venue. */
+/** "LONG" / "SHORT" pill, as on a perp venue. */
 export function SidePill({ p, size = "sm" }: { p: Position; size?: "sm" | "lg" }) {
   const long = p.side === "long";
   return (
@@ -18,17 +18,16 @@ export function SidePill({ p, size = "sm" }: { p: Position; size?: "sm" | "lg" }
       data-testid="side-pill"
     >
       {long ? "Long" : "Short"}
-      {p.lev !== null && <span className="normal-case opacity-80">{fmtLev(p.lev)}</span>}
     </span>
   );
 }
 
 /**
- * Liquidation ← entry → take profit on one line, with the live mark. The
- * left end is always the losing side, whatever the direction.
+ * Entry → take profit on one line, with the live mark. The left end is
+ * always the losing side, whatever the direction.
  */
-export function PositionBar({ p, mark }: { p: Position; mark?: number | null }) {
-  const lo = p.liq ?? p.entry - (p.tp - p.entry);
+function PositionBar({ p, mark }: { p: Position; mark?: number | null }) {
+  const lo = p.entry - (p.tp - p.entry);
   // Map prices onto 0..1 with liquidation at 0 and take profit at 1.
   const at = (v: number) => Math.min(1, Math.max(0, (v - lo) / (p.tp - lo)));
   const entryX = at(p.entry);
@@ -47,11 +46,8 @@ export function PositionBar({ p, mark }: { p: Position; mark?: number | null }) 
   );
 }
 
-/**
- * Entry / take profit / a third level, with each move in %. On QIE a call has no
- * liquidation level, so the third cell is the deadline unless one is given.
- */
-export function PositionLevels({ p, mark, dense = false, third }: { p: Position; mark?: number | null; dense?: boolean; third?: { k: string; v: string; sub?: string } }) {
+/** Entry / take profit / a third cell (usually the deadline), with each move in %. */
+export function PositionLevels({ p, mark, dense = false, third }: { p: Position; mark?: number | null; dense?: boolean; third: { k: string; v: string; sub?: string } }) {
   const m = mark != null ? markMove(p, mark) : null;
   const cell = "min-w-0";
   const k = "text-[10px] uppercase tracking-wide text-faint";
@@ -69,37 +65,23 @@ export function PositionLevels({ p, mark, dense = false, third }: { p: Position;
           <div className="text-[10px] text-yes">{fmtPct(p.tpMovePct)}</div>
         </div>
         <div className={cell}>
-          {third ? (
-            <>
-              <div className={k}>{third.k}</div>
-              <div className={v}>{third.v}</div>
-              {third.sub && <div className="text-[10px] text-faint">{third.sub}</div>}
-            </>
-          ) : (
-            <>
-              <div className={k}>Liquidation</div>
-              <div className={v}>{p.liq !== null ? usd(p.liq) : "—"}</div>
-              {p.liqMovePct !== null ? <div className="text-[10px] text-bad">{fmtPct(p.liqMovePct)}</div> : <div className="text-[10px] text-faint">not set</div>}
-            </>
-          )}
+          <div className={k}>{third.k}</div>
+          <div className={v}>{third.v}</div>
+          {third.sub && <div className="text-[10px] text-faint">{third.sub}</div>}
         </div>
       </div>
       <PositionBar p={p} mark={mark} />
       <div className="flex justify-between text-[11px] text-faint">
         <span>
-          {m ? (
+          {m !== null ? (
             <>
               mark <span className="text-muted">{usd(mark!)}</span>{" "}
-              <span className={m.movePct >= 0 ? "text-yes" : "text-bad"}>
-                {fmtPct(m.movePct, 2)}
-                {m.roe !== null && !dense ? ` · ${fmtPct(m.roe, 0)} ROE` : ""}
-              </span>
+              <span className={m >= 0 ? "text-yes" : "text-bad"}>{fmtPct(m, 2)}</span>
             </>
           ) : (
             "mark …"
           )}
         </span>
-        {p.roeAtTp !== null && <span className="text-yes">{fmtPct(p.roeAtTp, 0)} ROE at TP</span>}
       </div>
     </div>
   );

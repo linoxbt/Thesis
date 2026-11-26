@@ -13,7 +13,7 @@ export function LiveLine() {
     ["calls", String(calls.length)],
     ["traded", `${qusdc(calls.reduce((s, c) => s + c.volume, 0n), 0)} QUSDC`],
     ["wallets", String(wallets)],
-    ["touches proven", String(calls.filter((c) => c.touched).length)],
+    ["touches proven", String(calls.filter((c) => c.touched && !c.voided).length)],
   ];
   return (
     <div className="num mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted" data-testid="live-stats">

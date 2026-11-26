@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { Address } from "viem";
 import { publicClient, readCalls, readCreators, readFeeds, readParams, type Call, type Feed, type Params, type Stats } from "./chain";
 import { DEPLOY_BLOCK, DEPLOYED } from "./config";
-import { emptyEvents, readEvents, type Events, type Trade } from "./events";
+import { cloneEvents, emptyEvents, loadCachedEvents, readEvents, saveCachedEvents, type Events, type Trade } from "./events";
 
 interface Data {
   ready: boolean;
@@ -48,31 +48,66 @@ export function DataProvider({ children }: { children: ReactNode }) {
     creators: [],
     events: emptyEvents(),
   });
-  const busy = useRef(false);
+  const busy = useRef<Promise<void> | null>(null);
+  const again = useRef(false);
   const cursor = useRef<bigint>(DEPLOY_BLOCK);
   const events = useRef<Events>(emptyEvents());
   const seen = useRef(new Set<string>());
+  const callsRef = useRef<Call[]>([]);
+  const loaded = useRef(false);
 
-  const refresh = useCallback(async () => {
-    if (!DEPLOYED || busy.current) return;
-    busy.current = true;
+  const once = useCallback(async () => {
+    if (!loaded.current) {
+      loaded.current = true;
+      const cached = loadCachedEvents();
+      if (cached && cached.cursor > DEPLOY_BLOCK) {
+        events.current = cached.events;
+        cursor.current = cached.cursor;
+        seen.current = cached.seen;
+        setState((s) => ({ ...s, events: cached.events }));
+      }
+    }
     try {
-      const [p, feeds, calls, creators] = await Promise.all([readParams(), readFeeds(), readCalls(), readCreators()]);
+      const [p, feeds, calls, creators] = await Promise.all([readParams(), readFeeds(), readCalls(callsRef.current), readCreators()]);
+      callsRef.current = calls;
       setState((s) => ({ ...s, ready: true, error: null, ...p, feeds, calls, creators }));
       // History: from the last read block (a few blocks back, deduplicated) to the head.
       const head = await publicClient.getBlockNumber();
       const from = cursor.current > DEPLOY_BLOCK + 5n ? cursor.current - 5n : DEPLOY_BLOCK;
-      const next: Events = { ...events.current, trades: [...events.current.trades], touches: [...events.current.touches], settlements: [...events.current.settlements], claims: [...events.current.claims], feeClaims: [...events.current.feeClaims], createdTx: { ...events.current.createdTx } };
+      const next = cloneEvents(events.current);
       await readEvents(from, head, next, seen.current);
       events.current = next;
       cursor.current = head + 1n;
+      saveCachedEvents(next, cursor.current, seen.current);
       setState((s) => ({ ...s, historyReady: true, events: next }));
     } catch (e) {
       setState((s) => ({ ...s, error: (e as Error).message.split("\n")[0] }));
-    } finally {
-      busy.current = false;
     }
   }, []);
+
+  /**
+   * Refresh now. If one is already running, another runs right after it (so
+   * a refresh after a transaction never returns data read before it).
+   */
+  const refresh = useCallback(async () => {
+    if (!DEPLOYED) return;
+    if (busy.current) {
+      again.current = true;
+      return busy.current;
+    }
+    const run = (async () => {
+      do {
+        again.current = false;
+        await once();
+      } while (again.current);
+    })();
+    busy.current = run;
+    try {
+      await run;
+    } finally {
+      busy.current = null;
+    }
+  }, [once]);
 
   useEffect(() => {
     void refresh();

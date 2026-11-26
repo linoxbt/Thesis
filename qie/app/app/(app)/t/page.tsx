@@ -17,7 +17,8 @@ import { impliedYesBps, useData, useNow } from "@/lib/data";
 import { ago, fmtSkill, pct, price, qusdc, timeLeft, when } from "@/lib/format";
 import { explain, useWallet } from "@/lib/wallet";
 import { useSkillRank } from "@/components/ProfileStats";
-import { Who } from "@/components/Who";
+import { useQieName, Who } from "@/components/Who";
+import { fmtPct } from "@/lib/position";
 
 export default function TradePage() {
   return (
@@ -29,7 +30,9 @@ export default function TradePage() {
 
 /** One call: the position behind it, its market, the oracle and the activity. */
 function TradeView() {
-  const id = Number(useSearchParams().get("id") ?? "-1");
+  const raw = useSearchParams().get("id") ?? "";
+  // Only a plain non-negative integer is a call id ("", "abc", "1.5" are not).
+  const id = /^\d{1,9}$/.test(raw) ? Number(raw) : -1;
   const { ready, calls, creators, feedOf, tradesOf, events, refresh } = useData();
   const w = useWallet();
   const now = useNow(1000);
@@ -38,7 +41,9 @@ function TradeView() {
   const [rounds, setRounds] = useState<{ t: number; price: bigint }[]>([]);
   const [owed, setOwed] = useState(0n);
   const [err, setErr] = useState<string | null>(null);
+  const [claiming, setClaiming] = useState(false);
   const rank = useSkillRank(c?.creator ?? null);
+  const creatorName = useQieName(c?.creator ?? null);
 
   // The oracle's recent rounds, from a little before the call opened.
   useEffect(() => {
@@ -61,13 +66,14 @@ function TradeView() {
       .catch(() => {});
   }, [isCreator, w.account, c?.volume]);
 
-  if (!c) return <LoadState ready={ready} what="call" />;
+  // Ids past the last call may be one just posted; anything else is invalid.
+  if (!c) return <LoadState ready={ready} what="call" invalid={id < 0} pending={id >= calls.length && id < calls.length + 5} />;
   const dec = feed?.decimals ?? 8;
   const asset = feed?.asset ?? "…";
   const pos = positionOfCall(c, feed);
   const mark = feed ? price(feed.price, dec) : null;
   const s = creators.find((x) => x.creator.toLowerCase() === c.creator.toLowerCase())?.stats;
-  const scored = (s?.hits ?? 0) + (s?.misses ?? 0);
+  const scored = s?.scored ?? 0;
   const trades = tradesOf(c.id);
   const ownVolume = trades.filter((t) => t.user.toLowerCase() === c.creator.toLowerCase()).reduce((a, t) => a + t.amount, 0n);
   const live = !c.settled && now > 0 && c.end > now;
@@ -82,11 +88,15 @@ function TradeView() {
     { v: pos.entry, label: `entry ${usdPx(pos.entry)}` },
   ];
 
-  const claimFees = () =>
-    w
-      .write(`Claim ${qusdc(owed)} QUSDC creator fees`, { address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI as Abi, functionName: "claimCreatorFees" })
+  const claimFees = () => {
+    if (claiming) return;
+    setClaiming(true);
+    setErr(null);
+    w.write(`Claim ${qusdc(owed)} QUSDC creator fees`, { address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI as Abi, functionName: "claimCreatorFees" })
       .then(() => (setOwed(0n), refresh()))
-      .catch((e) => setErr(explain(e)));
+      .catch((e) => setErr(explain(e)))
+      .finally(() => setClaiming(false));
+  };
 
   const shareText = `${pos.side === "long" ? "Long" : "Short"} ${asset}: take profit ${usdPx(pos.tp)} by ${when(c.end)}. The crowd says ${pct(impliedYesBps(c), 0)}.${c.text ? ` ${c.text}` : ""}\nBack it or challenge it on QIE:`;
 
@@ -111,7 +121,7 @@ function TradeView() {
               )}
             </span>
           </Link>
-          <StateBadge touched={c.touched} settled={c.settled} yesWon={c.yesWon} />
+          <StateBadge touched={c.touched} settled={c.settled} yesWon={c.yesWon} voided={c.voided} />
         </div>
         <span className="label mt-6">The trade</span>
         <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -137,10 +147,27 @@ function TradeView() {
             opened at <span className="text-ink">{pct(c.openBps, 1)}</span>
           </span>
           {ownVolume > 0n && <span className="rounded-full border border-line px-3 py-1.5 text-faint">creator&apos;s own bets {qusdc(ownVolume)}</span>}
-          <ShareButton id={c.id} text={shareText} />
+          <ShareButton
+            id={c.id}
+            text={shareText}
+            card={{
+              side: pos.side,
+              asset,
+              entry: usdPx(pos.entry),
+              tp: usdPx(pos.tp),
+              movePct: fmtPct(pos.tpMovePct),
+              deadline: when(c.end).replace(/^\w+, /, ""),
+              crowdYes: pct(impliedYesBps(c), 0),
+              openOdds: pct(c.openBps, 0),
+              pot: qusdc(c.yesPool + c.noPool, 0),
+              creator: creatorName ?? `${c.creator.slice(0, 6)}…${c.creator.slice(-4)}`,
+              status: c.voided ? "void · refunded" : c.settled ? (c.yesWon ? "called it" : "missed") : live ? "live" : "window closed",
+              text: c.text || undefined,
+            }}
+          />
           {isCreator && owed > 0n && (
-            <button onClick={() => void claimFees()} className="btn btn-primary px-3 py-1.5 text-xs" data-testid="claim-fees">
-              Claim {qusdc(owed)} QUSDC creator fees
+            <button onClick={() => void claimFees()} disabled={claiming} className="btn btn-primary px-3 py-1.5 text-xs disabled:opacity-40" data-testid="claim-fees">
+              {claiming ? "Claiming…" : `Claim ${qusdc(owed)} QUSDC creator fees`}
             </button>
           )}
         </div>

@@ -93,6 +93,26 @@ export const THESIS_CALLS_ABI = [
             "internalType": "uint16",
             "name": "betCutoffBps",
             "type": "uint16"
+          },
+          {
+            "internalType": "uint16",
+            "name": "staleZTenths",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint16",
+            "name": "closeBps",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint32",
+            "name": "voidAfter",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint64",
+            "name": "minScoredVolume",
+            "type": "uint64"
           }
         ],
         "internalType": "struct ThesisCalls.Params",
@@ -106,6 +126,11 @@ export const THESIS_CALLS_ABI = [
   {
     "inputs": [],
     "name": "AlreadyFinal",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "AwaitingOracle",
     "type": "error"
   },
   {
@@ -430,6 +455,12 @@ export const THESIS_CALLS_ABI = [
         "internalType": "uint32",
         "name": "volBps",
         "type": "uint32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint32",
+        "name": "monitorSecs",
+        "type": "uint32"
       }
     ],
     "name": "FeedSet",
@@ -488,7 +519,106 @@ export const THESIS_CALLS_ABI = [
   },
   {
     "anonymous": false,
-    "inputs": [],
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint16",
+            "name": "feeBps",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint64",
+            "name": "minSeed",
+            "type": "uint64"
+          },
+          {
+            "internalType": "uint64",
+            "name": "maxSeed",
+            "type": "uint64"
+          },
+          {
+            "internalType": "uint64",
+            "name": "minStake",
+            "type": "uint64"
+          },
+          {
+            "internalType": "uint32",
+            "name": "minWindow",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint32",
+            "name": "maxWindow",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint32",
+            "name": "grace",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint32",
+            "name": "maxOracleAge",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint32",
+            "name": "maxVolAge",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint16",
+            "name": "minDistanceBps",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint16",
+            "name": "maxDistanceBps",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint16",
+            "name": "minOpenBps",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint16",
+            "name": "maxOpenBps",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint16",
+            "name": "betCutoffBps",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint16",
+            "name": "staleZTenths",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint16",
+            "name": "closeBps",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint32",
+            "name": "voidAfter",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint64",
+            "name": "minScoredVolume",
+            "type": "uint64"
+          }
+        ],
+        "indexed": false,
+        "internalType": "struct ThesisCalls.Params",
+        "name": "params",
+        "type": "tuple"
+      }
+    ],
     "name": "ParamsSet",
     "type": "event"
   },
@@ -531,9 +661,40 @@ export const THESIS_CALLS_ABI = [
         "internalType": "address",
         "name": "creator",
         "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "scored",
+        "type": "bool"
       }
     ],
     "name": "Settled",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "id",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint80",
+        "name": "checkedRound",
+        "type": "uint80"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "caughtUp",
+        "type": "bool"
+      }
+    ],
+    "name": "Synced",
     "type": "event"
   },
   {
@@ -610,6 +771,25 @@ export const THESIS_CALLS_ABI = [
     "inputs": [
       {
         "indexed": true,
+        "internalType": "uint256",
+        "name": "id",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "enum ThesisCalls.VoidReason",
+        "name": "reason",
+        "type": "uint8"
+      }
+    ],
+    "name": "Voided",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
         "internalType": "address",
         "name": "feed",
         "type": "address"
@@ -618,6 +798,12 @@ export const THESIS_CALLS_ABI = [
         "indexed": false,
         "internalType": "uint32",
         "name": "volBps",
+        "type": "uint32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint32",
+        "name": "monitorSecs",
         "type": "uint32"
       }
     ],
@@ -640,6 +826,19 @@ export const THESIS_CALLS_ABI = [
   {
     "inputs": [],
     "name": "SCAN_PER_TX",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "VOID_WINDOW",
     "outputs": [
       {
         "internalType": "uint256",
@@ -678,6 +877,69 @@ export const THESIS_CALLS_ABI = [
     "name": "bet",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "id",
+        "type": "uint256"
+      }
+    ],
+    "name": "betStatus",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "open",
+        "type": "bool"
+      },
+      {
+        "internalType": "uint256",
+        "name": "needBps",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "distBps",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "oracleAge",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "bucketStakes",
+    "outputs": [
+      {
+        "internalType": "uint128",
+        "name": "yes",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint128",
+        "name": "no",
+        "type": "uint128"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -742,6 +1004,30 @@ export const THESIS_CALLS_ABI = [
       }
     ],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "id",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+      }
+    ],
+    "name": "claimable",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -929,6 +1215,11 @@ export const THESIS_CALLS_ABI = [
         "type": "uint32"
       },
       {
+        "internalType": "uint32",
+        "name": "monitorSecs",
+        "type": "uint32"
+      },
+      {
         "internalType": "uint64",
         "name": "volUpdatedAt",
         "type": "uint64"
@@ -1025,6 +1316,36 @@ export const THESIS_CALLS_ABI = [
             "type": "bool"
           },
           {
+            "internalType": "bool",
+            "name": "voided",
+            "type": "bool"
+          },
+          {
+            "internalType": "uint16",
+            "name": "feeBps",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint32",
+            "name": "grace",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint64",
+            "name": "closeAt",
+            "type": "uint64"
+          },
+          {
+            "internalType": "uint64",
+            "name": "oracleAt",
+            "type": "uint64"
+          },
+          {
+            "internalType": "uint64",
+            "name": "touchAt",
+            "type": "uint64"
+          },
+          {
             "internalType": "uint256",
             "name": "yesPool",
             "type": "uint256"
@@ -1037,6 +1358,21 @@ export const THESIS_CALLS_ABI = [
           {
             "internalType": "uint256",
             "name": "volume",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "outsideVolume",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "voidYes",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "voidNo",
             "type": "uint256"
           }
         ],
@@ -1141,6 +1477,36 @@ export const THESIS_CALLS_ABI = [
             "type": "bool"
           },
           {
+            "internalType": "bool",
+            "name": "voided",
+            "type": "bool"
+          },
+          {
+            "internalType": "uint16",
+            "name": "feeBps",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint32",
+            "name": "grace",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint64",
+            "name": "closeAt",
+            "type": "uint64"
+          },
+          {
+            "internalType": "uint64",
+            "name": "oracleAt",
+            "type": "uint64"
+          },
+          {
+            "internalType": "uint64",
+            "name": "touchAt",
+            "type": "uint64"
+          },
+          {
             "internalType": "uint256",
             "name": "yesPool",
             "type": "uint256"
@@ -1153,6 +1519,21 @@ export const THESIS_CALLS_ABI = [
           {
             "internalType": "uint256",
             "name": "volume",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "outsideVolume",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "voidYes",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "voidNo",
             "type": "uint256"
           }
         ],
@@ -1210,6 +1591,11 @@ export const THESIS_CALLS_ABI = [
             "internalType": "uint128",
             "name": "volume",
             "type": "uint128"
+          },
+          {
+            "internalType": "uint32",
+            "name": "scored",
+            "type": "uint32"
           }
         ],
         "internalType": "struct ThesisCalls.Stats[]",
@@ -1247,6 +1633,25 @@ export const THESIS_CALLS_ABI = [
         "internalType": "address",
         "name": "",
         "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "feed",
+        "type": "address"
+      }
+    ],
+    "name": "minDistanceNow",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -1362,6 +1767,26 @@ export const THESIS_CALLS_ABI = [
         "internalType": "uint16",
         "name": "betCutoffBps",
         "type": "uint16"
+      },
+      {
+        "internalType": "uint16",
+        "name": "staleZTenths",
+        "type": "uint16"
+      },
+      {
+        "internalType": "uint16",
+        "name": "closeBps",
+        "type": "uint16"
+      },
+      {
+        "internalType": "uint32",
+        "name": "voidAfter",
+        "type": "uint32"
+      },
+      {
+        "internalType": "uint64",
+        "name": "minScoredVolume",
+        "type": "uint64"
       }
     ],
     "stateMutability": "view",
@@ -1443,6 +1868,11 @@ export const THESIS_CALLS_ABI = [
         "internalType": "address",
         "name": "feed",
         "type": "address"
+      },
+      {
+        "internalType": "bool",
+        "name": "above",
+        "type": "bool"
       },
       {
         "internalType": "int256",
@@ -1539,6 +1969,11 @@ export const THESIS_CALLS_ABI = [
         "internalType": "uint32",
         "name": "volBps",
         "type": "uint32"
+      },
+      {
+        "internalType": "uint32",
+        "name": "monitorSecs",
+        "type": "uint32"
       }
     ],
     "name": "setFeed",
@@ -1632,6 +2067,26 @@ export const THESIS_CALLS_ABI = [
             "internalType": "uint16",
             "name": "betCutoffBps",
             "type": "uint16"
+          },
+          {
+            "internalType": "uint16",
+            "name": "staleZTenths",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint16",
+            "name": "closeBps",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint32",
+            "name": "voidAfter",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint64",
+            "name": "minScoredVolume",
+            "type": "uint64"
           }
         ],
         "internalType": "struct ThesisCalls.Params",
@@ -1680,6 +2135,11 @@ export const THESIS_CALLS_ABI = [
       {
         "internalType": "uint32",
         "name": "volBps",
+        "type": "uint32"
+      },
+      {
+        "internalType": "uint32",
+        "name": "monitorSecs",
         "type": "uint32"
       }
     ],
@@ -1748,6 +2208,11 @@ export const THESIS_CALLS_ABI = [
         "internalType": "uint128",
         "name": "volume",
         "type": "uint128"
+      },
+      {
+        "internalType": "uint32",
+        "name": "scored",
+        "type": "uint32"
       }
     ],
     "stateMutability": "view",
@@ -1814,6 +2279,53 @@ export const THESIS_CALLS_ABI = [
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "userBucketStakes",
+    "outputs": [
+      {
+        "internalType": "uint128",
+        "name": "yes",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint128",
+        "name": "no",
+        "type": "uint128"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "id",
+        "type": "uint256"
+      }
+    ],
+    "name": "voidCall",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {

@@ -1,5 +1,4 @@
 /** Stake token (QUSDC) has 6 decimals. */
-export const USD_DECIMALS = 6;
 export const USD = 10n ** 6n;
 
 export const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -47,6 +46,26 @@ export function ago(ts: number, now = Date.now() / 1000): string {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86_400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86_400)}d ago`;
+}
+
+/**
+ * Cleans what's typed into an amount or price field: a comma decimal ("2,5")
+ * becomes a dot; anything but digits and the first dot is dropped.
+ */
+export function decimalInput(v: string): string {
+  const s = v.replace(/,/g, ".").replace(/[^0-9.]/g, "");
+  const i = s.indexOf(".");
+  return i < 0 ? s : s.slice(0, i + 1) + s.slice(i + 1).replace(/\./g, "");
+}
+
+/** UTF-8 byte length (the contract limits text by bytes, not characters). */
+export const byteLength = (s: string) => new TextEncoder().encode(s).length;
+
+/** |strike - spot| / spot in bps, rounded down like the contract. */
+export function distanceBps(spot: bigint, strike: bigint): number {
+  if (spot <= 0n) return 0;
+  const d = strike > spot ? strike - spot : spot - strike;
+  return Number((d * 10_000n) / spot);
 }
 
 /** Parses a token amount ("5", "2.5"), at most 6 decimals; null if invalid or zero. */

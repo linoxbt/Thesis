@@ -376,22 +376,6 @@ details[open] .faq-plus {
     box-shadow: 0 18px 40px -24px rgb(0 0 0 / 0.35);
   }
 
-  .tick-up {
-    animation: tick-up 0.9s ease;
-  }
-  .tick-down {
-    animation: tick-down 0.9s ease;
-  }
-  @keyframes tick-up {
-    from {
-      color: #3ecf8e;
-    }
-  }
-  @keyframes tick-down {
-    from {
-      color: #ff6b6b;
-    }
-  }
 }
 
 /* Desktop sidebar width, set before hydration (html.sb-collapsed from the head script). */

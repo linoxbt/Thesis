@@ -14,6 +14,7 @@ const RPC = "http://127.0.0.1:8545";
 const OUT = process.env.OUT_DIR ?? "/tmp/qie-e2e";
 const dep = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "contracts", "deployments", "localhost.json"), "utf8"));
 const ACCOUNT = "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720"; // hardhat account #9 (funded by dev-chain)
+const CALLS_ABI = require("../../contracts/scripts/keeper-abi.json");
 fs.mkdirSync(OUT, { recursive: true });
 
 const results = [];
@@ -187,14 +188,28 @@ async function main() {
     check("the new call has its page", /ETH \/ USDT/.test((await page.textContent('[data-testid="call-title"]')) ?? ""));
   }
 
-  // 5. SOL touches its target on the oracle; "Check the oracle" settles YES; the winner claims
-  const call0 = await client.readContract({ address: dep.ThesisCalls, abi: parseAbi(["function getCall(uint256) view returns ((address creator,address feed,bool above,bool touched,bool settled,bool yesWon,uint16 openBps,uint64 start,uint64 end,int256 strike,int256 spotAtOpen,uint80 touchRound,int256 touchPrice,uint80 checkedRound,bool scanDone,uint256 yesPool,uint256 noPool,uint256 volume))"]), functionName: "getCall", args: [0n] });
+  // 4b. Share: the dialog draws the call's card image
+  await page.goto(BASE + "/t/?id=0");
+  await page.waitForSelector('[data-testid="share-button"]');
+  await page.click('[data-testid="share-button"]');
+  await page.waitForSelector('[data-testid="share-card"]', { timeout: 20_000 });
+  const cardW = await page.$eval('[data-testid="share-card"]', (img) => img.naturalWidth);
+  check("share dialog shows the generated 1200×630 card, with Download image", cardW === 1200 && (await page.isVisible('[data-testid="share-download"]')));
+  await page.screenshot({ path: `${OUT}/share.png` });
+  await page.keyboard.press("Escape");
+
+  // 5. SOL touches its target on the oracle; "Check the oracle" settles YES; the winner claims.
+  // Three minutes pass first: stakes placed in the minute (or two) before a touch are refunded, not paid.
+  await rpc("evm_increaseTime", [180]);
+  await rpc("evm_mine");
+  const call0 = await client.readContract({ address: dep.ThesisCalls, abi: CALLS_ABI, functionName: "getCall", args: [0n] });
   await pushPrice(dep.feeds.SOL.address, (call0.strike * 1002n) / 1000n);
   await page.goto(BASE + "/t/?id=0");
   await page.waitForSelector('[data-testid="sync"]');
   await page.click('[data-testid="sync"]');
   await page.waitForSelector('[data-testid="resolution"]', { timeout: 60_000 });
   check("checking the oracle settles a touched call YES", /YES — touched/.test((await page.textContent('[data-testid="resolution"]')) ?? ""));
+  check("and says what it found", /Touch found/.test((await page.textContent('[data-testid="sync-result"]').catch(() => "")) ?? ""));
   await page.waitForSelector('[data-testid="claim"]', { timeout: 30_000 });
   await page.click('[data-testid="claim"]');
   const claimed = await page.waitForSelector('[data-testid="tx-confirmed"]:has-text("Claim")', { timeout: 60_000 }).then(() => true).catch(() => false);
@@ -218,12 +233,29 @@ async function main() {
   await page.screenshot({ path: `${OUT}/leaderboard.png`, fullPage: true });
   await page.goto(BASE + "/profile/");
   await page.waitForSelector('[data-testid="positions"]', { timeout: 30_000 });
-  await page.waitForSelector('[data-testid="positions"] li', { timeout: 30_000 });
-  check("profile lists positions", (await page.locator('[data-testid="positions"] li').count()) >= 1);
+  await page.waitForSelector('[data-testid="positions"] tbody tr', { timeout: 30_000 });
+  const posRows = await page.locator('[data-testid="positions"] tbody tr').allTextContents();
+  check(
+    "profile lists positions with entry → TP and mark; settled ones show P&L",
+    posRows.length >= 2 && posRows.every((r) => /→/.test(r)) && posRows.some((r) => /hit/.test(r) && /P&L/.test(r)),
+    posRows.map((r) => r.replace(/\s+/g, " ").slice(0, 60)).join(" | "),
+  );
   await page.screenshot({ path: `${OUT}/profile.png`, fullPage: true });
   await page.goto(BASE + "/stats/");
   await page.waitForSelector('[data-testid="stats"]', { timeout: 30_000 });
   check("stats count the touch and the trades", /Touches proven\s*1/.test((await page.textContent('[data-testid="stats"]')) ?? ""));
+
+  // 6b. Bad links: a non-numeric id is "no such call", not a forever-loading page; unknown paths get the styled 404
+  await page.goto(BASE + "/t/?id=abc");
+  await page.waitForSelector('[data-testid="not-found"]', { timeout: 20_000 });
+  check("an invalid call id says so", true);
+  const r404 = await page.goto(BASE + "/no-such-page");
+  check("unknown paths get the styled 404", r404?.status() === 404 && /Nothing here/.test((await page.textContent("h1")) ?? ""));
+
+  // 6c. Link previews
+  await page.goto(BASE + "/");
+  const og = await page.$eval('meta[property="og:image"]', (m) => m.getAttribute("content")).catch(() => null);
+  check("pages carry an Open Graph / X card image", !!og && /og\.png/.test(og), og ?? "");
 
   // 7. Mobile
   const m = await browser.newPage({ viewport: { width: 390, height: 844 } });

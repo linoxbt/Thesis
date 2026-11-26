@@ -61,21 +61,24 @@ const FAQ: [string, ReactNode][] = [
   ["What exactly is a thesis?", "Your trade call, made public and tradable. You post the position (long or short on BTC, ETH or SOL, a take profit and a deadline); Thesis turns it into a market the crowd backs or challenges in QUSDC, and records the outcome against your profile."],
   ["Is this a perp exchange?", "No. You keep trading wherever you trade. Thesis is the layer on top: it prices your call with a prediction market on QIE and settles it from the QIE Oracle. Nothing is lent to you and there is no liquidation."],
   ["What is a touch market?", "A market that asks whether price reaches a level at any moment before the deadline, not only at the close. If a QIE Oracle round prints at or past your target once, the call resolves YES, even if price falls back later."],
-  ["Who decides whether a call hit?", "Nobody decides. The contract reads the QIE Oracle's rounds itself: any round inside the window at or past the target settles YES. Before every bet and before a NO settlement it scans every round it hasn't checked, so a touch can't be missed or raced. Our keeper makes it prompt, but anyone can prove or settle."],
+  ["Who decides whether a call hit?", "Nobody decides. The contract reads the QIE Oracle's rounds itself: any round inside the window at or past the target settles YES. Before every bet and before a NO settlement it scans every round it hasn't checked, so a touch can't be missed. Stakes placed in the minute before the touching round are refunded instead of paid, and betting needs the target well clear of the latest oracle price (further the older that price is), so nobody can bet on a move the oracle hasn't printed yet. A keeper makes settlement prompt, but anyone can prove or settle."],
   [
     "How are the opening odds set?",
     <>
       The contract computes them onchain from the distance to the target, the time left and the asset&apos;s volatility, using
-      the reflection-principle probability that price touches the level: <span className="num text-ink">P = 2Φ(−|ln(K/S)| / σ√τ)</span>.
-      Your seed opens both sides of the pot at those odds.
+      the reflection-principle probability that price touches the level: <span className="num text-ink">P = 2Φ(−|ln(K/S)| / σ√τ)</span>,
+      corrected for the oracle printing in rounds rather than every tick, and counting the time since its latest print. Your seed
+      opens both sides of the pot at those odds.
     </>,
   ],
   [
     "How is the skill score calculated?",
-    "Each settled call scores 1 if it hit, minus the probability the contract gave it when it was posted (so nobody can choose it). A 20% call that hits earns +0.80; a 90% call that misses costs −0.90. Posting safe or random calls averages zero, so the leaderboard only rewards real edge. The score is stored onchain.",
+    "Each settled call scores 1 if it hit, minus the probability the contract gave it when it was posted (so nobody can choose it). A 20% call that hits earns +0.80; a 90% call that misses costs −0.90. Posting safe or random calls averages zero, so the leaderboard only rewards real edge. Only calls others actually bet on count, and the leaderboard ranks skill per call once you have three. The score is stored onchain.",
   ],
-  ["What do creators earn?", "Every bet pays a 2% fee: half to the creator of the call, half to the Thesis treasury. Creators claim their share any time from their profile."],
-  ["Can a quick wick be missed?", "Only between oracle rounds. Calls settle from the QIE Oracle's published rounds, which arrive every few minutes to an hour, so a wick that starts and ends between two rounds can't count. Every round that is published inside the window does."],
+  ["What do creators earn?", "Every bet currently pays a 2% fee: half to the creator of the call, half to the Thesis treasury. A call's fee is fixed when it's posted. Creators claim their share any time from their profile."],
+  ["When does betting close?", "In the last 10% of the window (a 48h call closes about 4.8 hours before its deadline), so nobody can pile in once the outcome is all but known. Betting also pauses while the target is too close to the latest oracle price."],
+  ["Can a quick wick be missed?", "Only between oracle rounds. Calls settle from the QIE Oracle's published rounds, typically 3 to 6 minutes apart and sometimes over an hour in quiet markets, so a wick that starts and ends between two rounds can't count. Every round that is published inside the window does, and the opening odds account for it."],
+  ["What if the oracle stops?", "NO only wins once the oracle has printed a price after the deadline, so an outage can't hand NO a win. If no price comes within 3 days of the deadline, anyone can void the call and every stake is refunded."],
   ["Is this real money?", `Yes, on QIE ${NETWORK === "mainnet" ? "mainnet" : NETWORK}: seeds, bets and payouts are in QUSDC, QIE's stablecoin, and gas is paid in QIE. Start small; this is a hackathon build and not financial advice.`],
 ];
 
@@ -166,7 +169,8 @@ export default function LandingPage() {
           </Reveal>
           <Reveal className="h-full" delay={220}>
           <StatCard chip="Grace" big="5 min" icon={<Timer size={44} strokeWidth={1.25} />}>
-            A touch settles YES at once. After the deadline, a five-minute grace window, then anyone can settle NO.
+            A touch settles YES at once. After the deadline and a five-minute grace window, anyone can settle NO once the oracle
+            prints past it; with no print in 3 days, the call is void and refunded.
           </StatCard>
           </Reveal>
         </div>
@@ -269,7 +273,8 @@ export default function LandingPage() {
         <Reveal delay={100} className="mt-14 grid gap-4 lg:grid-cols-3">
           <Bento className="lg:col-span-2" icon={<Layers size={18} />} title="One round is enough" tone="guard">
             A touch is a touch: the first QIE Oracle round at or past your target settles the call YES, whatever happens
-            next. The contract scans every round, so nobody has to race to prove it.
+            next. The contract scans every round, so nobody has to race to prove it, and stakes placed the minute before a touch are
+            refunded, so nobody can race the oracle either.
             <WickArt />
           </Bento>
           <Bento icon={<Sigma size={18} />} title="Fair from the first trade">
@@ -285,7 +290,7 @@ export default function LandingPage() {
             </div>
           </Bento>
           <Bento icon={<Coins size={18} />} title="Get paid to be followed">
-            Creators claim half of the 2% fee on every bet on their call.
+            Creators claim half of the fee (currently 2%) on every bet on their call.
             <div>
               <div className="flex h-2 gap-1">
                 <span className="w-1/2 rounded-full bg-line-2" />

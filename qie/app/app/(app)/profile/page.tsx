@@ -2,7 +2,7 @@
 
 import { Check, Copy, ExternalLink, ShieldCheck, Wallet } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Abi, Address } from "viem";
 import { ProfileStats } from "@/components/ProfileStats";
 import { Avatar } from "@/components/ThesisCard";
@@ -13,7 +13,9 @@ import { THESIS_CALLS_ABI } from "@/lib/abi";
 import { publicClient, readBalances, readPosition } from "@/lib/chain";
 import { CALLS_ADDRESS, explorerAddress, QUSDC_URL } from "@/lib/config";
 import { useData } from "@/lib/data";
-import { callLine, qusdc, shortAddr } from "@/lib/format";
+import { pct, price, qusdc, shortAddr } from "@/lib/format";
+import { fmtPct, markMove, positionOf } from "@/lib/position";
+import { usdPx } from "@/components/Position";
 import { explain, useWallet } from "@/lib/wallet";
 
 const CALLS = { address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI as Abi };
@@ -137,6 +139,7 @@ function OwnerPanel({ who }: { who: Address }) {
   const w = useWallet();
   const [pending, setPending] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [busy, run] = useOnce();
   const load = useCallback(() => {
     publicClient.readContract({ address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI, functionName: "pendingOwner" }).then(setPending).catch(() => {});
   }, []);
@@ -149,8 +152,12 @@ function OwnerPanel({ who }: { who: Address }) {
         <div className="text-xs text-muted">Accepting makes this wallet the owner (limits, pause, treasury). The current owner keeps control until you accept.</div>
         {err && <div className="mt-1 text-xs text-bad">{err}</div>}
       </div>
-      <button onClick={() => w.write("Accept contract ownership", { ...CALLS, functionName: "acceptOwnership" }).then(load).catch((e) => setErr(explain(e)))} className="btn btn-primary">
-        Accept ownership
+      <button
+        onClick={() => void run("accept", () => w.write("Accept contract ownership", { ...CALLS, functionName: "acceptOwnership" }).then(load).catch((e) => setErr(explain(e))))}
+        disabled={!!busy}
+        className="btn btn-primary disabled:opacity-40"
+      >
+        {busy ? "Accepting…" : "Accept ownership"}
       </button>
     </section>
   );
@@ -158,10 +165,11 @@ function OwnerPanel({ who }: { who: Address }) {
 
 function WalletPanel({ who }: { who: Address }) {
   const w = useWallet();
-  const { stakeToken, refresh } = useData();
+  const { stakeToken, refresh, params, creatorShareBps } = useData();
   const [bal, setBal] = useState<{ usd: bigint; gas: bigint } | null>(null);
   const [owed, setOwed] = useState(0n);
   const [err, setErr] = useState<string | null>(null);
+  const [busy, run] = useOnce();
   const load = useCallback(async () => {
     if (!stakeToken) return;
     const [b, fees] = await Promise.all([
@@ -192,58 +200,92 @@ function WalletPanel({ who }: { who: Address }) {
         {owed > 0n && (
           <button
             onClick={() =>
-              w
-                .write(`Claim ${qusdc(owed)} QUSDC creator fees`, { ...CALLS, functionName: "claimCreatorFees" })
-                .then(() => Promise.all([load(), refresh()]))
-                .catch((e) => setErr(explain(e)))
+              void run("fees", () =>
+                w
+                  .write(`Claim ${qusdc(owed)} QUSDC creator fees`, { ...CALLS, functionName: "claimCreatorFees" })
+                  .then(() => Promise.all([load(), refresh()]))
+                  .catch((e) => setErr(explain(e))),
+              )
             }
-            className="btn btn-yes text-sm"
+            disabled={!!busy}
+            className="btn btn-yes text-sm disabled:opacity-40"
             data-testid="claim-fees"
           >
-            Claim {qusdc(owed)} QUSDC in fees
+            {busy ? "Claiming…" : `Claim ${qusdc(owed)} QUSDC in fees`}
           </button>
         )}
       </div>
-      <p className="mt-3 text-xs text-faint">You earn half of the 2% fee on every bet on your calls; claim any time.</p>
+      <p className="mt-3 text-xs text-faint">
+        You earn {pct(creatorShareBps, 0)} of the {pct(params?.feeBps ?? 200, 0)} fee on every bet on your calls; claim any time.
+      </p>
       {err && <p className="mt-2 text-xs text-bad">{err}</p>}
     </section>
   );
 }
 
+/** Busy flag that also blocks a second click before React re-renders. */
+function useOnce() {
+  const [busy, setBusy] = useState<string | null>(null);
+  const ref = useRef(false);
+  const run = useCallback(async (key: string, fn: () => Promise<unknown>) => {
+    if (ref.current) return;
+    ref.current = true;
+    setBusy(key);
+    try {
+      await fn();
+    } finally {
+      ref.current = false;
+      setBusy(null);
+    }
+  }, []);
+  return [busy, run] as const;
+}
+
+type Row = { id: number; yes: bigint; no: bigint; claimable: bigint; claimed: boolean; paid: bigint; payoutIfYes: bigint; payoutIfNo: bigint };
+
 function Positions({ who }: { who: Address }) {
   const w = useWallet();
-  const { calls, events, feedOf, refresh } = useData();
-  const [rows, setRows] = useState<{ id: number; yes: bigint; no: bigint; claimable: bigint; claimed: boolean }[] | null>(null);
+  const { calls, events, feedOf, refresh, historyReady } = useData();
+  const [rows, setRows] = useState<Row[] | null>(null);
+  const [failed, setFailed] = useState(0);
   const [err, setErr] = useState<string | null>(null);
+  const [busy, run] = useOnce();
+  const me = who.toLowerCase();
   // Calls this wallet has bet on or posted (a seed is a position on both sides).
-  const ids = [...new Set([...events.trades.filter((t) => t.user.toLowerCase() === who.toLowerCase()).map((t) => t.id), ...calls.filter((c) => c.creator.toLowerCase() === who.toLowerCase()).map((c) => c.id)])];
-  const key = ids.sort((a, b) => b - a).join(",") + "|" + calls.filter((c) => c.settled).length;
+  const ids = [...new Set([...events.trades.filter((t) => t.user.toLowerCase() === me).map((t) => t.id), ...calls.filter((c) => c.creator.toLowerCase() === me).map((c) => c.id)])];
+  const key = ids.sort((a, b) => b - a).join(",") + "|" + calls.filter((c) => c.settled).length + "|" + events.claims.length;
 
   const load = useCallback(async () => {
-    const out = await Promise.all(
-      ids.map(async (id) => {
-        const p = await readPosition(id, who);
-        const c = calls.find((x) => x.id === id);
-        const claimable = c?.settled && !p.hasClaimed ? (c.yesWon ? p.payoutIfYes : p.payoutIfNo) : 0n;
-        return { id, yes: p.yes, no: p.no, claimable, claimed: p.hasClaimed };
-      }),
-    );
-    setRows(out.filter((r) => r.yes > 0n || r.no > 0n));
+    const got = await Promise.allSettled(ids.map((id) => readPosition(id, who)));
+    const out: Row[] = [];
+    let bad = 0;
+    got.forEach((g, i) => {
+      if (g.status === "rejected") return void (bad += 1);
+      const p = g.value;
+      const paid = events.claims.filter((x) => x.id === ids[i] && x.user.toLowerCase() === me).reduce((s, x) => s + x.amount, 0n);
+      if (p.yes > 0n || p.no > 0n) out.push({ id: ids[i], yes: p.yes, no: p.no, claimable: p.claimable, claimed: p.hasClaimed, paid, payoutIfYes: p.payoutIfYes, payoutIfNo: p.payoutIfNo });
+    });
+    setRows(out);
+    setFailed(bad);
   }, [key, who]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => void load().catch(() => {}), [load]);
+  useEffect(() => {
+    if (historyReady) void load().catch(() => setFailed(1));
+  }, [load, historyReady]);
 
   const claim = (id: number, amount: bigint) =>
-    w
-      .write(`Claim ${qusdc(amount)} QUSDC`, { ...CALLS, functionName: "claim", args: [BigInt(id)] })
-      .then(() => Promise.all([load(), refresh()]))
-      .catch((e) => setErr(explain(e)));
+    run(`claim-${id}`, () =>
+      w
+        .write(`Claim ${qusdc(amount)} QUSDC`, { ...CALLS, functionName: "claim", args: [BigInt(id)] })
+        .then(() => Promise.all([load(), refresh()]))
+        .catch((e) => setErr(explain(e))),
+    );
 
   return (
     <section className="panel p-6" data-testid="positions">
       <span className="label">Positions</span>
-      {rows === null ? (
+      {!historyReady || rows === null ? (
         <p className="mt-3 text-sm text-muted">Reading from QIE…</p>
-      ) : rows.length === 0 ? (
+      ) : rows.length === 0 && failed === 0 ? (
         <p className="mt-3 text-sm text-muted">
           No positions yet.{" "}
           <Link href="/app/" className="text-ink underline decoration-brand underline-offset-4">
@@ -252,32 +294,81 @@ function Positions({ who }: { who: Address }) {
           .
         </p>
       ) : (
-        <ul className="mt-3 divide-y divide-line text-sm">
-          {rows.map((p) => {
-            const c = calls.find((x) => x.id === p.id);
-            const f = c ? feedOf(c.feed) : undefined;
-            return (
-              <li key={p.id} className="num flex flex-wrap items-center justify-between gap-2 py-2.5">
-                <Link href={`/t/?id=${p.id}`} className="hover:underline">
-                  {c ? callLine(f?.asset ?? "…", c.above, c.strike, f?.decimals ?? 8) : `#${p.id}`}
-                  <span className="ml-2 text-xs text-muted">
-                    {p.yes > 0n && `YES ${qusdc(p.yes)} `}
-                    {p.no > 0n && `NO ${qusdc(p.no)}`}
-                  </span>
-                </Link>
-                {p.claimable > 0n ? (
-                  <button onClick={() => void claim(p.id, p.claimable)} className="btn btn-yes px-3 py-1 text-xs">
-                    Claim {qusdc(p.claimable)}
-                  </button>
-                ) : (
-                  <span className="text-xs text-faint">{c?.settled ? (p.claimed ? "claimed" : "settled") : "open"}</span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+        <div className="mt-3 overflow-x-auto">
+          <table className="num w-full min-w-[520px] text-left text-xs">
+            <thead className="text-[10px] uppercase tracking-wide text-faint">
+              <tr>
+                <th className="py-1.5 font-normal">Call</th>
+                <th className="font-normal">Entry → TP</th>
+                <th className="font-normal">Mark</th>
+                <th className="font-normal">Stake</th>
+                <th className="text-right font-normal">Payout / P&amp;L</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {rows.map((p) => {
+                const c = calls.find((x) => x.id === p.id);
+                const f = c ? feedOf(c.feed) : undefined;
+                const dec = f?.decimals ?? 8;
+                const pos = c ? positionOf(c.above ? "above" : "below", price(c.spotAtOpen, dec), price(c.strike, dec)) : null;
+                const mark = f ? price(f.price, dec) : null;
+                // Cost = net stake plus the fees this wallet paid on it (the seed pays none).
+                const feesPaid = events.trades.filter((t) => t.id === p.id && t.user.toLowerCase() === me).reduce((a, t) => a + t.fee, 0n);
+                const cost = p.yes + p.no + feesPaid;
+                const got = p.claimed ? p.paid : p.claimable;
+                const pnl = c?.settled ? got - cost : null;
+                return (
+                  <tr key={p.id} className="align-top">
+                    <td className="py-2.5 pr-2">
+                      <Link href={`/t/?id=${p.id}`} className="hover:underline">
+                        <span className={pos?.side === "long" ? "text-yes" : "text-bad"}>{pos?.side === "long" ? "LONG" : "SHORT"}</span> {f?.asset ?? "…"}
+                      </Link>
+                      <div className="text-faint">{c ? (c.voided ? "void" : c.settled ? (c.yesWon ? "hit" : "missed") : "open") : "…"}</div>
+                    </td>
+                    <td className="pr-2">{pos ? `${usdPx(pos.entry)} → ${usdPx(pos.tp)}` : "…"}</td>
+                    <td className="pr-2">
+                      {mark !== null && pos ? (
+                        <>
+                          {usdPx(mark)}
+                          <div className={markMove(pos, mark) >= 0 ? "text-yes" : "text-bad"}>{fmtPct(markMove(pos, mark), 2)}</div>
+                        </>
+                      ) : (
+                        "…"
+                      )}
+                    </td>
+                    <td className="pr-2">
+                      {p.yes > 0n && <div>YES {qusdc(p.yes)}</div>}
+                      {p.no > 0n && <div>NO {qusdc(p.no)}</div>}
+                    </td>
+                    <td className="text-right">
+                      {!c?.settled ? (
+                        <span className="text-faint">
+                          {p.yes > 0n && <div>{qusdc(p.payoutIfYes)} if hit</div>}
+                          {p.no > 0n && <div>{qusdc(p.payoutIfNo)} if missed</div>}
+                        </span>
+                      ) : p.claimable > 0n ? (
+                        <button onClick={() => void claim(p.id, p.claimable)} disabled={!!busy} className="btn btn-yes px-3 py-1 text-xs disabled:opacity-40">
+                          {busy === `claim-${p.id}` ? "Claiming…" : `Claim ${qusdc(p.claimable)}`}
+                        </button>
+                      ) : (
+                        <span className="text-faint">{p.claimed ? "claimed" : "nothing to claim"}</span>
+                      )}
+                      {pnl !== null && (
+                        <div className={pnl >= 0n ? "text-yes" : "text-bad"}>
+                          {pnl >= 0n ? "+" : "−"}
+                          {qusdc(pnl >= 0n ? pnl : -pnl)} P&amp;L
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
-      {err && <p className="mt-2 text-xs text-bad">{err}</p>}
+      {failed > 0 && <p className="mt-2 text-xs text-muted">{failed} position{failed > 1 ? "s" : ""} couldn&apos;t be read; retrying on the next refresh.</p>}
+      {err && <p className="mt-2 text-xs text-bad" role="alert">{err}</p>}
     </section>
   );
 }

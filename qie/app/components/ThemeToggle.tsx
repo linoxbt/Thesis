@@ -9,10 +9,10 @@ export const THEME_KEY = "thesis-theme";
 
 /**
  * Runs before first paint (via next/script beforeInteractive): the stored
- * preference, else light. "system" follows the device. Avoids a flash of the
- * wrong theme.
+ * preference, else light. "system" follows the device, live, on every page.
+ * Avoids a flash of the wrong theme.
  */
-export const THEME_SCRIPT = `(function(){try{var p=localStorage.getItem("${THEME_KEY}");var t=p==="dark"?"dark":p==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):"light";document.documentElement.dataset.theme=t;if(localStorage.getItem("thesis-sidebar-collapsed")==="1")document.documentElement.classList.add("sb-collapsed");}catch(e){document.documentElement.dataset.theme="light";}})();`;
+export const THEME_SCRIPT = `(function(){try{var p=localStorage.getItem("${THEME_KEY}");var t=p==="dark"?"dark":p==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):"light";document.documentElement.dataset.theme=t;if(localStorage.getItem("thesis-sidebar-collapsed")==="1")document.documentElement.classList.add("sb-collapsed");matchMedia("(prefers-color-scheme: dark)").addEventListener("change",function(e){try{if(localStorage.getItem("${THEME_KEY}")==="system")document.documentElement.dataset.theme=e.matches?"dark":"light";}catch(_){}});}catch(e){document.documentElement.dataset.theme="light";}})();`;
 
 function resolve(p: ThemePref): "light" | "dark" {
   if (p === "system") return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
@@ -45,14 +45,8 @@ export function ThemeSetting() {
     } catch {}
     setPref(p);
   }, []);
-  // Follow the device live while "system" is chosen.
-  useEffect(() => {
-    if (pref !== "system") return;
-    const mq = matchMedia("(prefers-color-scheme: dark)");
-    const on = () => applyTheme("system");
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, [pref]);
+  // "Match device" follows the system on every page: the listener is set up
+  // by THEME_SCRIPT at first paint.
   return (
     <div className="grid grid-cols-3 gap-1 rounded-xl border border-line bg-bg p-1" role="radiogroup" aria-label="Theme">
       {OPTIONS.map(({ key, label, icon: Icon }) => (

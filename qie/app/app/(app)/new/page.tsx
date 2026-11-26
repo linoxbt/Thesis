@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { parseEventLogs, type Abi } from "viem";
 import { usdPx } from "@/components/Position";
 import { ERC20_ABI, THESIS_CALLS_ABI } from "@/lib/abi";
-import { publicClient, readBalances } from "@/lib/chain";
+import { publicClient, readBalances, readMinDistance } from "@/lib/chain";
 import { CALLS_ADDRESS, explorerTx, QUSDC_URL } from "@/lib/config";
 import { useData, useNow } from "@/lib/data";
-import { callLine, parseAmount, pct, price, qusdc, when } from "@/lib/format";
+import { byteLength, callLine, decimalInput, distanceBps, parseAmount, pct, price, qusdc, timeLeft, when } from "@/lib/format";
 import { fmtPct, positionOf } from "@/lib/position";
 import { explain, useWallet } from "@/lib/wallet";
 
@@ -38,8 +38,11 @@ export default function NewTrade() {
   const [steps, setSteps] = useState<Step[] | null>(null);
   const [posted, setPosted] = useState<number | null>(null);
   const [bal, setBal] = useState<{ usd: bigint; gas: bigint } | null>(null);
+  const [minDist, setMinDist] = useState<number | null>(null);
+  const submitting = useRef(false);
 
-  const feed = feeds.find((f) => f.address === feedAddr) ?? feeds.find((f) => f.asset === "SOL") ?? feeds[0];
+  const live = feeds.filter((f) => f.enabled);
+  const feed = live.find((f) => f.address === feedAddr) ?? live.find((f) => f.asset === "SOL") ?? live[0];
   const dec = feed?.decimals ?? 8;
   const spot = feed ? price(feed.price, dec) : null;
   const busy = !!steps && steps.some((s) => s.status === "active");
@@ -56,40 +59,57 @@ export default function NewTrade() {
     const v = BigInt(i) * 10n ** BigInt(dec) + BigInt((f + "0".repeat(dec)).slice(0, dec) || "0");
     return v > 0n ? v : null;
   }, [target, dec]);
-  const position = spot && strike ? positionOf(above ? "above" : "below", spot, price(strike, dec), null) : null;
+  const position = spot && strike ? positionOf(above ? "above" : "below", spot, price(strike, dec)) : null;
   const end = now + windowSecs;
   const seedMicro = parseAmount(seed);
+
+  // The least distance the contract accepts right now: it grows with the age
+  // of the latest oracle print (the market may have moved since).
+  useEffect(() => {
+    if (!feed) return;
+    let on = true;
+    readMinDistance(feed.address).then((d) => on && setMinDist(d)).catch(() => on && setMinDist(null));
+    return () => {
+      on = false;
+    };
+  }, [feed?.address, feed?.updatedAt, Math.floor(now / 60)]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const printAge = feed && now > 0 ? Math.max(0, now - feed.updatedAt) : 0;
+  const textBytes = byteLength(text);
 
   // Client-side checks mirror the contract's, so the button never sends a doomed call.
   const inputErr = (() => {
     if (!params || !feed) return null;
     if (paused) return "Posting is paused.";
     if (!strike || !position) return "Enter a take-profit price.";
-    if (position.tpMovePct <= 0) return above ? "A long's take profit must be above the price." : "A short's take profit must be below the price.";
-    const bps = Math.round(Math.abs(position.tpMovePct) * 100);
-    if (bps < params.minDistanceBps) return `The take profit must be at least ${pct(params.minDistanceBps, 1)} from the price.`;
+    if (above ? strike <= feed.price : strike >= feed.price) return above ? "A long's take profit must be above the price." : "A short's take profit must be below the price.";
+    const bps = distanceBps(feed.price, strike);
+    const need = Math.max(params.minDistanceBps, minDist ?? 0);
+    if (bps < need)
+      return need > params.minDistanceBps
+        ? `The latest oracle price is ${Math.round(printAge / 60)} min old, so the take profit must be at least ${pct(need, 1)} away until it updates.`
+        : `The take profit must be at least ${pct(need, 1)} from the price.`;
     if (bps > params.maxDistanceBps) return `The take profit can be at most ${pct(params.maxDistanceBps, 0)} from the price.`;
     if (windowSecs < params.minWindow || windowSecs > params.maxWindow) return "That window is outside the allowed range.";
     if (!seedMicro || seedMicro < params.minSeed || seedMicro > params.maxSeed) return `Seed between ${qusdc(params.minSeed, 0)} and ${qusdc(params.maxSeed, 0)} QUSDC.`;
-    if (now > 0 && now - feed.updatedAt > params.maxOracleAge) return "The oracle price is too old right now; try again after its next update.";
+    if (textBytes > 280) return `The reason is ${textBytes} bytes; the limit is 280 (emoji and accents take more than one).`;
+    if (now > 0 && printAge > params.maxOracleAge) return `The oracle price is ${Math.round(printAge / 60)} min old (limit ${params.maxOracleAge / 60}); try again after its next update.`;
+    if (now > 0 && now - feed.volUpdatedAt > params.maxVolAge) return `${feed.asset} volatility hasn't been updated in ${Math.round((now - feed.volUpdatedAt) / 86_400)} days; posting reopens once it is.`;
     return null;
   })();
 
   useEffect(() => {
-    if (!feed || !strike || !params || inputErr) return setPreview(null);
-    let live = true;
+    setPreview(null); // never show odds for inputs that have since changed
+    if (!feed || !strike || !params || inputErr) return;
+    let on = true;
     publicClient
-      .readContract({ address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI, functionName: "previewOpenBps", args: [feed.address, strike, BigInt(Math.floor(Date.now() / 1000) + windowSecs)] })
-      .then(([open]) => {
-        if (!live) return;
-        const o = Number(open);
-        setPreview({ open: o, err: o < params.minOpenBps || o > params.maxOpenBps ? "Those odds are outside 1%–99%: pick a nearer take profit or a longer window." : undefined });
-      })
-      .catch(() => live && setPreview(null));
+      .readContract({ address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI, functionName: "previewOpenBps", args: [feed.address, above, strike, BigInt(Math.floor(Date.now() / 1000) + windowSecs)] })
+      .then(([open]) => on && setPreview({ open: Number(open) }))
+      .catch((e) => on && setPreview({ open: 0, err: explain(e) }));
     return () => {
-      live = false;
+      on = false;
     };
-  }, [feed?.address, strike, windowSecs, params, inputErr]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [feed?.address, above, strike, windowSecs, params, inputErr]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!w.account || !stakeToken) return setBal(null);
@@ -101,15 +121,19 @@ export default function NewTrade() {
 
   const go = async () => {
     if (!feed || !strike || !seedMicro || !stakeToken || !w.account) return;
-    const b = await readBalances(stakeToken, w.account);
+    if (submitting.current) return; // a second click while the first is still starting
+    submitting.current = true;
     const plan: Step[] = [
-      { key: "approve", label: `Approve ${qusdc(seedMicro)} QUSDC`, status: b.allowance >= seedMicro ? "skipped" : "todo" },
+      { key: "approve", label: `Approve ${qusdc(seedMicro)} QUSDC`, status: "todo" },
       { key: "post", label: `Post ${callLine(feed.asset, above, strike, dec)}`, status: "todo" },
     ];
     const upd = (key: string, patch: Partial<Step>) => setSteps((s) => (s ?? plan).map((x) => (x.key === key ? { ...x, ...patch } : x)));
-    setSteps(plan);
+    setSteps(plan.map((x, i) => (i === 0 ? { ...x, status: "active" } : x)));
     let current = "approve";
     try {
+      const b = await readBalances(stakeToken, w.account);
+      if (b.allowance >= seedMicro) plan[0].status = "skipped";
+      upd("approve", { status: plan[0].status === "skipped" ? "skipped" : "todo" });
       if (plan[0].status !== "skipped") {
         upd("approve", { status: "active" });
         const tx = await w.write(plan[0].label, { address: stakeToken, abi: ERC20_ABI as Abi, functionName: "approve", args: [CALLS_ADDRESS, seedMicro] });
@@ -127,6 +151,8 @@ export default function NewTrade() {
       setPosted(ev ? Number(ev.args.id) : null);
     } catch (e) {
       upd(current, { status: "failed", note: explain(e) });
+    } finally {
+      submitting.current = false;
     }
   };
 
@@ -165,9 +191,11 @@ export default function NewTrade() {
       <fieldset disabled={locked} className="contents">
         <section className={"space-y-3 panel p-5" + (locked ? " opacity-70" : "")}>
           <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Asset">
-            {feeds.map((f) => (
+            {live.map((f) => (
               <button
                 key={f.address}
+                role="radio"
+                aria-checked={feed?.address === f.address}
                 onClick={() => setFeedAddr(f.address)}
                 className={"num rounded-full px-3 py-1 text-xs " + (feed?.address === f.address ? "bg-ink text-bg" : "border border-line text-muted hover:text-ink")}
                 data-testid={`asset-${f.asset}`}
@@ -180,12 +208,14 @@ export default function NewTrade() {
             <span className="num text-sm text-ink">{feed ? `${feed.asset} / USDT` : "…"}</span>
             <span className="num text-xs text-muted">
               mark <span className="text-ink">{spot ? usdPx(spot) : "…"}</span> · QIE Oracle
+              {printAge > 0 && <span className="text-faint"> · {Math.round(printAge / 60)} min ago</span>}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-2">
             {[true, false].map((a) => (
               <button
                 key={String(a)}
+                aria-pressed={above === a}
                 onClick={() => setAbove(a)}
                 data-testid={a ? "side-long" : "side-short"}
                 className={"rounded-xl py-2.5 text-sm font-semibold transition-colors " + (above === a ? (a ? "bg-yes text-yes-ink" : "bg-bad text-white") : "border border-line text-muted hover:text-ink")}
@@ -208,7 +238,7 @@ export default function NewTrade() {
               </span>
               <input
                 value={target}
-                onChange={(e) => setTarget(e.target.value.replace(/[^0-9.]/g, ""))}
+                onChange={(e) => setTarget(decimalInput(e.target.value))}
                 inputMode="decimal"
                 className="num field mt-1 w-full px-3 py-2.5 outline-none"
                 aria-label="Take profit price in USD"
@@ -237,15 +267,22 @@ export default function NewTrade() {
                 </button>
               ))}
             </div>
-            {now > 0 && <div className="num mt-1 text-xs text-faint">until {when(end)}</div>}
+            {now > 0 && params && (
+              <div className="num mt-1 text-xs text-faint">
+                until {when(end)} · betting closes {timeLeft(Math.floor((windowSecs * params.closeBps) / 10_000), 0)} before
+              </div>
+            )}
           </div>
           <label className="block text-sm">
             <span className="text-muted">Why (optional, shown on the card)</span>
-            <textarea value={text} maxLength={280} onChange={(e) => setText(e.target.value)} rows={2} className="field mt-1 w-full px-3 py-2.5 outline-none" />
+            <textarea value={text} onChange={(e) => setText(e.target.value)} rows={2} className="field mt-1 w-full px-3 py-2.5 outline-none" aria-describedby="why-count" />
+            <span id="why-count" className={"num block text-right text-xs " + (textBytes > 280 ? "text-bad" : "text-faint")}>
+              {textBytes}/280
+            </span>
           </label>
           <label className="block text-sm">
             <span className="text-muted">Seed (QUSDC: opens both sides at the odds below, paid out with whichever side wins)</span>
-            <input value={seed} onChange={(e) => setSeed(e.target.value.replace(/[^0-9.]/g, ""))} inputMode="decimal" className="num field mt-1 w-full px-3 py-2.5 outline-none" data-testid="seed" />
+            <input value={seed} onChange={(e) => setSeed(decimalInput(e.target.value))} inputMode="decimal" className="num field mt-1 w-full px-3 py-2.5 outline-none" data-testid="seed" />
           </label>
           <div className="num rounded-xl border border-line bg-panel-2 p-3 text-sm" data-testid="preview">
             {inputErr || preview?.err ? (
@@ -257,9 +294,10 @@ export default function NewTrade() {
                   {" "}
                   that {feed?.asset} touches your take profit {strike ? usdPx(price(strike, dec)) : "…"} in time
                 </span>
-                {preview && (
+                {preview && params && (
                   <div className="mt-1 text-xs text-faint">
-                    Hit it and your skill gains {((10_000 - preview.open) / 10_000).toFixed(2)}; miss and it loses {(preview.open / 10_000).toFixed(2)}.
+                    Hit it and your skill gains {((10_000 - preview.open) / 10_000).toFixed(2)}; miss and it loses {(preview.open / 10_000).toFixed(2)}. Skill counts once
+                    others have bet {qusdc(params.minScoredVolume, 0)} QUSDC on it.
                   </div>
                 )}
               </>

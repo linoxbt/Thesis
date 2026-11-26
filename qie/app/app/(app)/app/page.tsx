@@ -63,7 +63,7 @@ export default function FeedPage() {
             ["Volume", `${qusdc(volume, 0)} QUSDC`],
             ["Traders", String(traders)],
             ["Calls", String(calls.length)],
-            ["Touches proven", String(calls.filter((c) => c.touched).length)],
+            ["Touches proven", String(calls.filter((c) => c.touched && !c.voided).length)],
           ].map(([k, v], i) => (
             <div key={k} className={"bg-panel px-5 py-4 " + (i ? "border-l border-line" : "") + (i === 2 ? " border-t sm:border-t-0" : "") + (i === 3 ? " border-t sm:border-t-0" : "")}>
               <div className="text-xs text-faint">{k}</div>

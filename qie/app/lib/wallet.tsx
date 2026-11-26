@@ -37,28 +37,36 @@ const CHAIN_HEX = "0x" + qie.id.toString(16);
 const REASONS: Record<string, string> = {
   Paused: "Trading is paused.",
   FeedNotEnabled: "That market isn't available.",
-  StaleOracle: "The oracle price is too old right now; try again after the next update.",
+  StaleOracle: "The latest oracle price is too old to trade on; try again after its next update.",
   StaleVolatility: "Volatility hasn't been updated recently; try again soon.",
   BadPrice: "The oracle returned no usable price.",
   StrikeWrongSide: "The target must be above the price for a long call, below it for a short.",
-  StrikeDistance: "The target is too close to or too far from the current price.",
+  StrikeDistance: "The target is too close to (or too far from) the latest oracle price. The older that price is, the further away the target must be.",
   BadWindow: "Pick a deadline inside the allowed window.",
-  OddsOutOfRange: "That call is too likely or too unlikely to open (odds must be 1%–99%).",
+  OddsOutOfRange: "Those opening odds are outside the allowed range: pick a nearer take profit or a longer window.",
   BadSeed: "The seed is outside the allowed range.",
-  TextTooLong: "Keep the reason under 280 characters.",
-  CallClosed: "This call is closed for new bets.",
+  TextTooLong: "Keep the reason under 280 bytes (emoji and accents count double or more).",
+  CallClosed: "Betting on this call has closed.",
   StakeTooSmall: "That's below the minimum bet.",
   AlreadyFinal: "Already settled.",
-  ProofTooLate: "The proof window has closed.",
+  ProofTooLate: "The proof window has closed; settle it instead.",
   RoundOutsideWindow: "That oracle round is outside the call's window.",
   NoTouch: "That oracle round didn't reach the target.",
   TooEarly: "It can't settle yet.",
   NotSettled: "Not settled yet.",
   NothingToClaim: "Nothing to claim.",
-  SyncRequired: "The oracle has many new rounds; press “Check the oracle” first.",
-  NearStrike: "The price is right at the target: betting pauses until it moves away.",
+  SyncRequired: "The oracle has many unchecked rounds; press “Check the oracle” first.",
+  NearStrike: "The target is too close to the latest oracle price (or that price is too old) to take bets right now. Betting reopens when the oracle prints a price further away.",
+  AwaitingOracle: "The deadline has passed, but the oracle hasn't printed a price after it yet. It settles as soon as it does.",
   Unauthorized: "This wallet isn't allowed to do that.",
 };
+
+/** The contract's custom error name behind a failed call, if any. */
+export function errorName(e: unknown): string | null {
+  if (!(e instanceof BaseError)) return null;
+  const revert = e.walk((x) => x instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null;
+  return revert?.data?.errorName ?? null;
+}
 
 export function explain(e: unknown): string {
   if (e instanceof BaseError) {

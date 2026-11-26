@@ -27,7 +27,7 @@ export function LogoMark({ size = 28, className = "", pulse = false }: { size?: 
   );
 }
 
-export function Wordmark({ className = "" }: { className?: string }) {
+function Wordmark({ className = "" }: { className?: string }) {
   return <span className={"font-display font-semibold leading-none tracking-[-0.035em] " + className}>Thesis</span>;
 }
 

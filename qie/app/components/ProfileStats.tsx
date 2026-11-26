@@ -15,11 +15,15 @@ function Tile({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
-/** Skill rank among creators with at least one scored call (all time, onchain). */
+/**
+ * Skill rank (all time, onchain), the leaderboard's way: by skill per scored
+ * call among creators with at least 3 scored calls. Null if not ranked.
+ */
 export function useSkillRank(who: Address | null): number | null {
   const { creators } = useData();
   if (!who) return null;
-  const ranked = creators.filter((c) => c.stats.hits + c.stats.misses > 0).sort((a, b) => b.stats.skillBps - a.stats.skillBps);
+  const per = (s: { skillBps: number; scored: number }) => s.skillBps / s.scored;
+  const ranked = creators.filter((c) => c.stats.scored >= 3).sort((a, b) => per(b.stats) - per(a.stats) || b.stats.skillBps - a.stats.skillBps);
   const i = ranked.findIndex((c) => c.creator.toLowerCase() === who.toLowerCase());
   return i < 0 ? null : i + 1;
 }
@@ -36,7 +40,7 @@ export function ProfileStats({ who }: { who: Address }) {
   const rank = useSkillRank(who);
   const mine = calls.filter((c) => c.creator.toLowerCase() === me);
   const ids = new Set(mine.map((c) => c.id));
-  const scored = (s?.hits ?? 0) + (s?.misses ?? 0);
+  const scored = s?.scored ?? 0;
   const avgOpen = mine.length ? Math.round(mine.reduce((a, c) => a + c.openBps, 0) / mine.length) : null;
   const feesEarned = events.trades.filter((t) => ids.has(t.id)).reduce((a, t) => a + (t.fee * BigInt(creatorShareBps)) / 10_000n, 0n);
   const won = events.claims.filter((c) => c.user.toLowerCase() === me).reduce((a, c) => a + c.amount, 0n);
@@ -49,12 +53,12 @@ export function ProfileStats({ who }: { who: Address }) {
         <Tile
           label="Skill score"
           value={scored > 0 ? fmtSkill(s!.skillBps) : "—"}
-          sub={scored > 0 ? `${rank ? `#${rank} · ` : ""}${scored} scored call${scored === 1 ? "" : "s"}` : "scored once a call settles"}
+          sub={scored > 0 ? `${rank ? `#${rank} · ` : ""}${scored} scored call${scored === 1 ? "" : "s"}` : "scored once a traded call settles"}
         />
         <Tile label="Calls posted" value={String(s?.posted ?? 0)} />
         <Tile label="Hit / missed" value={`${s?.hits ?? 0} / ${s?.misses ?? 0}`} sub={avgOpen !== null ? `avg opening odds ${pct(avgOpen, 0)}` : undefined} />
         <Tile label="Volume generated" value={`${qusdc(s?.volume ?? 0n, 0)}`} sub="QUSDC on their calls" />
-        <Tile label="Fees earned" value={qusdc(feesEarned)} sub="QUSDC, half of every fee" />
+        <Tile label="Fees earned" value={qusdc(feesEarned)} sub={`QUSDC, ${pct(creatorShareBps, 0)} of every fee`} />
         <Tile label="Staked" value={qusdc(staked, 0)} sub="QUSDC backed or challenged" />
         <Tile label="Winnings claimed" value={qusdc(won)} sub="QUSDC" />
       </div>
@@ -89,7 +93,7 @@ export function ProfileStats({ who }: { who: Address }) {
                         </Link>
                       </td>
                       <td className="text-muted">{pct(c.openBps, 0)}</td>
-                      <td>{c.settled ? c.yesWon ? <span className="text-yes">hit</span> : "missed" : <span className="text-muted">open</span>}</td>
+                      <td>{c.voided ? <span className="text-muted">void</span> : c.settled ? c.yesWon ? <span className="text-yes">hit</span> : "missed" : <span className="text-muted">open</span>}</td>
                       <td>{k === undefined ? <span className="text-faint">—</span> : <span className={k >= 0 ? "text-yes" : "text-bad"}>{fmtSkill(k)}</span>}</td>
                       <td className="text-right">{qusdc(c.volume, 0)}</td>
                     </tr>

@@ -24,8 +24,9 @@ export function Avatar({ addr, size = 28 }: { addr: string; size?: number }) {
   );
 }
 
-export function StateBadge({ touched, settled, yesWon }: { touched: boolean; settled: boolean; yesWon: boolean }) {
+export function StateBadge({ touched, settled, yesWon, voided = false }: { touched: boolean; settled: boolean; yesWon: boolean; voided?: boolean }) {
   const base = "num rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ";
+  if (voided) return <span className={base + "bg-panel-3 text-muted"}>Void · refunded</span>;
   if (settled) {
     return <span className={base + (yesWon ? "bg-yes/10 text-yes ring-1 ring-yes/30" : "bg-panel-3 text-muted")}>{yesWon ? "Called it" : "Missed"}</span>;
   }
@@ -52,7 +53,7 @@ export function Delta({ now, open }: { now: number; open: number }) {
 /** A call as the position behind it: long if it must rise to the target, short if it must fall. */
 export function positionOfCall(c: Call, feed: Feed | undefined) {
   const dec = feed?.decimals ?? 8;
-  return positionOf(c.above ? "above" : "below", price(c.spotAtOpen, dec), price(c.strike, dec), null);
+  return positionOf(c.above ? "above" : "below", price(c.spotAtOpen, dec), price(c.strike, dec));
 }
 
 export const pairOf = (feed: Feed | undefined) => `${feed?.asset ?? "…"} / USDT`;
@@ -75,7 +76,7 @@ export function ThesisCard({ c, feed }: { c: Call; feed: Feed | undefined }) {
           <Who addr={c.creator} className="truncate" />
         </Link>
         <div className="flex shrink-0 items-center gap-1.5">
-          <StateBadge touched={c.touched} settled={c.settled} yesWon={c.yesWon} />
+          <StateBadge touched={c.touched} settled={c.settled} yesWon={c.yesWon} voided={c.voided} />
         </div>
       </div>
 

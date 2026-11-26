@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { Tick } from "./Tick";
 
 /**
  * The hero product shot: an example Thesis call rendered as the trading
@@ -59,12 +58,12 @@ export function ProductWindow() {
         <span className="h-3 w-3 rounded-full bg-[#ff5f57]" />
         <span className="h-3 w-3 rounded-full bg-[#febc2e]" />
         <span className="h-3 w-3 rounded-full bg-[#28c840]" />
-        <span className="num ml-3 truncate text-[11px] text-white/45">thesis on QIE · Long SOL · example call</span>
+        <span className="num ml-3 truncate text-[11px] text-white/45">thesis on QIE · Long SOL · illustration, not live data</span>
       </div>
 
       <div className="num flex gap-7 overflow-hidden border-b border-white/[0.07] px-4 py-2.5 text-[10px] uppercase tracking-wide text-white/40">
         <Stat k="Position" v="Long SOL" tone="text-[#3ecf8e]" />
-        <Stat k="Mark" v={<Tick base={75.82} />} tone="text-white" sub="+3.8%" />
+        <Stat k="Mark" v="$75.82" tone="text-white" sub="+3.8%" />
         <Stat k="Entry" v="$73.04" />
         <Stat k="Take profit" v="$76.69" tone="text-[#3ecf8e]" />
         <Stat k="Pot" v="1,840 QUSDC" />
