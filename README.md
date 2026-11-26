@@ -1,177 +1,200 @@
 # Thesis
 
-**Prove you called it.** Anyone can claim they called the move. On Thesis a
-trade call is a live market: the crowd prices it the moment it's posted, a
-Pyth price anyone can submit settles it, and the caller's record is scored
-against those odds onchain, for good.
+**Prove you called it.**
 
-A *thesis* is a public trade call with two live onchain markets on the
-[pm-AMM](https://predict-pm-amm.dev): a conviction market the crowd can back or
-challenge (the take profit), and a protection market that pays out if price
-touches the trader's liquidation level. Both resolve from a Pyth-signed price
-that anyone can submit; settlement needs no admin.
+Thesis turns a trade call into a live onchain market. A trader posts a call
+("SOL touches $76.70 by Saturday"), the protocol prices it the moment it is
+posted, the crowd backs or challenges it, and an oracle settles it with no
+admin in the loop. Every result is scored against the odds the call was given,
+so a trader's record measures real edge rather than volume of safe calls.
 
-Status: live on devnet. Web: https://thesis-calls.netlify.app (landing at `/`,
-app at `/app`), deployed from `main`. Program `9yVcFaDE…` on devnet; worker and
-Postgres on Railway. See [`docs/DEPLOY.md`](docs/DEPLOY.md) and
-[`docs/PLAN.md`](docs/PLAN.md).
+| Edition | Network | Status | App |
+|---|---|---|---|
+| **Thesis on QIE** | QIE mainnet (chain 1990) | Live, contract verified | https://thesis-qie.netlify.app |
+| **Thesis on Solana** | Solana devnet | Live (test assets) | https://thesis-calls.netlify.app |
 
-## Why
+The QIE edition is a port of the original Solana build, rewritten in Solidity
+for the QIE Blockchain. Its own documentation is in [`qie/README.md`](qie/README.md).
 
-Traders post calls all day ("long SOL, target $80, stop $70") and nothing
-holds them to it: no price on the conviction, no record of hits and misses,
-and the stop is a hope. Thesis turns a call into two markets:
+---
 
-- **Conviction:** "SOL touches the take profit before the deadline." The
-  crowd backs it (YES) or challenges it (NO), so every call has a live price,
-  and the creator earns a share of the fees.
-- **Protection:** "SOL touches the liquidation price before the deadline." The
-  trader (or anyone) buys cover that pays $1 per share if it does.
+## Contents
 
-Both resolve from a Pyth-signed price that anyone can submit, so the record
-of who called it is onchain and nobody can fudge it.
+- [The problem](#the-problem)
+- [How it works](#how-it-works)
+- [Skill score](#skill-score)
+- [Thesis on QIE](#thesis-on-qie)
+- [Thesis on Solana](#thesis-on-solana)
+- [Repository layout](#repository-layout)
+- [Development](#development)
+- [Security model and known limitations](#security-model-and-known-limitations)
+- [License](#license)
 
-### Skill, not hit rate
+## The problem
 
-Hit rate is easy to game: post near-certain calls and you're always right.
-Thesis scores each settled call as `(1 if hit, else 0) − opening probability`,
-using the odds the program computed onchain when the call was posted. Hitting
-a 20% call earns +0.80; missing a 90% call costs −0.90; fair-odds calls posted
-at random average zero. The leaderboard (weekly and all-time) ranks creators by
-this score. Calls opened when Pyth's latest print was already past the target
-are excluded, so a stale spot can't be used to post a call that has already
-won (`packages/db/src/skill.ts`).
+Trading calls are everywhere and accountable nowhere. Anyone can claim they
+called the move after the fact; nothing prices a call when it is made, and
+nothing keeps a record that can't be edited. Hit rate is easy to game: post
+only near-certain calls and you are always right.
 
-### Trade from anywhere: Blinks
+Thesis addresses all three:
 
-Every call is a Solana Action. Sharing `https://thesis-calls.netlify.app/t/<pda>`
-lets blink-aware wallets and clients render it with **Back $5 / Challenge $5**
-(or any amount) buttons; the action builds the same trade as the app, through
-Thesis so the creator is credited, with 1% slippage protection from a simulated
-quote (`/actions.json`, `/api/actions/thesis/[pda]`). Unfurling directly on X
-needs the domain registered with Dialect's blink registry.
+- **Priced at posting.** Opening odds are computed onchain from distance to
+  target, time to deadline and volatility, using the reflection-principle
+  probability that price touches a level: `P = 2Φ(−|ln(K/S)| / σ√τ)`.
+- **Settled by an oracle, not a person.** A call resolves YES the first time
+  an oracle price inside the window reaches the target, and NO at the
+  deadline otherwise. Anyone can trigger settlement; nobody can choose the
+  outcome.
+- **Scored against the odds.** The record rewards calls that beat the market,
+  not calls that were obvious.
 
 ## How it works
 
-1. **Post:** the program opens both markets on pm-AMM with an opening price it
-   computes onchain (reflection principle: `P = 2Φ(−|ln(K/S)| / σ√τ)`), then
-   links them into a thesis.
-2. **Trade:** backs, challenges and cover go through `trade`, which attributes
-   fees to the thesis and caps cover per wallet.
-3. **Prove:** the first fully verified Pyth print at or past a strike inside
-   the window resolves the market's touch. Our watcher submits it; so can
-   anyone.
-4. **Settle:** after the deadline plus a grace period, the market settles (YES
-   if touched, else NO) and the creator's hit/miss record updates. The keeper
-   then brings the treasury's seed and any YES it bought back home.
+1. **Post.** The trader picks an asset, a direction, a take-profit level and a
+   deadline, and seeds the market. The contract computes the opening odds and
+   opens the market at that price.
+2. **Trade.** Others back the call (YES) or challenge it (NO). Every trade pays
+   a 2% fee, part of which goes to the creator of the call.
+3. **Resolve.** The first qualifying oracle price at or past the target settles
+   the call YES. If none appears before the deadline, it settles NO after a
+   short grace period.
+4. **Claim and score.** Winners claim their payout; the creator's onchain
+   record (hits, misses, skill) updates.
 
-### Why pm-AMM
+## Skill score
 
-A new call has no order book. pm-AMM gives every market liquidity from its
-first trade (the seed) and prices outcome tokens with a pool built for
-prediction markets, whose liquidity decays toward the deadline, which suits
-touch markets that end on a clock.
+Each settled call scores `(1 if hit, else 0) − opening probability`, using the
+odds computed onchain when the call was posted:
 
-### Architecture
+| Call | Opening odds | Outcome | Score |
+|---|---|---|---|
+| Long shot | 20% | Hit | **+0.80** |
+| Coin flip | 50% | Missed | −0.50 |
+| Near-certain | 90% | Missed | **−0.90** |
 
-```
- browser ──► Next.js on Netlify ── API routes ──► Postgres (Railway) ◄── indexer ┐
-    │            (reads, abuse guards)                                           │
-    └── signs ──► Solana: Thesis program ──CPI──► pm-AMM          worker (Railway)┤
-                       ▲  prove_touch / settle / treasury_redeem ◄── watcher, keeper
-                       └── Pyth SOL/USD (PriceUpdateV2)
-```
+Calls posted at fair odds average zero over time, so the leaderboard only rises
+for traders with genuine edge.
 
-### Traction
+## Thesis on QIE
 
-Live numbers: https://thesis-calls.netlify.app/stats (team wallets and the
-treasury excluded). On devnet so far: house calls from the team, one touch
-proven live by the watcher (see [`docs/DEMO.md`](docs/DEMO.md)), and test
-trades. Real traders posting calls is the next milestone.
+A single Solidity contract, `ThesisCalls`, implements pari-mutuel call markets
+on QIE mainnet, using the QIE stack end to end:
 
-Demo script: [`docs/DEMO.md`](docs/DEMO.md). Mainnet runbook:
-[`docs/MAINNET.md`](docs/MAINNET.md).
-
-## Layout
-
-| Path | What |
+| QIE component | Role |
 |---|---|
-| `programs/thesis` | Anchor 1.0.1 program (instructions below) |
-| `services/worker` | One process: watcher (proves touches), keeper (settles, redeems the treasury's positions), indexer (chain → Postgres), volatility keeper, Telegram alerts |
-| `apps/web` | Next.js 16 app: feed, trade pages, Post, Protect, Profile, Stats, and the API routes |
-| `packages/chain` | IDLs, Pyth decoding, the `prove_touch` rules mirrored offchain, pricing, position math |
-| `packages/db` | Postgres schema (migrations), reads, writes, abuse guards |
-| `idls/pm_amm.json` | Trimmed pm-AMM IDL for `declare_program!` (`scripts/trim-idl.js` from `idls/full`, MIT, [sparkfun-labs/pm-amm](https://github.com/sparkfun-labs/pm-amm)) |
+| **QIE Blockchain** | `ThesisCalls` on mainnet: [`0x40fBC7178cadFb6e4827B8098154476f02fFeF66`](https://mainnet.qie.digital/address/0x40fBC7178cadFb6e4827B8098154476f02fFeF66#code) (verified source) |
+| **QIE Oracle** | BTC, ETH and SOL feeds price each call at posting, settle it round by round (`getRoundData`), and supply realised volatility |
+| **QUSDC** | Seeds, stakes, payouts and fees |
+| **QIE Wallet** | Discovered via EIP-6963; one-click network switch and signing |
+
+**Design highlights**
+
+- **Every oracle round counts.** Before accepting a bet, and before settling NO,
+  the contract scans every oracle round it has not yet checked. A touch can't
+  be missed, and nobody gains by racing to submit or withhold a proof.
+- **Onchain odds and scoring.** `TouchMath` computes touch probabilities with
+  fixed-point `ln`, `exp`, `sqrt` and `erfc`; creator statistics (posted, hits,
+  misses, skill, volume) live in contract storage.
+- **Creator earnings.** Half of every 2% fee accrues to the call's creator,
+  claimable at any time.
+- **Bounded administration.** Two-step ownership transfer, bounded parameters
+  and a pause switch. No owner function sets or changes a call's outcome.
+- **No backend required.** The web app is a static site that reads the contract
+  and its events directly; an optional keeper proves touches and settles calls
+  promptly.
+
+Contract, tests, keeper and app: [`qie/`](qie/). Details and the deployment
+record: [`qie/README.md`](qie/README.md).
+
+## Thesis on Solana
+
+The original edition: an Anchor program in which each thesis links two
+[pm-AMM](https://predict-pm-amm.dev) markets, settled by Pyth.
+
+- **Conviction market:** "SOL touches the take profit before the deadline."
+  The crowd backs or challenges it; the creator earns a share of fees.
+- **Protection market:** "SOL touches the liquidation price before the
+  deadline." Cover pays $1 per share if it does.
+- **Permissionless proofs:** the first fully verified Pyth print past a strike
+  inside the window resolves the touch. A watcher submits proofs
+  automatically; anyone else can too.
+- **Solana Actions (Blinks):** every call is shareable as an action with
+  Back / Challenge buttons.
+
+```
+ browser ──► Next.js (Netlify) ── API routes ──► Postgres ◄── indexer ─┐
+    │                                                                   │
+    └── signs ──► Thesis program ──CPI──► pm-AMM          worker ───────┤
+                     ▲  prove_touch / settle / treasury_redeem ◄── watcher, keeper
+                     └── Pyth SOL/USD (PriceUpdateV2)
+```
+
+| Program | Devnet |
+|---|---|
+| Thesis | `9yVcFaDEmBk1VU66tXxuvUujZXfiiT3ED1EpioVuug6h` |
+| pm-AMM | `GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y` |
+| Pyth receiver | `rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ` |
+
+Operations: [`docs/DEPLOY.md`](docs/DEPLOY.md) ·
+[`docs/MAINNET.md`](docs/MAINNET.md) · [`docs/DEMO.md`](docs/DEMO.md).
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `qie/contracts` | QIE edition: `ThesisCalls` and `TouchMath` (Solidity 0.8.24), Hardhat tests, deploy scripts, keeper |
+| `qie/app` | QIE edition: static Next.js app (viem, EIP-6963 wallets) |
+| `programs/thesis` | Solana edition: Anchor 1.0.1 program |
+| `services/worker` | Solana edition: watcher, keeper, indexer, volatility updates, alerts |
+| `apps/web` | Solana edition: Next.js app and API routes |
+| `packages/chain` | Shared chain logic: IDLs, Pyth decoding, pricing, position maths |
+| `packages/db` | Postgres schema, migrations and queries |
 | `tests/harness` | LiteSVM tests against the real pm-AMM and Metaplex bytecode |
-| `scripts/` | Local stack, e2e, devnet seeding, migrations, preflight checks |
+| `scripts/` | Local stack, end-to-end tests, seeding, preflight checks |
 
-### Program instructions
+## Development
 
-| Group | Instructions |
-|---|---|
-| Config | `initialize_config`, `update_config` (bounded; proposes a new admin), `accept_admin`, `set_volatility`, `migrate_config` (one-off v1 → v2 resize) |
-| Markets | `create_touch_market` (opening price computed onchain; sponsored markets may name a beneficiary), `prove_touch` (until `end_ts` + grace), `settle` |
-| Theses | `create_thesis` (links markets within 15 min of opening), `trade` (fees attributed, cover capped per wallet), `claim_creator_fees` |
-| Treasury | `treasury_buy_yes` (keeper, after a proven touch, needs a 1% edge), `treasury_redeem` (anyone, after settlement: seed residuals + winnings back to the treasury) |
+**QIE edition** (Node 22):
 
-Creator fees owed are reserved onchain (`creator_fees_owed`): sponsored seeds
-and treasury buys can't spend them.
+```bash
+cd qie/contracts && npm ci
+npx hardhat test                      # contract unit tests
+FORK=1 npx hardhat test test/fork.test.js   # against live QIE Oracle feeds
 
-## Program IDs
+# Local end to end: chain, demo data, app, browser tests
+npx hardhat node &
+npx hardhat run scripts/dev-chain.js --network localhost
+cd ../app && NEXT_PUBLIC_QIE_NETWORK=local npx next build && npx serve out -l 3200 &
+node e2e/ui.e2e.cjs
+```
 
-| Program | Devnet | Mainnet |
-|---|---|---|
-| Thesis | `9yVcFaDEmBk1VU66tXxuvUujZXfiiT3ED1EpioVuug6h` | — |
-| pm-AMM | `GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y` | same |
-| Pyth receiver | `rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ` | same |
-
-## Build and test
-
-Toolchain: Rust stable, Solana CLI 3.0.14, Anchor CLI 1.0.1, Node 22, pnpm 10.
-CI (`.github/workflows/ci.yml`) runs all of the below except the e2e.
+**Solana edition** (Rust stable, Solana CLI 3.0.14, Anchor CLI 1.0.1, Node 22,
+pnpm 10):
 
 ```bash
 pnpm install
 cargo build-sbf --tools-version v1.52 --manifest-path programs/thesis/Cargo.toml
-scripts/fetch-fixtures.sh            # dump pm-AMM + Metaplex from devnet
-pnpm test                            # LiteSVM: 34 program tests
-npx tsc --noEmit -p tsconfig.json    # scripts, worker, packages
-(cd apps/web && npx tsc --noEmit)
-(cd packages/db && pnpm test)        # needs Postgres on :5433 (database thesis_test)
-pnpm test:worker                     # watcher, indexer, alerts, layout (Postgres on :5433)
+scripts/fetch-fixtures.sh             # pm-AMM and Metaplex fixtures from devnet
+pnpm test                             # LiteSVM program tests
+(cd packages/db && pnpm test)         # needs local Postgres on :5433
+pnpm test:worker
 ```
 
-The database tests refuse to run against anything but a local server.
+Continuous integration runs in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
-`cargo build-sbf` needs platform tools v1.52 for the edition-2024 crates in the
-lockfile, the same as pm-AMM's own devnet build. The LiteSVM harness has its own
-workspace and lockfile because it needs a newer Cargo than the platform tools
-ship. After changing the program: `anchor idl build -p thesis -o
-target/idl/thesis.json -t target/types/thesis.ts && scripts/sync-idl.sh`.
+## Security model and known limitations
 
-### End to end, locally
-
-```bash
-PG_URL=postgres://postgres@localhost:5433 scripts/local-stack.sh   # validator, worker, seed, web on :3100
-BASE_URL=http://localhost:3100 npx tsx scripts/ui-e2e.ts            # 29 browser checks
-```
-
-## Known limitations (devnet)
-
-- **Proofs come from one onchain price account.** The watcher reads Pyth's
-  sponsored SOL/USD account, which on devnet updates about every 30 minutes.
-  Only prints that land there can prove a touch: a wick between two prints
-  can't be proven. Posting exact prints from Pyth's Hermes service would close
-  the gap; it needs a Hermes API key.
-- **Stale opening spot on devnet.** Market creation accepts a spot print up
-  to `max_spot_age_secs` old: one hour on devnet (the feed updates every ~30
-  minutes), so a market can open against a price that has since moved past
-  its strike. Mainnet uses 60 seconds (`scripts/mainnet-preflight.ts`).
-- **Instant wallets** are devnet keys kept in the browser's local storage.
-- **Keys:** the upgrade authority and config admin are one hot key. Before
-  mainnet, move both to a multisig (`update_config` then `accept_admin`, and
-  `solana program set-upgrade-authority`).
+- **Oracle cadence.** Calls settle from published oracle prices. A wick that
+  starts and ends between two oracle updates can't be counted on either
+  edition.
+- **Keys.** On both editions, administrative keys are held by a single wallet
+  today. Ownership should move to a multisig before significant value is at
+  stake.
+- **Unaudited.** The contracts have extensive tests but no third-party audit.
+  Use small amounts.
+- **Not financial advice.** Thesis is an experimental protocol.
 
 ## License
 
-MIT
+[MIT](LICENSE)
