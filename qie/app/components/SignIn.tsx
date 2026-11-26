@@ -124,7 +124,7 @@ export function SignInDialog() {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 backdrop-blur-sm sm:items-center"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
       onClick={() => !busy && !waiting && w.closeSignIn()}
       role="dialog"
       aria-modal="true"
