@@ -1,0 +1,9 @@
+# Thesis on QIE keeper (build context: qie/contracts).
+FROM node:22-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts && npm install --no-save --ignore-scripts ethers@6 && chown -R node:node /app
+COPY scripts/keeper.js scripts/keeper.js
+USER node
+# KEEPER_KEY (secret), CALLS_ADDRESS and RPC_URL come from the environment.
+CMD ["node", "scripts/keeper.js"]

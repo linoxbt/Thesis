@@ -10,9 +10,9 @@ const fs = require("node:fs");
 
 const QUSDC = "0x3F43DA82eC9A4f5285F10FaF1F26EcA7319E5DA5";
 const FEEDS = {
-  BTC: { address: "0x9E596d809a20A272c788726f592c0d1629755440", volBps: 5_000 },
-  ETH: { address: "0x4bb7012Fbc79fE4Ae9B664228977b442b385500d", volBps: 6_500 },
-  SOL: { address: "0xe86999c8e6C8eeF71bebd35286bCa674E0AD7b21", volBps: 7_000 },
+  BTC: { address: "0x9E596d809a20A272c788726f592c0d1629755440", volBps: 7_200 }, // 7-day realised, measured 26 Nov 2026
+  ETH: { address: "0x4bb7012Fbc79fE4Ae9B664228977b442b385500d", volBps: 8_200 },
+  SOL: { address: "0xe86999c8e6C8eeF71bebd35286bCa674E0AD7b21", volBps: 6_800 },
 };
 const USDC = 1_000_000n;
 
