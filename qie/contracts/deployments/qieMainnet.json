@@ -1,0 +1,23 @@
+{
+  "network": "qieMainnet",
+  "chainId": 1990,
+  "ThesisCalls": "0x40fBC7178cadFb6e4827B8098154476f02fFeF66",
+  "stakeToken": "0x3F43DA82eC9A4f5285F10FaF1F26EcA7319E5DA5",
+  "treasury": "0x747DF176962e1495355562Fe30b65F276f0B8404",
+  "keeper": "0xA47CD56Bbd97203b76757B180f9736d259Da24fe",
+  "feeds": {
+    "BTC": {
+      "address": "0x9E596d809a20A272c788726f592c0d1629755440",
+      "volBps": 7200
+    },
+    "ETH": {
+      "address": "0x4bb7012Fbc79fE4Ae9B664228977b442b385500d",
+      "volBps": 8200
+    },
+    "SOL": {
+      "address": "0xe86999c8e6C8eeF71bebd35286bCa674E0AD7b21",
+      "volBps": 6800
+    }
+  },
+  "deployedAt": "2026-11-26T13:41:44.669Z"
+}

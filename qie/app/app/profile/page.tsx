@@ -37,6 +37,7 @@ function ProfileView() {
   const { ready, calls, creators, params, feedOf, refresh } = useData();
   const now = useNow(1000);
   const [owed, setOwed] = useState<bigint>(0n);
+  const [pendingOwner, setPendingOwner] = useState<string | null>(null);
   const [positions, setPositions] = useState<{ id: number; yes: bigint; no: bigint; claimable: bigint }[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const mine = !!w.account && !!who && w.account.toLowerCase() === who.toLowerCase();
@@ -45,6 +46,7 @@ function ProfileView() {
     if (!who) return;
     const fees = await publicClient.readContract({ address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI, functionName: "creatorFeesOwed", args: [who] });
     setOwed(fees);
+    setPendingOwner(await publicClient.readContract({ address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI, functionName: "pendingOwner" }));
     // Positions across the latest 100 calls.
     const recent = calls.slice(-100);
     const ps = await Promise.all(recent.map((c) => readPosition(c.id, who).then((p) => ({ c, p }))));
@@ -105,6 +107,25 @@ function ProfileView() {
         )}
       </header>
       {err && <p className="text-xs text-bad">{err}</p>}
+      {mine && pendingOwner && pendingOwner.toLowerCase() === who.toLowerCase() && (
+        <section className="panel flex flex-wrap items-center justify-between gap-3 p-5" data-testid="accept-ownership">
+          <div className="text-sm">
+            <div className="text-ink">You&apos;ve been offered ownership of the Thesis contract.</div>
+            <div className="text-xs text-muted">Accepting makes this wallet the owner (limits, pause, treasury). The current owner keeps control until you accept.</div>
+          </div>
+          <button
+            onClick={() =>
+              w
+                .write("Accept contract ownership", { address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI as Abi, functionName: "acceptOwnership" })
+                .then(load)
+                .catch((e) => setErr(explain(e)))
+            }
+            className="btn btn-primary"
+          >
+            Accept ownership
+          </button>
+        </section>
+      )}
 
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-4">
         <Tile label="Skill score" value={scored > 0 ? fmtSkill(stats!.skillBps) : "—"} sub={scored > 0 ? `${scored} scored call${scored === 1 ? "" : "s"}` : "scored once a call settles"} />

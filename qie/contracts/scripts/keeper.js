@@ -168,7 +168,12 @@ async function tick(ctx) {
 
 async function main() {
   const key = envKey();
-  if (!key) throw new Error("set KEEPER_KEY (or QIE_DEPLOYER_KEY in .env)");
+  if (!key) {
+    // Hosted without a key yet: wait instead of crash-looping (Railway redeploys when it's set).
+    log("KEEPER_KEY is not set; idle until it is (any funded QIE wallet works for proving and settling)");
+    setInterval(() => {}, 1 << 30);
+    return;
+  }
   if (!ADDRESS) throw new Error("set CALLS_ADDRESS");
   const provider = new ethers.JsonRpcProvider(RPC);
   const wallet = new ethers.Wallet(key, provider);
