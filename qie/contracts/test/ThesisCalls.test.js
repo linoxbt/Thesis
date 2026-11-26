@@ -46,11 +46,19 @@ async function deploy() {
   return { owner, treasury, keeper, creator, alice, bob, carol, token, feed, calls };
 }
 
-/** A call "SOL touches $105 within 2 days", seeded with 100 QUSDC. */
+/**
+ * A call "SOL touches $105 within 2 days", seeded with 100 QUSDC, and one
+ * quiet oracle round after it (a touch in the very first round after posting
+ * voids a call, so tests that want a YES need a round in between).
+ */
 async function withCall() {
   const f = await deploy();
   const end = (await time.latest()) + 2 * DAY;
   await f.calls.connect(f.creator).createCall(await f.feed.getAddress(), true, PX(105), end, 100n * USDC, "SOL breaks $105");
+  await time.increase(5 * MIN);
+  const t = (await time.latest()) + 1;
+  await time.setNextBlockTimestamp(t);
+  await f.feed.push(PX(100.2), t);
   const c = await f.calls.getCall(0);
   return { ...f, id: 0n, end, closeAt: Number(c.closeAt) };
 }
@@ -208,6 +216,13 @@ describe("ThesisCalls: trading", () => {
     expect(c.yesPool - before.yesPool).to.equal(49n * USDC);
     expect(c.outsideVolume).to.equal(50n * USDC);
     expect(await f.calls.yesStake(0, f.alice.address)).to.equal(49n * USDC);
+    // The fee waits in escrow until the next oracle round passes without a touch...
+    const pd = await f.calls.pending(0);
+    expect([pd.creatorFee, pd.treasuryFee]).to.deep.equal([500_000n, 500_000n]);
+    expect(await f.calls.creatorFeesOwed(f.creator.address)).to.equal(0n);
+    // ... then it's credited.
+    await later(f, 10 * MIN, 100);
+    await f.calls.sync(0, 0);
     expect(await f.calls.creatorFeesOwed(f.creator.address)).to.equal(500_000n);
     expect(await f.calls.treasuryFees()).to.equal(500_000n);
     const [net, pays] = await f.calls.quote(0, false, 10n * USDC);
@@ -219,7 +234,7 @@ describe("ThesisCalls: trading", () => {
     const f = await loadFixture(withCall);
     await f.calls.setParams({ ...PARAMS, feeBps: 500, grace: 2 * HOUR });
     await f.calls.connect(f.alice).bet(0, true, 50n * USDC);
-    expect(await f.calls.treasuryFees()).to.equal(500_000n); // still 2%, not 5%
+    expect((await f.calls.pending(0)).treasuryFee).to.equal(500_000n); // still 2%, not 5%
   });
 
   it("closes betting before the deadline and enforces the minimum stake", async () => {
@@ -309,7 +324,7 @@ describe("ThesisCalls: resolution", () => {
     const f = await loadFixture(withCall);
     await time.increaseTo(f.end + 10);
     const late = await print(f, 110);
-    await expect(f.calls.proveTouch(0, late)).to.be.revertedWithCustomError(f.calls, "RoundOutsideWindow");
+    await expect(f.calls.proveTouch(0, late)).to.be.revertedWithCustomError(f.calls, "NoTouch");
     await time.increaseTo(f.end + HOUR + 1);
     await expect(f.calls.proveTouch(0, late)).to.be.revertedWithCustomError(f.calls, "ProofTooLate");
   });
@@ -345,6 +360,8 @@ describe("ThesisCalls: resolution", () => {
   it("pays creator fees and treasury fees to the right accounts only", async () => {
     const f = await loadFixture(withCall);
     await f.calls.connect(f.alice).bet(0, true, 100n * USDC);
+    await later(f, 10 * MIN, 100);
+    await f.calls.sync(0, 0); // the next round passed: fees are final
     const k0 = await f.token.balanceOf(f.creator.address);
     await f.calls.connect(f.creator).claimCreatorFees();
     expect((await f.token.balanceOf(f.creator.address)) - k0).to.equal(1n * USDC);
@@ -360,6 +377,7 @@ describe("ThesisCalls: resolution", () => {
     await f.calls.connect(f.alice).bet(0, true, 20n * USDC);
     await f.calls.setPaused(true);
     await expect(f.calls.connect(f.bob).bet(0, false, 5n * USDC)).to.be.revertedWithCustomError(f.calls, "Paused");
+    await later(f, 10 * MIN, 101);
     const hit = await later(f, HOUR, 106);
     await f.calls.proveTouch(0, hit);
     await f.calls.connect(f.alice).claim(0);
@@ -390,23 +408,58 @@ describe("ThesisCalls: no racing the oracle", () => {
     await expect(f.calls.connect(f.alice).bet(0, true, 10n * USDC)).to.be.revertedWithCustomError(f.calls, "NearStrike");
   });
 
-  it("audit C1: a bet that front-runs the touching oracle update is refunded, not paid", async () => {
+  it("audit C1: bets placed in the round before the touch (front-running the oracle) are refunded in full", async () => {
     const f = await loadFixture(withCall);
-    await f.calls.connect(f.alice).bet(0, false, 50n * USDC); // honest, long before the touch
+    await f.calls.connect(f.alice).bet(0, false, 50n * USDC); // honest, rounds before the touch
     await later(f, HOUR, 103);
-    await f.calls.connect(f.bob).bet(0, true, 200n * USDC); // front-runs the next print
-    const hit = await print(f, 105.5); // the touching round, seconds later
+    const fees0 = await f.calls.treasuryFees();
+    await f.calls.connect(f.bob).bet(0, true, 200n * USDC); // bets on the move the next print shows
+    await time.increase(4 * MIN); // minutes later, not seconds: a whole round gap is covered
+    const hit = await print(f, 105.5); // the touching round
     await f.calls.proveTouch(0, hit);
     const c = await f.calls.getCall(0);
     expect(c.voidYes).to.equal(196n * USDC);
+    expect(await f.calls.treasuryFees()).to.equal(fees0 + 500_000n); // alice's fee was credited when her round passed; bob's never was
     const b0 = await f.token.balanceOf(f.bob.address);
     await f.calls.connect(f.bob).claim(0);
-    expect((await f.token.balanceOf(f.bob.address)) - b0).to.equal(196n * USDC); // net stake back, no winnings
+    expect((await f.token.balanceOf(f.bob.address)) - b0).to.equal(200n * USDC); // the full 200 back, fee included
     // The creator's seed YES takes the whole remaining pot (alice's NO stake).
     const k0 = await f.token.balanceOf(f.creator.address);
     await f.calls.connect(f.creator).claim(0);
     const pot = c.yesPool + c.noPool - c.voidYes - c.voidNo;
     expect((await f.token.balanceOf(f.creator.address)) - k0).to.be.closeTo(pot, 2n);
+    // Everything owed is covered.
+    await f.calls.connect(f.creator).claimCreatorFees();
+    await f.calls.connect(f.treasury).withdrawTreasury();
+    expect(await f.token.balanceOf(await f.calls.getAddress())).to.be.lessThan(3n);
+  });
+
+  it("re-audit N1: proving a later touching round still settles on the first one (no dodging the refund)", async () => {
+    const f = await loadFixture(withCall);
+    await later(f, HOUR, 103);
+    await f.calls.connect(f.bob).bet(0, true, 200n * USDC);
+    await time.increase(3 * MIN);
+    const r1 = await print(f, 105.3); // first touch: bob's bet is in the round before it
+    await time.increase(5 * MIN);
+    const r2 = await print(f, 105.6); // a later touch
+    await f.calls.proveTouch(0, r2);
+    const c = await f.calls.getCall(0);
+    expect(c.touchRound).to.equal(r1);
+    expect(c.voidYes).to.equal(196n * USDC);
+    expect(await f.calls.claimable(0, f.bob.address)).to.equal(200n * USDC);
+  });
+
+  it("re-audit N2: a call touched in its first round can't be rescued by proving a later round", async () => {
+    const f = await deploy();
+    const feed = await f.feed.getAddress();
+    const end = (await time.latest()) + DAY;
+    await f.calls.connect(f.creator).createCall(feed, true, PX(101.5), end, 100n * USDC, "");
+    await time.increase(4 * MIN);
+    await print(f, 101.7); // the first round after posting touches
+    await time.increase(4 * MIN);
+    const r2 = await print(f, 101.9);
+    await expect(f.calls.proveTouch(0, r2)).to.emit(f.calls, "Voided").withArgs(0, 1);
+    expect((await f.calls.stats(f.creator.address)).skillBps).to.equal(0n);
   });
 
   it("audit H1: a touch right after posting voids the call (posted into an unprinted move)", async () => {
@@ -450,6 +503,39 @@ describe("ThesisCalls: no racing the oracle", () => {
     expect([c.settled, c.yesWon, c.scanDone]).to.deep.equal([true, false, true]);
   });
 
+  it("re-audit N3: voidCall settles NO when the oracle did print past the deadline", async () => {
+    const f = await loadFixture(withCall);
+    await f.calls.connect(f.alice).bet(0, true, 20n * USDC);
+    await time.increaseTo(f.end + HOUR);
+    await print(f, 101); // past the deadline, nobody settled
+    await time.increaseTo(f.end + 3 * DAY + 1);
+    await expect(f.calls.connect(f.alice).voidCall(0)).to.emit(f.calls, "Settled");
+    const c = await f.calls.getCall(0);
+    expect([c.settled, c.voided, c.yesWon]).to.deep.equal([true, false, false]);
+    expect(await f.calls.claimable(0, f.alice.address)).to.equal(0n); // the YES loser gets no refund
+  });
+
+  it("re-audit N3: voidCall finds an unproven touch and settles YES", async () => {
+    const f = await loadFixture(withCall);
+    await f.calls.connect(f.bob).bet(0, false, 20n * USDC);
+    await later(f, 10 * MIN, 101);
+    await later(f, HOUR, 106); // touched; nobody proved it, and the oracle then went silent
+    await time.increaseTo(f.end + 3 * DAY + 1);
+    await f.calls.connect(f.bob).voidCall(0);
+    const c = await f.calls.getCall(0);
+    expect([c.settled, c.voided, c.yesWon]).to.deep.equal([true, false, true]);
+    expect(await f.calls.claimable(0, f.bob.address)).to.equal(0n);
+  });
+
+  it("re-audit N6: refunded outside bets don't make a call count toward skill", async () => {
+    const f = await loadFixture(withCall);
+    await later(f, HOUR, 103);
+    await f.calls.connect(f.alice).bet(0, false, 6n * USDC); // a 'sybil' bet in the round before the touch
+    await time.increase(3 * MIN);
+    const hit = await print(f, 105.4);
+    await expect(f.calls.proveTouch(0, hit)).to.emit(f.calls, "Settled").withArgs(0, true, 0, f.creator.address, false);
+  });
+
   it("audit M2: if the oracle stops, the call voids after voidAfter and everyone is refunded", async () => {
     const f = await loadFixture(withCall);
     await f.calls.connect(f.alice).bet(0, true, 20n * USDC);
@@ -465,7 +551,7 @@ describe("ThesisCalls: no racing the oracle", () => {
     expect(await f.token.balanceOf(await f.calls.getAddress())).to.equal(400_000n); // only the fees remain
   });
 
-  it("audit M2: a feed that starts reverting can't lock funds", async () => {
+  it("audit M2: a feed that starts reverting can't lock funds (and running out of gas can't fake that)", async () => {
     const f = await loadFixture(withCall);
     await f.calls.connect(f.alice).bet(0, true, 20n * USDC);
     await f.feed.setBroken(true); // the feed is retired mid-call

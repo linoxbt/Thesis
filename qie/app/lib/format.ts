@@ -53,7 +53,8 @@ export function ago(ts: number, now = Date.now() / 1000): string {
  * becomes a dot; anything but digits and the first dot is dropped.
  */
 export function decimalInput(v: string): string {
-  const s = v.replace(/,/g, ".").replace(/[^0-9.]/g, "");
+  // "1,000.50": the comma groups thousands; "2,5": the comma is the decimal point.
+  const s = (v.includes(".") ? v.replace(/,/g, "") : v.replace(/,/g, ".")).replace(/[^0-9.]/g, "");
   const i = s.indexOf(".");
   return i < 0 ? s : s.slice(0, i + 1) + s.slice(i + 1).replace(/\./g, "");
 }

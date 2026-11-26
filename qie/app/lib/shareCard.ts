@@ -160,14 +160,20 @@ export async function drawCard(d: CardData): Promise<Blob> {
     g.fillText(t, 64, 566);
   }
 
-  // Footer.
+  // Footer: the site on the right, the creator (shrunk, then cut, to fit) on the left.
   g.font = mono(20);
-  g.fillStyle = C.faint;
-  g.fillText(`by ${d.creator}`, 64, 604);
+  const site = "thesis-qie.netlify.app · back it or challenge it on QIE";
+  const siteW = g.measureText(site).width;
   g.textAlign = "right";
   g.fillStyle = C.ink;
-  g.fillText("thesis-qie.netlify.app · back it or challenge it on QIE", W - 64, 604);
+  g.fillText(site, W - 64, 604);
   g.textAlign = "left";
+  g.fillStyle = C.faint;
+  const room = W - 128 - siteW - 32;
+  let by = `by ${d.creator}`;
+  fit(g, by, mono, 20, room);
+  while (g.measureText(by).width > room && by.length > 6) by = by.slice(0, -2) + "…";
+  g.fillText(by, 64, 604);
   g.fillStyle = C.brand;
   g.fillRect(0, H - 8, W, 8);
 

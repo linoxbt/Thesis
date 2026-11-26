@@ -149,7 +149,7 @@ export default function LeaderboardPage() {
       )}
       <p className="text-[11px] leading-relaxed text-faint">
         A call can&apos;t open with its target inside the move the oracle may not have printed yet (the older the latest oracle
-        price, the further away the target must be), and a call touched within a minute of posting is voided. Scores are stored
+        price, the further away the target must be), and a call that touches in the first oracle round after it's posted is voided. Scores are stored
         onchain by the contract. Rows marked – have fewer than {MIN_CALLS} scored calls. Raw numbers:{" "}
         <Link href="/stats/" className="underline">
           Stats

@@ -37,7 +37,12 @@ export function SignInDialog() {
   const opener = useRef<Element | null>(null);
 
   /** Ends a sign-in in progress (stops polling; the server forgets it) and closes. */
+  // Bumped whenever a sign-in is started, cancelled or closed: a response that
+  // arrives for an older one is ignored (it can't sign anyone in after Cancel).
+  const gen = useRef(0);
+
   const close = useCallback(() => {
+    gen.current += 1;
     if (flow.step === "code" || flow.step === "starting") void post("cancel").catch(() => {});
     setFlow({ step: "pick" });
     w.closeSignIn();
@@ -96,9 +101,11 @@ export function SignInDialog() {
     const poll = setInterval(async () => {
       if (polling.current) return;
       polling.current = true;
+      const mine = gen.current;
       try {
         const r = await api("status");
         const b = (await r.json().catch(() => ({}))) as Partial<QieIdLogin> & { status?: string; message?: string; expiresAt?: string | number };
+        if (mine !== gen.current) return; // cancelled meanwhile
         if (r.ok && b.status === "completed" && b.address) {
           w.adoptQieIdLogin({ address: b.address, qieId: b.qieId!, verified: !!b.verified, expiresAt: Number(b.expiresAt) });
         } else if (r.ok && b.status === "rejected") setFlow({ step: "ended", message: "Sign-in was declined." });
@@ -121,11 +128,17 @@ export function SignInDialog() {
   }, [now, flow]);
 
   const start = useCallback(async () => {
+    const mine = ++gen.current;
     setErr(null);
     setFlow({ step: "starting" });
     try {
       const r = await post("start", { qieId });
       const b = (await r.json().catch(() => ({}))) as { code?: string; qieId?: string; expiresAt?: string; message?: string; retryAfterSeconds?: number };
+      if (mine !== gen.current) {
+        // Closed or cancelled while starting: forget it on the server too.
+        if (r.status === 202) void post("cancel").catch(() => {});
+        return;
+      }
       if (r.status === 202 && b.code && b.expiresAt) {
         setNow(Date.now());
         setFlow({ step: "code", qieId: b.qieId ?? qieId, code: b.code, expiresAt: Date.parse(b.expiresAt) });
@@ -135,6 +148,7 @@ export function SignInDialog() {
       if (b.retryAfterSeconds) setRetryAt(Date.now() + b.retryAfterSeconds * 1000);
       setErr(b.message ?? "Couldn't start the sign-in. Try again.");
     } catch {
+      if (mine !== gen.current) return;
       setFlow({ step: "qieid" });
       setErr("Couldn't reach the sign-in service. Try again.");
     }
@@ -143,7 +157,10 @@ export function SignInDialog() {
   // Count down a "try again in" wait.
   useEffect(() => {
     if (retryAt <= Date.now()) return;
-    const t = setInterval(() => setNow(Date.now()), 500);
+    const t = setInterval(() => {
+      setNow(Date.now());
+      if (Date.now() >= retryAt) clearInterval(t);
+    }, 500);
     return () => clearInterval(t);
   }, [retryAt]);
 
@@ -261,7 +278,7 @@ export function SignInDialog() {
             <p className="num text-xs text-faint" data-testid="qieid-countdown">
               {flow.qieId} · {Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")} left
             </p>
-            <button onClick={() => (void post("cancel").catch(() => {}), setFlow({ step: "qieid" }))} className="mt-4 text-xs text-muted underline hover:text-ink" data-testid="qieid-cancel">
+            <button onClick={() => (gen.current++, void post("cancel").catch(() => {}), setFlow({ step: "qieid" }))} className="mt-4 text-xs text-muted underline hover:text-ink" data-testid="qieid-cancel">
               Cancel
             </button>
           </div>

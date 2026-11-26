@@ -61,7 +61,7 @@ const FAQ: [string, ReactNode][] = [
   ["What exactly is a thesis?", "Your trade call, made public and tradable. You post the position (long or short on BTC, ETH or SOL, a take profit and a deadline); Thesis turns it into a market the crowd backs or challenges in QUSDC, and records the outcome against your profile."],
   ["Is this a perp exchange?", "No. You keep trading wherever you trade. Thesis is the layer on top: it prices your call with a prediction market on QIE and settles it from the QIE Oracle. Nothing is lent to you and there is no liquidation."],
   ["What is a touch market?", "A market that asks whether price reaches a level at any moment before the deadline, not only at the close. If a QIE Oracle round prints at or past your target once, the call resolves YES, even if price falls back later."],
-  ["Who decides whether a call hit?", "Nobody decides. The contract reads the QIE Oracle's rounds itself: any round inside the window at or past the target settles YES. Before every bet and before a NO settlement it scans every round it hasn't checked, so a touch can't be missed. Stakes placed in the minute before the touching round are refunded instead of paid, and betting needs the target well clear of the latest oracle price (further the older that price is), so nobody can bet on a move the oracle hasn't printed yet. A keeper makes settlement prompt, but anyone can prove or settle."],
+  ["Who decides whether a call hit?", "Nobody decides. The contract reads the QIE Oracle's rounds itself: any round inside the window at or past the target settles YES. Before every bet and before a NO settlement it scans every round it hasn't checked, so a touch can't be missed. Bets placed while the latest oracle price was the round just before the touching one are refunded in full (fee included) instead of paid, and betting needs the target well clear of the latest oracle price (further the older that price is), so nobody can bet on a move the oracle hasn't printed yet. A keeper makes settlement prompt, but anyone can prove or settle."],
   [
     "How are the opening odds set?",
     <>
@@ -78,7 +78,7 @@ const FAQ: [string, ReactNode][] = [
   ["What do creators earn?", "Every bet currently pays a 2% fee: half to the creator of the call, half to the Thesis treasury. A call's fee is fixed when it's posted. Creators claim their share any time from their profile."],
   ["When does betting close?", "In the last 10% of the window (a 48h call closes about 4.8 hours before its deadline), so nobody can pile in once the outcome is all but known. Betting also pauses while the target is too close to the latest oracle price."],
   ["Can a quick wick be missed?", "Only between oracle rounds. Calls settle from the QIE Oracle's published rounds, typically 3 to 6 minutes apart and sometimes over an hour in quiet markets, so a wick that starts and ends between two rounds can't count. Every round that is published inside the window does, and the opening odds account for it."],
-  ["What if the oracle stops?", "NO only wins once the oracle has printed a price after the deadline, so an outage can't hand NO a win. If no price comes within 3 days of the deadline, anyone can void the call and every stake is refunded."],
+  ["What if the oracle stops?", "NO only wins once the oracle has printed a price after the deadline, so an outage can't hand NO a win. If no price comes within 3 days of the deadline (or the feed breaks), anyone can void the call and every stake is refunded. A call the oracle can still settle is never voided."],
   ["Is this real money?", `Yes, on QIE ${NETWORK === "mainnet" ? "mainnet" : NETWORK}: seeds, bets and payouts are in QUSDC, QIE's stablecoin, and gas is paid in QIE. Start small; this is a hackathon build and not financial advice.`],
 ];
 
@@ -273,7 +273,7 @@ export default function LandingPage() {
         <Reveal delay={100} className="mt-14 grid gap-4 lg:grid-cols-3">
           <Bento className="lg:col-span-2" icon={<Layers size={18} />} title="One round is enough" tone="guard">
             A touch is a touch: the first QIE Oracle round at or past your target settles the call YES, whatever happens
-            next. The contract scans every round, so nobody has to race to prove it, and stakes placed the minute before a touch are
+            next. The contract scans every round, so nobody has to race to prove it, and bets placed in the oracle round just before a touch are
             refunded, so nobody can race the oracle either.
             <WickArt />
           </Bento>

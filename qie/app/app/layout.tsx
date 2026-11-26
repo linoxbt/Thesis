@@ -8,7 +8,6 @@ import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
 import "./globals.css";
 import type { Metadata, Viewport } from "next";
-import Script from "next/script";
 import type { ReactNode } from "react";
 import { Providers } from "@/components/Providers";
 import { THEME_SCRIPT } from "@/components/ThemeToggle";
@@ -38,10 +37,13 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1, them
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* A plain inline script in the static HTML: runs before first paint, and
+            scripts/csp.mjs hashes it (next/script would inject it at runtime,
+            which a hash-based CSP blocks). */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body className="min-h-screen font-sans antialiased">
-        <Script id="theme" strategy="beforeInteractive">
-          {THEME_SCRIPT}
-        </Script>
         <Providers>{children}</Providers>
       </body>
     </html>

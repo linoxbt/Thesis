@@ -190,6 +190,11 @@ export const THESIS_CALLS_ABI = [
   },
   {
     "inputs": [],
+    "name": "OutOfGas",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "Paused",
     "type": "error"
   },
@@ -825,6 +830,19 @@ export const THESIS_CALLS_ABI = [
   },
   {
     "inputs": [],
+    "name": "PROVE_SCAN_MAX",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "SCAN_PER_TX",
     "outputs": [
       {
@@ -908,35 +926,6 @@ export const THESIS_CALLS_ABI = [
         "internalType": "uint256",
         "name": "oracleAge",
         "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "name": "bucketStakes",
-    "outputs": [
-      {
-        "internalType": "uint128",
-        "name": "yes",
-        "type": "uint128"
-      },
-      {
-        "internalType": "uint128",
-        "name": "no",
-        "type": "uint128"
       }
     ],
     "stateMutability": "view",
@@ -1346,6 +1335,21 @@ export const THESIS_CALLS_ABI = [
             "type": "uint64"
           },
           {
+            "internalType": "uint80",
+            "name": "openRound",
+            "type": "uint80"
+          },
+          {
+            "internalType": "uint32",
+            "name": "voidAfter",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint64",
+            "name": "minScored",
+            "type": "uint64"
+          },
+          {
             "internalType": "uint256",
             "name": "yesPool",
             "type": "uint256"
@@ -1504,6 +1508,21 @@ export const THESIS_CALLS_ABI = [
           {
             "internalType": "uint64",
             "name": "touchAt",
+            "type": "uint64"
+          },
+          {
+            "internalType": "uint80",
+            "name": "openRound",
+            "type": "uint80"
+          },
+          {
+            "internalType": "uint32",
+            "name": "voidAfter",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint64",
+            "name": "minScored",
             "type": "uint64"
           },
           {
@@ -1806,6 +1825,50 @@ export const THESIS_CALLS_ABI = [
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "pending",
+    "outputs": [
+      {
+        "internalType": "uint80",
+        "name": "round",
+        "type": "uint80"
+      },
+      {
+        "internalType": "uint128",
+        "name": "yesNet",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint128",
+        "name": "noNet",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint128",
+        "name": "outside",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint128",
+        "name": "creatorFee",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint128",
+        "name": "treasuryFee",
+        "type": "uint128"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "pendingOwner",
     "outputs": [
@@ -1951,6 +2014,30 @@ export const THESIS_CALLS_ABI = [
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "id",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "maxRounds",
+        "type": "uint256"
+      }
+    ],
+    "name": "scanFor",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -2292,23 +2379,28 @@ export const THESIS_CALLS_ABI = [
         "internalType": "address",
         "name": "",
         "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
       }
     ],
-    "name": "userBucketStakes",
+    "name": "userPending",
     "outputs": [
       {
+        "internalType": "uint80",
+        "name": "round",
+        "type": "uint80"
+      },
+      {
         "internalType": "uint128",
-        "name": "yes",
+        "name": "yesNet",
         "type": "uint128"
       },
       {
         "internalType": "uint128",
-        "name": "no",
+        "name": "noNet",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint128",
+        "name": "gross",
         "type": "uint128"
       }
     ],

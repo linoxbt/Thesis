@@ -18,7 +18,7 @@ const CALLS = { address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI as Abi };
 /** The call's market: crowd odds over time on the left, the trade ticket or the outcome on the right. */
 export function MarketPanel({ c, feed }: { c: Call; feed: Feed | undefined }) {
   const w = useWallet();
-  const { params, tradesOf, events, refresh } = useData();
+  const { tradesOf, events, refresh } = useData();
   const now = useNow(1000);
   const [pos, setPos] = useState<Awaited<ReturnType<typeof readPosition>> | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -28,7 +28,7 @@ export function MarketPanel({ c, feed }: { c: Call; feed: Feed | undefined }) {
   const dec = feed?.decimals ?? 8;
   const asset = feed?.asset ?? "…";
   const settleAt = c.end + c.grace;
-  const voidAt = c.end + (params?.voidAfter ?? 3 * 86_400);
+  const voidAt = c.end + c.voidAfter;
   const yes = impliedYesBps(c);
   const touch = events.touches.find((t) => t.id === c.id);
 
@@ -73,7 +73,7 @@ export function MarketPanel({ c, feed }: { c: Call; feed: Feed | undefined }) {
       const after = await readCall();
       setInfo(
         after.touched
-          ? `Touch found: oracle round ${after.touchRound} printed ${usdPx(price(after.touchPrice, dec))}. ${after.voided ? "It came right after posting, so the call is void and every stake is refunded." : "The call settled YES."}`
+          ? `Touch found: oracle round ${after.touchRound} printed ${usdPx(price(after.touchPrice, dec))}. ${after.voided ? "It came in the first round after posting, so the call is void and every stake is refunded." : "The call settled YES."}`
           : after.scanDone
             ? "Every round up to the deadline is checked: no touch."
             : `No touch in the oracle rounds up to #${after.checkedRound}.`,
@@ -94,15 +94,31 @@ export function MarketPanel({ c, feed }: { c: Call; feed: Feed | undefined }) {
             await write("Check the oracle", "sync", [BigInt(c.id), 300n]);
             continue;
           }
-          if (name === "AwaitingOracle" && now > voidAt) {
-            await write("Void and refund the call", "voidCall", [BigInt(c.id)]);
-            return;
-          }
           throw e;
         }
         await write("Settle the call", "settle", [BigInt(c.id)]);
         return;
       }
+      throw new Error("The oracle has a very long backlog of rounds. Press Settle again to keep checking.");
+    });
+  // Past voidAfter: voidCall settles whatever the oracle can still decide, and
+  // voids (refunding everyone) only if it never printed past the deadline.
+  const settleOrVoid = () =>
+    act("settle", async () => {
+      for (let i = 0; i < 10; i++) {
+        try {
+          await publicClient.simulateContract({ ...CALLS, functionName: "voidCall", args: [BigInt(c.id)], account: w.account! });
+        } catch (e) {
+          if (errorName(e) === "SyncRequired") {
+            await write("Check the oracle", "sync", [BigInt(c.id), 300n]);
+            continue;
+          }
+          throw e;
+        }
+        await write("Settle or void the call", "voidCall", [BigInt(c.id)]);
+        return;
+      }
+      throw new Error("The oracle has a very long backlog of rounds. Press the button again to keep checking.");
     });
   const claim = (amount: bigint) => act("claim", () => write(`Claim ${qusdc(amount)} QUSDC`, "claim", [BigInt(c.id)]));
 
@@ -120,7 +136,7 @@ export function MarketPanel({ c, feed }: { c: Call; feed: Feed | undefined }) {
       </div>
       <p className="mt-1 px-1 text-[11px] leading-snug text-faint">
         Any QIE Oracle round inside the window at or past the target settles it YES. The contract checks every round itself
-        before each bet and before NO, so a touch can&apos;t be missed. Stakes placed in the minute before the touching round are
+        before each bet and before NO, so a touch can&apos;t be missed. Bets placed while the latest price was the round just before the touch are
         refunded rather than paid, so it can&apos;t be raced either.
       </p>
     </>
@@ -180,8 +196,8 @@ export function MarketPanel({ c, feed }: { c: Call; feed: Feed | undefined }) {
                     Void: <span className="text-ink">every stake is refunded</span>
                     <div className="mt-1 text-xs text-faint">
                       {c.touched
-                        ? "The oracle touched the target right after the call was posted, so it can't count."
-                        : "The oracle printed no price after the deadline for too long, so there was no fair way to settle it."}{" "}
+                        ? "The oracle touched the target in its first round after the call was posted, so it can't count."
+                        : "The oracle printed no price after the deadline for 3 days (or its feed broke), so there was no fair way to settle it."}{" "}
                       Fees already paid are not refunded.
                     </div>
                   </>
@@ -192,7 +208,7 @@ export function MarketPanel({ c, feed }: { c: Call; feed: Feed | undefined }) {
                 )}
               </div>
               {c.yesWon && c.voidYes + c.voidNo > 0n && (
-                <div className="num mt-1 text-xs text-faint">{qusdc(c.voidYes + c.voidNo)} QUSDC staked in the minute before the touch was refunded, not paid.</div>
+                <div className="num mt-1 text-xs text-faint">{qusdc(c.voidYes + c.voidNo)} QUSDC bet in the oracle round before the touch was refunded in full, not paid.</div>
               )}
               {c.touched && (
                 <div className="num mt-1 text-xs text-muted">
@@ -232,8 +248,8 @@ export function MarketPanel({ c, feed }: { c: Call; feed: Feed | undefined }) {
               <div className="rounded-2xl border border-line bg-panel-2 p-4 text-muted" data-testid="resolution">
                 Window and grace period over with no touch found yet. It settles NO once the contract has checked every round up to
                 the deadline and the oracle has printed a price after it
-                {now > voidAt ? "; the oracle has been silent too long, so it can now be voided and every stake refunded." : "."}
-                <button onClick={() => void settle()} disabled={!w.account || !!acting} className="btn btn-ghost mt-3 w-full text-xs disabled:opacity-40" data-testid="settle">
+                {now > voidAt ? ". It's been 3 days: settling now decides it if the oracle can, and otherwise voids it with every stake refunded." : "."}
+                <button onClick={() => void (now > voidAt ? settleOrVoid() : settle())} disabled={!w.account || !!acting} className="btn btn-ghost mt-3 w-full text-xs disabled:opacity-40" data-testid="settle">
                   {acting === "settle" ? "Settling…" : now > voidAt ? "Settle or void (anyone can)" : "Settle now (anyone can)"}
                 </button>
               </div>

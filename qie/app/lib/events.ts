@@ -41,7 +41,7 @@ export interface Settlement {
 }
 export interface Voiding {
   id: number;
-  /** 1: touched right after posting; 2: no oracle print past the deadline. */
+  /** 1: touched in the first round after posting; 2: no oracle print past the deadline, or the feed broke. */
   reason: number;
   tx: Hash;
   ts: number;
@@ -126,7 +126,10 @@ async function pool<T>(tasks: (() => Promise<T>)[], limit: number): Promise<T[]>
  * Nothing is marked as seen until the whole read has succeeded, so a failed
  * read is simply retried next time without losing events.
  */
-export async function readEvents(from: bigint, to: bigint, into: Events, seen: Set<string>): Promise<void> {
+/** Log keys already read (tx:logIndex) with their block, to dedupe overlapping reads. */
+export type Seen = Map<string, bigint>;
+
+export async function readEvents(from: bigint, to: bigint, into: Events, seen: Seen): Promise<void> {
   if (to < from) return;
   const ranges: [bigint, bigint][] = [];
   for (let a = from; a <= to; a += SPAN + 1n) ranges.push([a, a + SPAN > to ? to : a + SPAN]);
@@ -136,11 +139,11 @@ export async function readEvents(from: bigint, to: bigint, into: Events, seen: S
       CONCURRENCY,
     )
   ).flat();
-  const fresh = new Set<string>();
+  const fresh = new Map<string, bigint>();
   const logs = parseEventLogs({ abi: THESIS_CALLS_ABI, logs: raw }).filter((l) => {
     const k = `${l.transactionHash}:${l.logIndex}`;
     if (seen.has(k) || fresh.has(k)) return false;
-    fresh.add(k);
+    fresh.set(k, l.blockNumber!);
     return true;
   });
   logs.sort((a, b) => (a.blockNumber === b.blockNumber ? (a.logIndex ?? 0) - (b.logIndex ?? 0) : a.blockNumber! < b.blockNumber! ? -1 : 1));
@@ -184,7 +187,7 @@ export async function readEvents(from: bigint, to: bigint, into: Events, seen: S
         break;
     }
   }
-  for (const k of fresh) seen.add(k);
+  for (const [k, b] of fresh) seen.set(k, b);
 }
 
 // ------------------------------------------------------------------ cache
@@ -193,23 +196,25 @@ export async function readEvents(from: bigint, to: bigint, into: Events, seen: S
 // ignored. A reorg deeper than the 5-block overlap is not expected on QIE
 // (CometBFT finality).
 
-const CACHE_KEY = `thesis-events:v2:${qie.id}:${CALLS_ADDRESS.toLowerCase()}`;
+const CACHE_KEY = `thesis-events:v3:${qie.id}:${CALLS_ADDRESS.toLowerCase()}`;
 const big = (_k: string, v: unknown) => (typeof v === "bigint" ? { $b: v.toString() } : v);
 const unbig = (_k: string, v: unknown) => (v && typeof v === "object" && "$b" in v ? BigInt((v as { $b: string }).$b) : v);
 
-export function loadCachedEvents(): { events: Events; cursor: bigint; seen: Set<string> } | null {
+export function loadCachedEvents(): { events: Events; cursor: bigint; seen: Seen } | null {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return null;
-    const c = JSON.parse(raw, unbig) as { events: Events; cursor: bigint; seen: string[] };
+    const c = JSON.parse(raw, unbig) as { events: Events; cursor: bigint; seen: [string, bigint][] };
     if (typeof c.cursor !== "bigint" || !Array.isArray(c.events?.trades)) return null;
-    return { events: { ...emptyEvents(), ...c.events }, cursor: c.cursor, seen: new Set(c.seen) };
+    return { events: { ...emptyEvents(), ...c.events }, cursor: c.cursor, seen: new Map(Array.isArray(c.seen) ? c.seen.filter((x) => Array.isArray(x)) : []) };
   } catch {
     return null;
   }
 }
 
-export function saveCachedEvents(events: Events, cursor: bigint, seen: Set<string>) {
+export function saveCachedEvents(events: Events, cursor: bigint, seen: Seen) {
+  // Reads overlap by 5 blocks, so only recent keys are needed to dedupe: drop the rest.
+  for (const [k, b] of seen) if (b + 20n < cursor) seen.delete(k);
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify({ events, cursor, seen: [...seen] }, big));
   } catch {

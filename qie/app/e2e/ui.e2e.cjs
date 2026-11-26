@@ -211,9 +211,14 @@ async function main() {
 
   // 5. SOL touches its target on the oracle; "Check the oracle" settles YES; the winner claims.
   // Three minutes pass first: stakes placed in the minute (or two) before a touch are refunded, not paid.
+  // A quiet round first: the bet above is then final (bets in the round right
+  // before a touch are refunded), and a touch in the first round after posting would void the call.
+  const call0 = await client.readContract({ address: dep.ThesisCalls, abi: CALLS_ABI, functionName: "getCall", args: [0n] });
   await rpc("evm_increaseTime", [180]);
   await rpc("evm_mine");
-  const call0 = await client.readContract({ address: dep.ThesisCalls, abi: CALLS_ABI, functionName: "getCall", args: [0n] });
+  await pushPrice(dep.feeds.SOL.address, call0.spotAtOpen);
+  await rpc("evm_increaseTime", [180]);
+  await rpc("evm_mine");
   await pushPrice(dep.feeds.SOL.address, (call0.strike * 1002n) / 1000n);
   await page.goto(BASE + "/t/?id=0");
   await page.waitForSelector('[data-testid="sync"]');

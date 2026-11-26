@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { Address } from "viem";
 import { publicClient, readCalls, readCreators, readFeeds, readParams, type Call, type Feed, type Params, type Stats } from "./chain";
 import { DEPLOY_BLOCK, DEPLOYED } from "./config";
-import { cloneEvents, emptyEvents, loadCachedEvents, readEvents, saveCachedEvents, type Events, type Trade } from "./events";
+import { cloneEvents, emptyEvents, loadCachedEvents, readEvents, saveCachedEvents, type Events, type Seen, type Trade } from "./events";
 
 interface Data {
   ready: boolean;
@@ -52,7 +52,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const again = useRef(false);
   const cursor = useRef<bigint>(DEPLOY_BLOCK);
   const events = useRef<Events>(emptyEvents());
-  const seen = useRef(new Set<string>());
+  const seen = useRef<Seen>(new Map());
   const callsRef = useRef<Call[]>([]);
   const loaded = useRef(false);
 

@@ -40,6 +40,10 @@ export interface Call {
   touchRound: bigint;
   touchPrice: bigint;
   touchAt: number;
+  /** Latest oracle round when posted (a touch in the next one voids the call). */
+  openRound: bigint;
+  voidAfter: number;
+  minScored: bigint;
   checkedRound: bigint;
   scanDone: boolean;
   yesPool: bigint;
@@ -164,6 +168,9 @@ function toCall(id: number, c: RawCall, text: string): Call {
     touchRound: c.touchRound,
     touchPrice: c.touchPrice,
     touchAt: Number(c.touchAt),
+    openRound: c.openRound,
+    voidAfter: Number(c.voidAfter),
+    minScored: c.minScored,
     checkedRound: c.checkedRound,
     scanDone: c.scanDone,
     yesPool: c.yesPool,

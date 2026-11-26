@@ -23,7 +23,7 @@ interface Props {
  */
 export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
   const w = useWallet();
-  const { stakeToken, params, calls, refresh } = useData();
+  const { stakeToken, params, calls, refresh, paused: tradingPaused } = useData();
   const c = calls.find((x) => x.id === id);
   const [yes, setYes] = useState(initialSide === "yes");
   const [amount, setAmount] = useState("5");
@@ -123,7 +123,14 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
       // settled YES and the bet wasn't taken (no Bet event, no transfer).
       const rc = await publicClient.getTransactionReceipt({ hash: hash as Hash });
       const taken = parseEventLogs({ abi: THESIS_CALLS_ABI, logs: rc.logs, eventName: "Bet" }).length > 0;
-      if (!taken) setNote("The oracle had already touched the target, so the call settled YES and your bet wasn't taken. Nothing left your wallet but gas.");
+      if (!taken) {
+        const voided = parseEventLogs({ abi: THESIS_CALLS_ABI, logs: rc.logs, eventName: "Voided" }).length > 0;
+        setNote(
+          voided
+            ? "The oracle touched the target in its first round after the call was posted, so the call is void and your bet wasn't taken. Nothing left your wallet but gas."
+            : "The oracle had already touched the target, so the call settled YES and your bet wasn't taken. Nothing left your wallet but gas.",
+        );
+      }
       await Promise.all([refresh(), loadBal()]);
       if (taken) onDone?.();
     } catch (e) {
@@ -224,7 +231,11 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
         </p>
       ) : paused && gate ? (
         <p className="mt-2 rounded-xl border border-line px-3 py-2 text-xs text-muted" data-testid="bet-paused">
-          Betting is paused: the target is {pct(gate.distBps, 2)} from the latest oracle price, which is {Math.round(gate.oracleAge / 60)} min old, and needs to be {pct(gate.needBps, 2)} away. It reopens when the oracle prints again.
+          {tradingPaused
+            ? "Trading is paused on Thesis right now."
+            : params && gate.oracleAge > params.maxOracleAge
+              ? `Betting is paused: the latest oracle price is ${Math.round(gate.oracleAge / 60)} min old, too old to bet on. It reopens when the oracle prints again.`
+              : `Betting is paused: the target is ${pct(gate.distBps, 2)} from the latest oracle price, which is ${Math.round(gate.oracleAge / 60)} min old, and needs to be ${pct(gate.needBps, 2)} away. It reopens when the oracle prints again.`}
         </p>
       ) : null}
       <button

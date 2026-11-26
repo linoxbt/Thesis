@@ -121,15 +121,29 @@ test("audit H7: cross-site, non-JSON or origin-less POSTs are refused", async ()
 });
 
 test("audit H7: start is rate limited per IP and per QIE ID", async () => {
+  _internal.resetLimits();
   const b = browser("198.51.100.7");
   const codes = [];
   for (let i = 0; i < 8; i++) codes.push((await b.call("start", { method: "POST", body: { qieId: `ghost${i}` } })).status);
   assert.deepEqual(codes.slice(0, 6), [404, 404, 404, 404, 404, 404]);
   assert.equal(codes[6], 429);
-  // Per QIE ID across many IPs.
+  // One IP retrying one QIE ID: 3 per 10 min.
+  _internal.resetLimits();
+  const one = browser("192.0.2.9");
+  const same = [];
+  for (let i = 0; i < 4; i++) same.push((await one.call("start", { method: "POST", body: { qieId: "target-person" } })).status);
+  assert.deepEqual(same, [404, 404, 404, 429]);
+  // All IPs together on one QIE ID: 10 per 10 min (caps prompts sent to one person).
+  _internal.resetLimits();
   const id = [];
-  for (let i = 0; i < 5; i++) id.push((await browser().call("start", { method: "POST", body: { qieId: "target-person" } })).status);
-  assert.deepEqual(id, [404, 404, 404, 429, 429]);
+  for (let i = 0; i < 12; i++) id.push((await browser().call("start", { method: "POST", body: { qieId: "target-person" } })).status);
+  assert.deepEqual(id.slice(9), [404, 429, 429]);
+  // An IP already over its own limit doesn't use up the victim's ID allowance.
+  _internal.resetLimits();
+  const spammer = browser("198.51.100.66");
+  for (let i = 0; i < 6; i++) await spammer.call("start", { method: "POST", body: { qieId: `x${i}` } });
+  for (let i = 0; i < 5; i++) assert.equal((await spammer.call("start", { method: "POST", body: { qieId: "victim" } })).status, 429);
+  assert.equal((await browser().call("start", { method: "POST", body: { qieId: "victim" } })).status, 404);
 });
 
 test("audit M12: cancel forgets the sign-in in this browser", async () => {
@@ -181,6 +195,18 @@ test("audit L1: wallet sign-in needs the server's nonce, once", async () => {
   assert.equal(replay.body.code, "NO_NONCE");
   const forged = await siwe(b, { nonce: "a".repeat(24) });
   assert.equal((await b.call("verify-wallet", { method: "POST", body: forged })).body.code, "BAD_NONCE");
+});
+
+test("re-audit N5: extra hosts (a custom domain) come from ALLOWED_HOSTS", async () => {
+  _internal.resetLimits();
+  const custom = { origin: "https://thesis.example.com", "sec-fetch-site": "same-origin" };
+  assert.equal((await browser().call("start", { method: "POST", body: { qieId: "nobody" }, headers: custom })).status, 403);
+  process.env.ALLOWED_HOSTS = "thesis.example.com";
+  try {
+    assert.equal((await browser().call("start", { method: "POST", body: { qieId: "nobody" }, headers: custom })).status, 404);
+  } finally {
+    delete process.env.ALLOWED_HOSTS;
+  }
 });
 
 test("audit L1: bad dates, other sites and other chains are refused", async () => {

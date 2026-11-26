@@ -26,7 +26,8 @@
 // Blobs; per-instance memory as a fallback).
 //
 // Env (Netlify): QIE_PASS_API_URL, QIE_PASS_PUBLIC_KEY, QIE_PASS_SECRET_KEY,
-//                SESSION_SECRET (≥ 32 random bytes; cookies; fails closed if missing)
+//                SESSION_SECRET (≥ 32 random bytes; cookies; fails closed if missing),
+//                ALLOWED_HOSTS (optional, comma-separated extra hosts, e.g. a custom domain)
 import crypto from "node:crypto";
 import { connectLambda, getStore } from "@netlify/blobs";
 import { createPublicClient, getAddress, http, isAddress, recoverMessageAddress } from "viem";
@@ -45,10 +46,17 @@ const NONCE_COOKIE = "tq_nonce";
 const QIE_TIMEOUT_MS = 8_000;
 const LIMITS = {
   // [max, window seconds]
-  "start:ip": [6, 600],
-  "start:id": [3, 600],
+  "start:ip": [6, 600], // one browser/IP trying IDs
+  "start:id-ip": [3, 600], // one IP retrying one QIE ID
+  "start:id": [10, 600], // all IPs together on one QIE ID: caps prompt spam to a victim
   "verify:ip": [20, 600],
 };
+const extraHosts = () =>
+  String(process.env.ALLOWED_HOSTS || "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+const siteHost = (host) => SITE_HOST.test(host) || extraHosts().includes(host) || (process.env.CONTEXT === "dev" && DEV_HOST.test(host));
 
 const log = (...a) => console.log("[qie-pass]", ...a);
 
@@ -143,7 +151,7 @@ function sameSite(event) {
   if (!origin) return site === "same-origin";
   try {
     const u = new URL(origin);
-    return (u.protocol === "https:" && SITE_HOST.test(u.host)) || (process.env.CONTEXT === "dev" && DEV_HOST.test(u.host));
+    return (u.protocol === "https:" || process.env.CONTEXT === "dev") && siteHost(u.host);
   } catch {
     return false;
   }
@@ -166,17 +174,17 @@ function clientIp(event) {
 // ---- Rate limits ------------------------------------------------------------
 
 const memory = new Map();
-let store = null;
+let warned = false;
+/** This request's Blobs store (its credentials come with each event), or null. */
 function limiter(event) {
-  if (store === null) {
-    try {
-      connectLambda(event);
-      store = getStore("qie-pass-limits");
-    } catch {
-      store = false; // no Blobs here: per-instance memory only
-    }
+  try {
+    connectLambda(event);
+    return getStore({ name: "qie-pass-limits", consistency: "strong" });
+  } catch (e) {
+    if (!warned) log("rate limits: Netlify Blobs unavailable, using per-instance memory", e?.name || "");
+    warned = true;
+    return null;
   }
-  return store || null;
 }
 
 /** Counts a hit on `key`; returns seconds to wait if over the limit, else 0. */
@@ -192,7 +200,11 @@ async function overLimit(event, kind, id) {
       n = Number((await s.get(key)) ?? 0) + 1;
       await s.set(key, String(n));
     } else throw new Error("memory");
-  } catch {
+  } catch (e) {
+    if (s && !warned) {
+      log("rate limits: Blobs read/write failed, using per-instance memory", e?.name || "");
+      warned = true;
+    }
     n = (memory.get(key) ?? 0) + 1;
     memory.set(key, n);
     if (memory.size > 5000) for (const k of [...memory.keys()].slice(0, 2500)) memory.delete(k);
@@ -223,11 +235,14 @@ async function start(event) {
   }
   const qieId = normalizeQieId(body.qieId);
   if (!qieId) return fail(400, "BAD_QIE_ID", "A QIE ID looks like yourname.qie.");
-  const ip = clientIp(event);
-  const wait = Math.max(await overLimit(event, "start:ip", ip ?? "unknown"), await overLimit(event, "start:id", qieId));
+  const ip = clientIp(event) ?? "unknown";
+  // The IP's own limit first: an IP already over it doesn't count against the ID.
+  let wait = await overLimit(event, "start:ip", ip);
+  if (!wait) wait = await overLimit(event, "start:id-ip", `${qieId}|${ip}`);
+  if (!wait) wait = await overLimit(event, "start:id", qieId);
   if (wait) return tooMany(wait);
   const ua = String(header(event, "user-agent") || "").slice(0, 512);
-  const client = { ...(ip ? { ip } : {}), ...(ua ? { userAgent: ua } : {}) };
+  const client = { ...(ip !== "unknown" ? { ip } : {}), ...(ua ? { userAgent: ua } : {}) };
   const r = await qie("POST", "/qie-login/requests", { qieId, ...(Object.keys(client).length ? { client } : {}) });
   if (!r.ok) {
     const [status, message] = START_ERRORS[r.json.code] || [r.status >= 500 ? 502 : r.status, "QIE couldn't start the sign-in. Try again."];
@@ -325,7 +340,7 @@ async function verifyWallet(event) {
   try {
     uriOk = new URL(m.uri ?? "").host === m.domain;
   } catch {}
-  if (!m.address || !m.domain || !(SITE_HOST.test(m.domain) || (process.env.CONTEXT === "dev" && DEV_HOST.test(m.domain))) || !uriOk)
+  if (!m.address || !m.domain || !siteHost(String(m.domain).toLowerCase()) || !uriOk)
     return fail(401, "WRONG_SITE", "Sign-in message is for another site", {}, used);
   if (m.version !== "1" || m.chainId !== CHAIN_ID) return fail(401, "WRONG_CHAIN", "Sign-in message is for another network", {}, used);
   if (m.nonce !== issued.n) return fail(401, "BAD_NONCE", "Sign-in expired. Try again.", {}, used);

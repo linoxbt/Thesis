@@ -21,10 +21,11 @@ const INTERVAL_MS = Number(process.env.KEEPER_INTERVAL_MS ?? "60000");
 const VOL_EVERY_SECS = Number(process.env.VOL_EVERY_SECS ?? String(12 * 3600));
 const MIN_GAS_QIE = Number(process.env.MIN_GAS_QIE ?? "0.05");
 const TX_TIMEOUT_MS = Number(process.env.TX_TIMEOUT_MS ?? "90000");
-const TICK_LIMIT_MS = Number(process.env.TICK_LIMIT_MS ?? String(10 * 60_000));
+const TICK_LIMIT_MS = Number(process.env.TICK_LIMIT_MS ?? String(30 * 60_000));
 const SCAN_BATCH = 25;
 const SCAN_PER_TICK = 600; // rounds read off-chain per call per tick
 const SYNC_BACKLOG = 40; // on-chain sync once this many rounds are unchecked (contract scans 48 per bet)
+const PROVE_SCAN_MAX = 300n; // proveTouch scans at most this many rounds
 const YEAR = 31_536_000;
 
 const FEED_ABI = [
@@ -51,32 +52,59 @@ function errorName(calls, e) {
 /**
  * Send a contract transaction and wait for it, re-sending with the same nonce
  * and a 30% higher gas price if it isn't mined within `timeoutMs` (up to
- * `bumps` times). Throws if it never confirms or reverts.
+ * `bumps` times). The nonce is the next *confirmed* one, so a transaction
+ * left stuck by an earlier run is replaced rather than queued behind.
+ * Returns the receipt of whichever attempt was mined; throws if it reverted
+ * or nothing was mined.
  */
 async function send(ctx, contract, method, args, { timeoutMs = TX_TIMEOUT_MS, bumps = 3 } = {}) {
   const { wallet, provider } = ctx;
   const data = contract.interface.encodeFunctionData(method, args);
   const to = await contract.getAddress();
   const gasLimit = ((await provider.estimateGas({ from: wallet.address, to, data })) * 13n) / 10n;
-  const nonce = await provider.getTransactionCount(wallet.address, "pending");
+  const nonce = await provider.getTransactionCount(wallet.address, "latest");
   let gasPrice = (await provider.getFeeData()).gasPrice ?? 1_125_000_000n;
+  const hashes = [];
+  const minedAttempt = async () => {
+    for (const h of hashes) {
+      const rc = await provider.getTransactionReceipt(h).catch(() => null);
+      if (rc) return rc;
+    }
+    return null;
+  };
+  const done = (rc) => {
+    if (rc.status !== 1) throw new Error(`${method} reverted (${rc.hash})`);
+    return rc;
+  };
   for (let attempt = 0; attempt <= bumps; attempt++) {
-    const tx = await wallet.sendTransaction({ to, data, nonce, gasLimit, gasPrice, type: 0 });
+    let tx;
+    try {
+      tx = await wallet.sendTransaction({ to, data, nonce, gasLimit, gasPrice, type: 0 });
+    } catch (e) {
+      // "nonce too low" / "already known": an earlier attempt got in first.
+      const rc = await minedAttempt();
+      if (rc) return done(rc);
+      throw e;
+    }
+    hashes.push(tx.hash);
     try {
       const rc = await tx.wait(1, timeoutMs);
-      if (!rc || rc.status !== 1) throw new Error(`${method} reverted (${tx.hash})`);
-      return rc;
+      return done(rc);
     } catch (e) {
-      if (e?.code !== "TIMEOUT") throw e;
-      // An earlier attempt with this nonce may have been mined meanwhile.
-      if ((await provider.getTransactionCount(wallet.address, "latest")) > nonce) {
-        log(`${method}: an earlier attempt confirmed`);
-        return null;
+      if (e?.code === "TRANSACTION_REPLACED") {
+        // One of our own earlier attempts (same nonce) was mined instead.
+        if (e.receipt && hashes.includes(e.receipt.hash)) return done(e.receipt);
+        throw e;
       }
+      if (e?.code !== "TIMEOUT") throw e;
+      const rc = await minedAttempt();
+      if (rc) return done(rc);
       gasPrice = (gasPrice * 13n) / 10n;
       log(`${method}: not mined in ${timeoutMs / 1000}s, re-sending at ${ethers.formatUnits(gasPrice, "gwei")} gwei`);
     }
   }
+  const rc = await minedAttempt();
+  if (rc) return done(rc);
   throw new Error(`${method}: still not mined after ${bumps} re-sends`);
 }
 
@@ -139,10 +167,15 @@ async function findTouch(feed, c, from, latest, limit) {
   while (r < stop) {
     const ids = [];
     for (let k = 0; k < SCAN_BATCH && r + BigInt(k) + 1n <= stop; k++) ids.push(r + BigInt(k) + 1n);
-    const rows = await Promise.all(ids.map((x) => feed.getRoundData(x).catch(() => null)));
+    // A round the feed refuses (a revert) is skipped, like the contract does;
+    // a network error stops here, so that round is read again next tick.
+    const rows = await Promise.all(ids.map((x) => feed.getRoundData(x).then((v) => ({ v }), (e) => ({ e }))));
     for (let k = 0; k < rows.length; k++) {
-      const rd = rows[k];
-      if (!rd) continue;
+      if (rows[k].e) {
+        if (rows[k].e?.code === "CALL_EXCEPTION") continue;
+        return { touch: null, lastChecked: ids[k] - 1n, pastEnd: false };
+      }
+      const rd = rows[k].v;
       const t = Number(rd[3]);
       if (t > Number(c.end)) return { touch: null, lastChecked: ids[k] - 1n, pastEnd: true };
       if (t >= Number(c.start) && rd[1] > 0n && (c.above ? rd[1] >= c.strike : rd[1] <= c.strike))
@@ -165,6 +198,12 @@ async function handleCall(ctx, id, c, now, p) {
     log(`call ${id}: ${msg}`);
   };
 
+  // 0. Long past the deadline: settle if the oracle can, else void (this also
+  // covers a feed that has started reverting).
+  if (now > end + Number(c.voidAfter)) {
+    await settle(ctx, id, end, c);
+    return;
+  }
   // 1. Look for a touch off-chain (cheap) and prove it at once.
   if (!c.scanDone) {
     const [latest] = await feed.latestRoundData();
@@ -174,11 +213,14 @@ async function handleCall(ctx, id, c, now, p) {
     scanned.set(id, res.lastChecked);
     if (res.touch) {
       if (now <= end + grace) {
+        // proveTouch checks every round up to it, in order (at most 300 at a time).
+        if (res.touch.round - c.checkedRound > PROVE_SCAN_MAX) await send(ctx, calls, "sync", [id, 250]);
         await send(ctx, calls, "proveTouch", [id, res.touch.round]);
-        log(`call ${id}: touch proven with round ${res.touch.round} (${res.touch.price})`);
+        const after = await calls.getCall(id);
+        log(`call ${id}: touch proven with round ${after.touchRound} (${after.voided ? "void: touched right after posting" : "YES"})`);
       } else {
         // Too late to prove: settle() finds the same round in its own scan.
-        await settle(ctx, id, end, p);
+        await settle(ctx, id, end, c);
       }
       return;
     }
@@ -190,35 +232,37 @@ async function handleCall(ctx, id, c, now, p) {
     }
   }
 
-  // 3. Past deadline + grace: settle, or void if the oracle went quiet for good.
-  if (now > end + grace) await settle(ctx, id, end, p, note);
+  // 3. Past deadline + grace: settle (voidCall takes over after voidAfter).
+  if (now > end + grace) await settle(ctx, id, end, c, note);
 }
 
-async function settle(ctx, id, end, p, note = (_k, m) => log(`call ${id}: ${m}`)) {
+/**
+ * Settles a call past its deadline: syncs as far as needed, then settle().
+ * Once voidAfter has passed, voidCall() instead: it settles whatever the
+ * oracle can still decide and voids only a call the oracle never printed past
+ * (or whose feed is broken).
+ */
+async function settle(ctx, id, end, c, note = (_k, m) => log(`call ${id}: ${m}`)) {
   const { calls } = ctx;
+  const voidAt = end + Number(c.voidAfter);
   for (let i = 0; i < 20; i++) {
+    const now = (await ctx.provider.getBlock("latest")).timestamp;
+    const fn = now > voidAt ? "voidCall" : "settle";
     try {
-      await calls.settle.staticCall(id);
+      await calls[fn].staticCall(id);
     } catch (e) {
       const name = errorName(calls, e);
       if (name === "SyncRequired") {
         await send(ctx, calls, "sync", [id, 300]);
         continue;
       }
-      if (name === "AwaitingOracle") {
-        const now = (await ctx.provider.getBlock("latest")).timestamp;
-        if (now > end + Number(p.voidAfter)) {
-          await send(ctx, calls, "voidCall", [id]);
-          log(`call ${id}: voided, no oracle round past the deadline within ${Number(p.voidAfter) / 3600}h; stakes refundable`);
-        } else note("await", "deadline passed; waiting for the oracle to print past it before settling");
-        return;
-      }
+      if (name === "AwaitingOracle") return note("await", "deadline passed; waiting for the oracle to print past it before settling");
       if (name === "AlreadyFinal") return;
       throw e;
     }
-    await send(ctx, calls, "settle", [id]);
-    const c = await calls.getCall(id);
-    log(`call ${id}: settled ${c.voided ? "void" : c.yesWon ? "YES" : "NO"}`);
+    await send(ctx, calls, fn, [id]);
+    const after = await calls.getCall(id);
+    log(`call ${id}: ${fn === "voidCall" ? "voidCall: " : ""}settled ${after.voided ? "void (stakes refundable)" : after.yesWon ? "YES" : "NO"}`);
     return;
   }
   throw new Error("settle: still behind after 20 syncs");

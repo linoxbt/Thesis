@@ -26,6 +26,9 @@ async function setup() {
   const end = (await time.latest()) + 2 * DAY;
   await calls.connect(creator).createCall(await feed.getAddress(), true, PX(105), end, 100n * USDC, "");
   await calls.connect(alice).bet(0, false, 10n * USDC);
+  // A quiet round (a touch in the very first round after posting would void the call).
+  await time.increase(300);
+  await print(feed, 100.3);
   const ctx = makeCtx(keeper, await calls.getAddress());
   return { owner, keeper, creator, alice, token, feed, calls, ctx, end };
 }
@@ -60,7 +63,7 @@ describe("keeper", function () {
     await print(f.feed, 105.4);
     await quiet(() => tick(f.ctx));
     const c = await f.calls.getCall(0);
-    expect([c.settled, c.yesWon, c.touched]).to.deep.equal([true, true, true]);
+    expect([c.settled, c.yesWon, c.touched, c.voided]).to.deep.equal([true, true, true, false]);
   });
 
   it("audit H3: a touch first seen after the grace period still settles YES", async () => {
@@ -86,6 +89,24 @@ describe("keeper", function () {
     await quiet(() => tick(f.ctx));
     const c = await f.calls.getCall(0);
     expect([c.settled, c.yesWon, c.voided]).to.deep.equal([true, false, false]);
+  });
+
+  it("voidCall after voidAfter still settles NO when the oracle printed past the deadline", async () => {
+    const f = await setup();
+    await time.increaseTo(f.end + 600);
+    await print(f.feed, 101);
+    await time.increaseTo(f.end + Number(LAUNCH_PARAMS.voidAfter) + 10);
+    await quiet(() => tick(f.ctx));
+    const c = await f.calls.getCall(0);
+    expect([c.settled, c.voided, c.yesWon]).to.deep.equal([true, false, false]);
+  });
+
+  it("voids a call whose feed broke", async () => {
+    const f = await setup();
+    await f.feed.setBroken(true);
+    await time.increaseTo(f.end + Number(LAUNCH_PARAMS.voidAfter) + 10);
+    await quiet(() => tick(f.ctx));
+    expect((await f.calls.getCall(0)).voided).to.equal(true);
   });
 
   it("waits for an oracle print past the deadline, and voids if it never comes", async () => {
