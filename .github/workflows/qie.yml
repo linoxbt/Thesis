@@ -65,6 +65,8 @@ jobs:
         working-directory: qie/app
         env:
           NEXT_TELEMETRY_DISABLED: "1"
+          # Public by design (it ships in the site's JS); the browser suite needs Reown's picker.
+          NEXT_PUBLIC_REOWN_PROJECT_ID: d1bf7b7232b7d0fb7f0469d0adb29f5b
         run: |
           pnpm run build
           npx -y serve out -l 3200 > /tmp/serve.log 2>&1 &
