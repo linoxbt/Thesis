@@ -457,7 +457,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       account,
       qieName,
       session,
-      chainOk: chainId === CHAIN_HEX,
+      // Unknown until a wallet reports its network (e.g. signed in with QIE ID, no wallet linked yet).
+      chainOk: chainId === null || chainId === CHAIN_HEX,
       connect,
       signIn,
       adoptQieIdLogin,

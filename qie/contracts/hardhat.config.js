@@ -16,6 +16,8 @@ module.exports = {
   },
   sourcify: { enabled: false },
   networks: {
+    // Local chain; HH_INITIAL_DATE (ISO date) starts it in the past, for seeding demo history.
+    hardhat: process.env.HH_INITIAL_DATE ? { initialDate: process.env.HH_INITIAL_DATE } : {},
     qieTestnet: { url: process.env.QIE_TESTNET_RPC ?? "https://rpc4testnet.qie.digital", chainId: 1983, accounts },
     qieMainnet: { url: process.env.QIE_MAINNET_RPC ?? "https://rpc1mainnet.qie.digital", chainId: 1990, accounts },
   },
