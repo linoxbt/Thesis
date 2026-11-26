@@ -3,13 +3,14 @@
 import type { ReactNode } from "react";
 import { DataProvider } from "@/lib/data";
 import { WalletProvider } from "@/lib/wallet";
-import { Shell } from "./Shell";
+import { TxToasts } from "./TxToasts";
 
 export function Providers({ children }: { children: ReactNode }) {
   return (
     <WalletProvider>
       <DataProvider>
-        <Shell>{children}</Shell>
+        {children}
+        <TxToasts />
       </DataProvider>
     </WalletProvider>
   );

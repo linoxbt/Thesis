@@ -62,7 +62,7 @@ async function main() {
   fs.writeFileSync(path.join(__dirname, "..", "deployments", "localhost.json"), JSON.stringify(out, null, 2) + "\n");
   fs.writeFileSync(
     path.join(__dirname, "..", "..", "app", ".env.local"),
-    `NEXT_PUBLIC_QIE_NETWORK=local\nNEXT_PUBLIC_CALLS_ADDRESS=${await calls.getAddress()}\n`,
+    `NEXT_PUBLIC_QIE_NETWORK=local\nNEXT_PUBLIC_CALLS_ADDRESS=${await calls.getAddress()}\nNEXT_PUBLIC_DEPLOY_BLOCK=0\n`,
   );
   console.log("ThesisCalls", await calls.getAddress(), "· wrote deployments/localhost.json and ../app/.env.local");
 }

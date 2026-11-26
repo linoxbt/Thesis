@@ -35,3 +35,7 @@ export const explorerTx = (hash: string) => (EXPLORER ? `${EXPLORER}/tx/${hash}`
 export const explorerAddress = (a: string) => (EXPLORER ? `${EXPLORER}/address/${a}` : "#");
 export const QIE_WALLET_URL = "https://www.qie.digital";
 export const QUSDC_URL = "https://www.stable.qie.digital/";
+
+/** First block to read contract events from (the deploy block); 0 on a local chain. */
+export const DEPLOY_BLOCK = BigInt(process.env.NEXT_PUBLIC_DEPLOY_BLOCK ?? (NETWORK === "mainnet" ? "12187275" : "0"));
+export const ORACLE_URL = "https://www.qie.digital";

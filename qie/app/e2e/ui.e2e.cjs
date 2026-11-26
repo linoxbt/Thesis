@@ -64,12 +64,21 @@ async function main() {
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("console", (m) => m.type() === "error" && !/favicon|404/.test(m.text()) && errors.push(m.text()));
 
-  // 1. Home: oracle prices and the demo calls
+  // 0. Landing
   await page.goto(BASE + "/");
-  await page.waitForSelector('[data-testid="call-card"]', { timeout: 30_000 });
+  await page.waitForSelector('[data-testid="launch-app"]');
+  check("landing renders", /Prove you/.test((await page.textContent("h1")) ?? ""));
+  await page.waitForSelector('[data-testid="live-stats"]', { timeout: 30_000 });
+  check("landing shows live contract stats", /calls/.test((await page.textContent('[data-testid="live-stats"]')) ?? ""));
+  await page.screenshot({ path: `${OUT}/landing.png`, fullPage: true });
+
+  // 1. Markets: oracle prices and the demo calls
+  await page.click('[data-testid="launch-app"]');
+  await page.waitForSelector('[data-testid="thesis-card"]', { timeout: 30_000 });
   const prices = await page.textContent('[data-testid="oracle-prices"]');
   check("home shows live oracle prices", /BTC \$[\d,]+/.test(prices ?? "") && /SOL \$\d/.test(prices ?? ""), (prices ?? "").replace(/\s+/g, " "));
-  check("home lists the calls", (await page.locator('[data-testid="call-card"]').count()) >= 2);
+  check("markets list the calls", (await page.locator('[data-testid="thesis-card"]').count()) >= 2);
+  check("sidebar and tab bar shell", (await page.locator('[data-testid="sidebar-toggle"]').count()) >= 1);
   check("network badge visible", /QIE local/i.test((await page.textContent('[data-testid="network-badge"]')) ?? ""));
   await page.screenshot({ path: `${OUT}/home.png`, fullPage: true });
 
@@ -81,24 +90,27 @@ async function main() {
   check("connects through QIE Wallet discovery", /0xa0Ee/i.test((await page.textContent('[data-testid="account"]')) ?? ""));
 
   // 3. Back the SOL call with 5 QUSDC
-  await page.goto(BASE + "/call/?id=0");
+  await page.goto(BASE + "/call/?id=0"); // old links redirect to the trade page
+  await page.waitForURL(/\/t\/\?id=0/);
   await page.waitForSelector('[data-testid="bet-box"]');
   await page.fill('[data-testid="bet-amount"]', "5");
-  await page.waitForFunction(() => /pays about/.test(document.querySelector('[data-testid="bet-quote"]')?.textContent ?? ""));
+  await page.waitForFunction(() => /pays [\d.]+ QUSDC/.test(document.querySelector('[data-testid="bet-quote"]')?.textContent ?? ""));
   await page.click('[data-testid="bet-submit"]');
   const backed = await page.waitForSelector('[data-testid="tx-confirmed"], [data-testid="tx-failed"]', { timeout: 60_000 });
   check("backs a call (approve-if-needed + bet)", (await backed.getAttribute("data-testid")) === "tx-confirmed", ((await backed.textContent()) ?? "").replace(/\s+/g, " ").slice(0, 80));
   await page.waitForSelector('[data-testid="position"]', { timeout: 20_000 });
-  check("position shows the stake", /YES stake 4\.90/.test((await page.textContent('[data-testid="position"]')) ?? ""));
+  check("position shows the stake", /4\.90 YES/.test((await page.textContent('[data-testid="position"]')) ?? ""));
+  await page.waitForSelector('[data-testid="activity"]', { timeout: 30_000 });
+  check("activity lists the bet from contract events", /backed · YES/.test((await page.textContent('[data-testid="activity"]')) ?? ""));
   await page.screenshot({ path: `${OUT}/call.png`, fullPage: true });
 
   // 4. Post a call
   await page.goto(BASE + "/new/");
   await page.click('[data-testid="asset-ETH"]');
   await page.fill('[data-testid="seed"]', "10");
-  await page.waitForFunction(() => /Opening odds \d/.test(document.querySelector('[data-testid="preview"]')?.textContent ?? ""), null, { timeout: 20_000 });
+  await page.waitForFunction(() => /Opening odds: [\d.]+%/.test(document.querySelector('[data-testid="preview"]')?.textContent ?? ""), null, { timeout: 20_000 });
   const preview = (await page.textContent('[data-testid="preview"]')) ?? "";
-  check("post form previews the onchain odds", /Opening odds [\d.]+%/.test(preview), preview.slice(0, 90));
+  check("post form previews the onchain odds", /Opening odds: [\d.]+%/.test(preview), preview.slice(0, 90));
   await page.screenshot({ path: `${OUT}/new.png`, fullPage: true });
   await page.click('[data-testid="post-submit"]');
   const posted = await page.waitForSelector('[data-testid="posted"]', { timeout: 60_000 }).then(() => true).catch(() => false);
@@ -106,17 +118,17 @@ async function main() {
   if (posted) {
     await page.click('[data-testid="view-call"]');
     await page.waitForSelector('[data-testid="call-title"]');
-    check("the new call has its page", /ETH ≥ \$/.test((await page.textContent('[data-testid="call-title"]')) ?? ""));
+    check("the new call has its page", /ETH \/ USDT/.test((await page.textContent('[data-testid="call-title"]')) ?? ""));
   }
 
   // 5. SOL touches its target on the oracle; "Check the oracle" settles YES; the winner claims
   const call0 = await client.readContract({ address: dep.ThesisCalls, abi: parseAbi(["function getCall(uint256) view returns ((address creator,address feed,bool above,bool touched,bool settled,bool yesWon,uint16 openBps,uint64 start,uint64 end,int256 strike,int256 spotAtOpen,uint80 touchRound,int256 touchPrice,uint80 checkedRound,bool scanDone,uint256 yesPool,uint256 noPool,uint256 volume))"]), functionName: "getCall", args: [0n] });
   await pushPrice(dep.feeds.SOL.address, (call0.strike * 1002n) / 1000n);
-  await page.goto(BASE + "/call/?id=0");
+  await page.goto(BASE + "/t/?id=0");
   await page.waitForSelector('[data-testid="sync"]');
   await page.click('[data-testid="sync"]');
   await page.waitForSelector('[data-testid="resolution"]', { timeout: 60_000 });
-  check("checking the oracle settles a touched call YES", /Hit/.test((await page.textContent('[data-testid="resolution"]')) ?? ""));
+  check("checking the oracle settles a touched call YES", /YES — touched/.test((await page.textContent('[data-testid="resolution"]')) ?? ""));
   await page.waitForSelector('[data-testid="claim"]', { timeout: 30_000 });
   await page.click('[data-testid="claim"]');
   const claimed = await page.waitForSelector('[data-testid="tx-confirmed"]:has-text("Claim")', { timeout: 60_000 }).then(() => true).catch(() => false);
@@ -131,14 +143,21 @@ async function main() {
   await page.screenshot({ path: `${OUT}/leaderboard.png`, fullPage: true });
   await page.goto(BASE + "/profile/");
   await page.waitForSelector('[data-testid="positions"]', { timeout: 30_000 });
+  await page.waitForSelector('[data-testid="positions"] li', { timeout: 30_000 });
   check("profile lists positions", (await page.locator('[data-testid="positions"] li').count()) >= 1);
+  await page.screenshot({ path: `${OUT}/profile.png`, fullPage: true });
+  await page.goto(BASE + "/stats/");
+  await page.waitForSelector('[data-testid="stats"]', { timeout: 30_000 });
+  check("stats count the touch and the trades", /Touches proven\s*1/.test((await page.textContent('[data-testid="stats"]')) ?? ""));
 
   // 7. Mobile
   const m = await browser.newPage({ viewport: { width: 390, height: 844 } });
-  await m.goto(BASE + "/");
-  await m.waitForSelector('[data-testid="call-card"]');
+  await m.goto(BASE + "/app/");
+  await m.waitForSelector('[data-testid="thesis-card"]');
+  check("mobile shows the tab bar", await m.isVisible('[data-testid="tab-bar"]'));
   await m.screenshot({ path: `${OUT}/home-mobile.png`, fullPage: true });
-  check("mobile layout renders", true);
+  await m.goto(BASE + "/");
+  await m.screenshot({ path: `${OUT}/landing-mobile.png`, fullPage: true });
 
   check("no browser errors", errors.length === 0, errors.slice(0, 3).join(" | "));
   await browser.close();
