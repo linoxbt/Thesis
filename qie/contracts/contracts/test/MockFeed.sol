@@ -6,7 +6,9 @@ contract MockFeed {
     struct Round { int256 answer; uint256 updatedAt; }
     mapping(uint80 => Round) public rounds;
     uint80 public latest;
-    string public description = "SOL / USDT";
+    string public description;
+
+    constructor(string memory description_) { description = description_; }
 
     function decimals() external pure returns (uint8) { return 8; }
 

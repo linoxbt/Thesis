@@ -27,7 +27,7 @@ const PARAMS = {
 async function deploy() {
   const [owner, treasury, keeper, creator, alice, bob, carol] = await ethers.getSigners();
   const token = await (await ethers.getContractFactory("MockToken")).deploy();
-  const feed = await (await ethers.getContractFactory("MockFeed")).deploy();
+  const feed = await (await ethers.getContractFactory("MockFeed")).deploy("SOL / USDT");
   const calls = await (await ethers.getContractFactory("ThesisCalls")).deploy(
     await token.getAddress(), treasury.address, keeper.address, 5_000, PARAMS,
   );
