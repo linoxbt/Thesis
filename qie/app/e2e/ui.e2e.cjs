@@ -121,6 +121,8 @@ async function main() {
       return json(200, { status: "completed", ...fn.session });
     }
     if (action === "me") return fn.session ? json(200, fn.session) : json(401, { code: "NO_SESSION" });
+    if (action === "nonce") return json(200, { nonce: "e2e0nonce0000001" });
+    if (action === "cancel") return (fn.cancels = (fn.cancels ?? 0) + 1), json(200, { ok: true });
     if (action === "logout") return (fn.session = null), json(200, { ok: true });
     if (action === "verify-wallet") return fn.verifyWallet === "down" ? json(502, { code: "QIE_UNREACHABLE" }) : json(200, { address: ACCOUNT, verified: false });
     return json(404, {});
@@ -143,9 +145,18 @@ async function main() {
   await page.screenshot({ path: `${OUT}/signin-code.png` });
   await page.waitForSelector('[data-testid="qieid-ended"]', { timeout: 20_000 });
   check("a declined sign-in says so and offers Start again", /declined/.test((await page.textContent('[data-testid="qieid-ended-message"]')) ?? ""));
+  // Cancel really cancels: from the code screen, Cancel tells the server and polling stops.
+  fn.outcome = "pending";
+  await page.click('[data-testid="qieid-restart"]');
+  await page.waitForSelector('[data-testid="qieid-code"]');
+  await page.click('[data-testid="qieid-cancel"]');
+  const pollsAtCancel = fn.polls;
+  await page.waitForTimeout(4500);
+  check("Cancel ends the sign-in (server told, polling stops)", fn.cancels === 1 && fn.polls === pollsAtCancel, `cancels ${fn.cancels}, polls ${pollsAtCancel}→${fn.polls}`);
+  await page.fill('[data-testid="qieid-input"]', "tester");
   // c) start again; the user approves: signed in, QIE Pass verified
   fn.outcome = "approved";
-  await page.click('[data-testid="qieid-restart"]');
+  await page.click('[data-testid="qieid-submit"]');
   await page.waitForSelector('[data-testid="account-qiepass"]', { timeout: 20_000 });
   check("approving in QIE Wallet signs in with the QIE ID", /tester\.qie/.test((await page.textContent('[data-testid="account"]')) ?? ""));
   // d) the session survives a reload (server session cookie)

@@ -8,6 +8,16 @@ const fail = () => {
 module.exports = new Proxy(
   {},
   {
-    get: (_, key) => (key === "__esModule" ? false : key === "default" ? module.exports : fail),
+    // Symbols, "then" (promise checks) and inspection probes get undefined, so
+    // merely importing, awaiting or logging the module never throws; only a
+    // real call to an x402 function does.
+    get: (_, key) =>
+      typeof key === "symbol" || key === "then" || key === "toJSON" || key === "inspect" || key === "constructor"
+        ? undefined
+        : key === "__esModule"
+          ? false
+          : key === "default"
+            ? module.exports
+            : fail,
   },
 );

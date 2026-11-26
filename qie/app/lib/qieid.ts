@@ -12,6 +12,12 @@ import { createPublicClient, getAddress, http, isAddress, zeroAddress, type Addr
  *
  * The lookup service is QIE's public MCP server (mcp.qie.digital): read-only,
  * no keys, CORS open.
+ *
+ * Trust: paid IDs are checked against the onchain store; free IDs exist only
+ * in QIE's service, so for those the round trip checks consistency, and the
+ * trust is in QIE itself. Names are display only: nothing here sends funds to
+ * a name, and the address is always one click away. "No name" is cached for
+ * 10 minutes, names for 6 hours.
  */
 const MAINNET_RPC = "https://rpc1mainnet.qie.digital";
 const QIE_ID_STORE = "0x8777d01d509D0eA71FB38F88F79867da558d5018" as const;
@@ -69,13 +75,15 @@ export function resolveQieId(input: string): Promise<Address | null> {
 
 const CACHE_KEY = "thesis-qieid-names";
 const TTL = 6 * 3600 * 1000;
+/** "No name" is cached briefly: a newly bought or transferred ID should show up soon. */
+const MISS_TTL = 10 * 60 * 1000;
 const reverse = new Map<string, Promise<string | null>>();
 
 function cached(addr: string): string | null | undefined {
   try {
     const all = JSON.parse(localStorage.getItem(CACHE_KEY) ?? "{}") as Record<string, [string | null, number]>;
     const hit = all[addr];
-    return hit && Date.now() - hit[1] < TTL ? hit[0] : undefined;
+    return hit && Date.now() - hit[1] < (hit[0] ? TTL : MISS_TTL) ? hit[0] : undefined;
   } catch {
     return undefined;
   }

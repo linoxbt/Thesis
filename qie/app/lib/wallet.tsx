@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { BaseError, ContractFunctionRevertedError, createWalletClient, custom, getAddress, type Abi, type Address, type EIP1193Provider } from "viem";
-import { createSiweMessage, generateSiweNonce } from "viem/siwe";
+import { createSiweMessage } from "viem/siwe";
 import { publicClient } from "./chain";
 import { EXPLORER, qie, REOWN_PROJECT_ID, RPC_URL } from "./config";
 import { connectWallet, disconnectWallet, restoreWallet } from "./appkit";
@@ -100,7 +100,11 @@ export interface QieIdLogin {
   expiresAt: number;
 }
 
-/** A signed-in session: proof (an EIP-4361 signature) that this browser's user controls `address`. */
+/**
+ * Who is signed in, for display (name, QIE Pass badge). Nothing trusts it:
+ * every transaction is signed by the user's own wallet, and the QIE Pass
+ * session itself lives in the server's sealed cookie.
+ */
 export interface Session {
   address: Address;
   /** QIE ID found for the address (display only). */
@@ -110,8 +114,6 @@ export interface Session {
   via: Via;
   issuedAt: number;
   expiresAt: number;
-  message: string;
-  signature: string;
 }
 
 interface WalletState {
@@ -127,11 +129,8 @@ interface WalletState {
   chainOk: boolean;
   /** Opens the sign-in dialog; resolves once signed in (rejects silently if closed). */
   connect(): Promise<void>;
-  /**
-   * Connects through `via`, signs the sign-in message and asks QIE Pass whether
-   * the wallet is verified. With `requirePass`, an unverified wallet isn't signed in.
-   */
-  signIn(via: "injected" | "reown", opts?: { requirePass?: boolean }): Promise<void>;
+  /** Connects through `via`, signs the sign-in message and asks QIE Pass whether the wallet is verified. */
+  signIn(via: "injected" | "reown"): Promise<void>;
   /** Opens the session from a completed Sign in with QIE ID (the server has already checked it). */
   adoptQieIdLogin(login: QieIdLogin): void;
   disconnect(): void;
@@ -151,8 +150,12 @@ const SESSION_DAYS = 7;
 
 function loadSession(): Session | null {
   try {
-    const s = JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null") as Session | null;
-    return s && s.expiresAt > Date.now() ? s : null;
+    const s = JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null") as (Session & { message?: string; signature?: string }) | null;
+    if (!s || !(s.expiresAt > Date.now())) return null;
+    const { message: _m, signature: _s, ...clean } = s; // older sessions stored the signed message; drop it
+    void _m;
+    void _s;
+    return clean;
   } catch {
     return null;
   }
@@ -195,12 +198,15 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   // The provider in use: Reown once connected through it, else the browser wallet.
   const active = via === "reown" ? wc : via === "qieid" ? signer : (picked?.provider ?? null);
 
-  // Restore a signed-in session: reconnect silently through the same route, and
-  // keep it only if the wallet still has that account.
+  // Restore a signed-in session once: reconnect silently through the same
+  // route, and keep it only if the wallet still has that account.
+  const restored = useRef<{ base: boolean; injected: boolean }>({ base: false, injected: false });
   useEffect(() => {
     const s = loadSession();
     if (!s) return;
-    if (s.via === "injected" && picked) {
+    if (s.via === "injected") {
+      if (!picked || restored.current.injected) return;
+      restored.current.injected = true;
       picked.provider
         .request({ method: "eth_accounts" })
         .then((a) => {
@@ -211,7 +217,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           }
         })
         .catch(() => {});
+      return;
     }
+    if (restored.current.base) return;
+    restored.current.base = true;
     if (s.via === "qieid") {
       // The server's sealed session cookie is the truth; the copy here is for display.
       fetch(`${QIE_PASS_URL}?action=me`, { credentials: "same-origin" })
@@ -238,28 +247,35 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [picked]);
 
-  // Follow the active wallet's account and network. Switching accounts ends the session.
+  // Follow the active wallet's account and network. Switching accounts (or a
+  // WalletConnect session ending) signs out a wallet session; with QIE Pass,
+  // it only unlinks the signing wallet (the QIE ID session stays).
+  const endSessionRef = useRef<() => void>(() => {});
   useEffect(() => {
     const p = active;
     if (!p || !account) return;
+    const lost = () => {
+      if (via === "qieid") {
+        setSigner(null);
+        if (wc) void disconnectWallet();
+        setWc(null);
+      } else endSessionRef.current();
+    };
     const onAccounts = (a: unknown) => {
       const next = ((a as string[])[0] as Address | undefined) ?? null;
-      if (!next || next.toLowerCase() !== account.toLowerCase()) {
-        localStorage.removeItem(SESSION_KEY);
-        setSession(null);
-        setAccount(null);
-        setVia(null);
-      }
+      if (!next || next.toLowerCase() !== account.toLowerCase()) lost();
     };
     const onChain = (c: unknown) => setChainId(String(c).toLowerCase());
     p.request({ method: "eth_chainId" }).then(onChain).catch(() => {});
     p.on?.("accountsChanged", onAccounts as never);
     p.on?.("chainChanged", onChain as never);
+    p.on?.("disconnect", lost as never);
     return () => {
       p.removeListener?.("accountsChanged", onAccounts as never);
       p.removeListener?.("chainChanged", onChain as never);
+      p.removeListener?.("disconnect", lost as never);
     };
-  }, [active, account]);
+  }, [active, account, via, wc]);
 
   // The connected account's QIE ID, for display; looked up again after one is bought in the widget.
   const [boughtTick, setBoughtTick] = useState(0);
@@ -306,12 +322,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = useCallback<WalletState["signIn"]>(
-    async (route, opts) => {
+    async (route) => {
       // 2. Connect.
       let p: EIP1193Provider;
       if (route === "reown") {
         // Reown's wallet picker: installed wallets, QIE Wallet app, QR code, 700+ wallets.
-        const r = await connectWallet();
+        // Always a fresh pick, so a wallet left connected earlier isn't reused silently.
+        const r = await connectWallet({ fresh: true });
         setWc(r.provider);
         p = r.provider;
       } else {
@@ -322,8 +339,15 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       if (!accounts[0]) throw new Error("The wallet didn't share an account.");
       const address = getAddress(accounts[0]);
       await ensureChain(p);
-      // 3. Sign the sign-in message (EIP-4361): free, no transaction.
-      const name = await qieIdOf(address).catch(() => null);
+      // 3. Sign the sign-in message (EIP-4361): free, no transaction. The nonce
+      // comes from the server (single use), so the signature can't be replayed.
+      const [name, nonce] = await Promise.all([
+        qieIdOf(address).catch(() => null),
+        fetch(`${QIE_PASS_URL}?action=nonce`, { credentials: "same-origin" })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((b: { nonce?: string } | null) => b?.nonce ?? null)
+          .catch(() => null),
+      ]);
       const issued = new Date();
       const expires = new Date(issued.getTime() + SESSION_DAYS * 86_400_000);
       const message = createSiweMessage({
@@ -331,7 +355,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         uri: window.location.origin,
         address,
         chainId: qie.id,
-        nonce: generateSiweNonce(),
+        // Without the server (local dev), a local nonce: signing in still works, just without the badge.
+        nonce: nonce ?? Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join(""),
         version: "1",
         issuedAt: issued,
         expirationTime: expires,
@@ -341,20 +366,24 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       const signature = await wallet.signMessage({ account: address, message });
       const ok = await publicClient.verifyMessage({ address, message, signature }).catch(() => false);
       if (!ok) throw new Error("That signature doesn't match the wallet's address.");
-      // 4. QIE Pass: the server checks the signature and asks QIE whether this wallet is verified.
+      // 4. QIE Pass: the server checks the signature and asks QIE whether this
+      // wallet is verified. If it can't, sign-in still works, without the badge.
       let qiePass: boolean | null = null;
-      try {
-        const res = await fetch(`${QIE_PASS_URL}?action=verify-wallet`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message, signature }) });
-        const body = (await res.json().catch(() => ({}))) as { verified?: boolean; error?: string };
-        if (res.ok && typeof body.verified === "boolean") qiePass = body.verified;
-        else if (opts?.requirePass) throw new Error(body.error ?? "QIE Pass couldn't be checked right now. Try again.");
-      } catch (e) {
-        if (opts?.requirePass) throw e instanceof Error && e.message ? e : new Error("QIE Pass couldn't be checked right now. Try again.");
+      if (nonce) {
+        try {
+          const res = await fetch(`${QIE_PASS_URL}?action=verify-wallet`, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ message, signature }),
+          });
+          const body = (await res.json().catch(() => ({}))) as { verified?: boolean };
+          if (res.ok && typeof body.verified === "boolean") qiePass = body.verified;
+        } catch {
+          /* badge unavailable */
+        }
       }
-      if (opts?.requirePass && !qiePass) {
-        throw new Error("This wallet isn't verified with QIE Pass yet. Complete verification in the QIE Wallet app, or sign in with your wallet.");
-      }
-      const s: Session = { address, name, qiePass, via: route, issuedAt: issued.getTime(), expiresAt: expires.getTime(), message, signature };
+      const s: Session = { address, name, qiePass, via: route, issuedAt: issued.getTime(), expiresAt: expires.getTime() };
       localStorage.setItem(SESSION_KEY, JSON.stringify(s));
       setVia(route);
       setAccount(address);
@@ -381,7 +410,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const adoptQieIdLogin = useCallback((login: QieIdLogin) => {
-    const s: Session = { address: getAddress(login.address), name: login.qieId, qiePass: login.verified, via: "qieid", issuedAt: Date.now(), expiresAt: login.expiresAt, message: "", signature: "" };
+    const s: Session = { address: getAddress(login.address), name: login.qieId, qiePass: login.verified, via: "qieid", issuedAt: Date.now(), expiresAt: login.expiresAt };
     localStorage.setItem(SESSION_KEY, JSON.stringify(s));
     setSigner(null);
     setVia("qieid");
@@ -393,13 +422,17 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const disconnect = useCallback(() => {
     localStorage.removeItem(SESSION_KEY);
-    if (via === "reown" || (via === "qieid" && signer === wc)) void disconnectWallet();
-    if (via === "qieid") void fetch(`${QIE_PASS_URL}?action=logout`, { method: "POST", credentials: "same-origin" }).catch(() => {});
+    // Any Reown connection made for this session ends with it.
+    if (wc || via === "reown") void disconnectWallet();
+    if (via === "qieid")
+      void fetch(`${QIE_PASS_URL}?action=logout`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => {});
     setSession(null);
     setAccount(null);
     setSigner(null);
+    setWc(null);
     setVia(null);
-  }, [via, wc, signer]);
+  }, [via, wc]);
+  endSessionRef.current = disconnect;
 
   /**
    * Signed in with QIE ID: sign-in proves the account, but transactions still
@@ -415,14 +448,16 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       const r = await connectWallet();
       p = r.provider;
       addr = r.address;
-      setWc(r.provider);
     } else if (picked) {
       p = picked.provider;
       addr = ((await p.request({ method: "eth_requestAccounts" })) as string[])[0];
     } else throw new Error(`Connect the wallet ${short} to continue.`);
     if (addr?.toLowerCase() !== account.toLowerCase()) {
-      throw new Error(`Your QIE ID is on ${short}, but the connected wallet isn't. Connect that wallet to continue.`);
+      // Don't keep the wrong wallet connected: the next try opens the picker again.
+      if (REOWN_PROJECT_ID) await disconnectWallet();
+      throw new Error(`Your QIE ID is on ${short}, but you connected ${addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : "another wallet"}. Try again and pick the wallet that holds your QIE ID.`);
     }
+    if (REOWN_PROJECT_ID) setWc(p);
     setSigner(p);
     return p;
   }, [account, picked]);

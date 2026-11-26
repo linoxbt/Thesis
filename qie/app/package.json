@@ -6,13 +6,18 @@
   "scripts": {
     "dev": "next dev -p 3200",
     "build": "next build",
-    "start": "npx serve out -l 3200"
+    "start": "npx serve out -l 3200",
+    "postbuild": "node scripts/csp.mjs",
+    "test": "node --test e2e/qie-pass.test.mjs",
+    "e2e": "node e2e/ui.e2e.cjs",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ethersproject/sha2": "5.8.0",
     "@fontsource/inter": "^5.3.0",
     "@fontsource/jetbrains-mono": "^5.3.0",
     "@fontsource/sora": "^5.3.0",
+    "@netlify/blobs": "^8.2.0",
     "@reown/appkit": "1.8.24",
     "@reown/appkit-adapter-ethers": "1.8.24",
     "ethers": "6.17.0",

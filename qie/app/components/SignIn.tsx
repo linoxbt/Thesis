@@ -3,6 +3,7 @@
 import { ArrowLeft, ArrowRight, Loader2, ShieldCheck, Wallet, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { onModalChange } from "@/lib/appkit";
 import { openQieIdWidget } from "@/lib/qieidWidget";
 import { explain, QIE_PASS_URL, useWallet, type QieIdLogin } from "@/lib/wallet";
 
@@ -14,6 +15,7 @@ type Flow =
   | { step: "ended"; message: string };
 
 const api = (action: string, init?: RequestInit) => fetch(`${QIE_PASS_URL}?action=${action}`, { credentials: "same-origin", ...init });
+const post = (action: string, body: unknown = {}) => api(action, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
 /**
  * Sign in: QIE Pass (enter your QIE ID, approve in QIE Wallet with the code
@@ -27,21 +29,69 @@ export function SignInDialog() {
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [retryAt, setRetryAt] = useState(0);
+  // Reown's picker is on screen (this dialog steps aside while it is).
+  const [reownOpen, setReownOpen] = useState(false);
   const polling = useRef(false);
+  const panel = useRef<HTMLDivElement>(null);
+  const opener = useRef<Element | null>(null);
+
+  /** Ends a sign-in in progress (stops polling; the server forgets it) and closes. */
+  const close = useCallback(() => {
+    if (flow.step === "code" || flow.step === "starting") void post("cancel").catch(() => {});
+    setFlow({ step: "pick" });
+    w.closeSignIn();
+  }, [flow.step, w]);
 
   useEffect(() => {
-    if (!w.signInOpen) return;
+    if (!w.signInOpen) {
+      // Give focus back to whatever opened the dialog.
+      if (opener.current instanceof HTMLElement) opener.current.focus();
+      return;
+    }
+    opener.current = document.activeElement;
     setErr(null);
     setBusy(null);
     setFlow({ step: "pick" });
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && w.closeSignIn();
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    setTimeout(() => panel.current?.querySelector<HTMLElement>("button, input")?.focus(), 0);
   }, [w.signInOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // While a code is shown: countdown, and poll every 2 s until it's no longer pending.
   useEffect(() => {
-    if (flow.step !== "code") return;
+    if (!w.signInOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !reownOpen) close();
+      // Keep Tab inside the dialog.
+      if (e.key === "Tab" && panel.current) {
+        const f = [...panel.current.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]), a[href]")];
+        if (!f.length) return;
+        const first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) (e.preventDefault(), last.focus());
+        else if (!e.shiftKey && document.activeElement === last) (e.preventDefault(), first.focus());
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [w.signInOpen, close, reownOpen]);
+
+  // While signing in through Reown, follow its picker: step aside while it's
+  // open, come back (to "confirm in your wallet") once it closes.
+  useEffect(() => {
+    if (busy !== "reown") return setReownOpen(false);
+    let unsub: (() => void) | null = null;
+    let on = true;
+    onModalChange((open) => on && setReownOpen(open))
+      .then((u) => (on ? (unsub = u) : u()))
+      .catch(() => {});
+    setReownOpen(true);
+    return () => {
+      on = false;
+      unsub?.();
+    };
+  }, [busy]);
+
+  // While a code is shown (and the dialog is open): countdown, and poll every 2 s until it's no longer pending.
+  useEffect(() => {
+    if (flow.step !== "code" || !w.signInOpen) return;
     const tick = setInterval(() => setNow(Date.now()), 500);
     const poll = setInterval(async () => {
       if (polling.current) return;
@@ -74,14 +124,15 @@ export function SignInDialog() {
     setErr(null);
     setFlow({ step: "starting" });
     try {
-      const r = await api("start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ qieId }) });
-      const b = (await r.json().catch(() => ({}))) as { code?: string; qieId?: string; expiresAt?: string; message?: string };
+      const r = await post("start", { qieId });
+      const b = (await r.json().catch(() => ({}))) as { code?: string; qieId?: string; expiresAt?: string; message?: string; retryAfterSeconds?: number };
       if (r.status === 202 && b.code && b.expiresAt) {
         setNow(Date.now());
         setFlow({ step: "code", qieId: b.qieId ?? qieId, code: b.code, expiresAt: Date.parse(b.expiresAt) });
         return;
       }
       setFlow({ step: "qieid" });
+      if (b.retryAfterSeconds) setRetryAt(Date.now() + b.retryAfterSeconds * 1000);
       setErr(b.message ?? "Couldn't start the sign-in. Try again.");
     } catch {
       setFlow({ step: "qieid" });
@@ -89,9 +140,16 @@ export function SignInDialog() {
     }
   }, [qieId]);
 
+  // Count down a "try again in" wait.
+  useEffect(() => {
+    if (retryAt <= Date.now()) return;
+    const t = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(t);
+  }, [retryAt]);
+
   if (!w.signInOpen || typeof document === "undefined") return null;
-  // Reown's own picker takes over while it's open; this dialog returns if it's closed.
-  if (busy === "reown") return null;
+  // Reown's own picker takes over while it's open; this dialog returns once it closes.
+  if (busy === "reown" && reownOpen) return null;
 
   const connect = async (via: "injected" | "reown") => {
     setErr(null);
@@ -108,6 +166,7 @@ export function SignInDialog() {
   // Wallet: Reown's picker (QIE Wallet first, plus every installed wallet); the browser wallet if Reown isn't set up.
   const walletVia: "injected" | "reown" | null = w.reownAvailable ? "reown" : w.available ? "injected" : null;
   const waiting = flow.step === "code" || flow.step === "starting";
+  const retryIn = Math.max(0, Math.ceil((retryAt - now) / 1000));
   const left = flow.step === "code" ? Math.max(0, Math.ceil((flow.expiresAt - now) / 1000)) : 0;
   const spinner = <Loader2 size={16} className="animate-spin" />;
 
@@ -125,14 +184,8 @@ export function SignInDialog() {
   );
 
   return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-      onClick={() => !busy && !waiting && w.closeSignIn()}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Sign in"
-    >
-      <div className="panel w-full max-w-sm p-5 shadow-2xl" onClick={(e) => e.stopPropagation()} data-testid="signin-modal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => !busy && !waiting && close()}>
+      <div ref={panel} className="panel w-full max-w-sm p-5 shadow-2xl" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="signin-title" data-testid="signin-modal">
         <div className="mb-4 flex items-center justify-between">
           {flow.step === "qieid" || flow.step === "ended" ? (
             <button onClick={() => (setFlow({ step: "pick" }), setErr(null))} className="-ml-1 rounded-full p-1 text-muted hover:bg-panel-2 hover:text-ink" aria-label="Back" data-testid="signin-back">
@@ -141,20 +194,34 @@ export function SignInDialog() {
           ) : (
             <span />
           )}
-          <h2 className="text-base font-semibold tracking-[-0.02em]">Sign in</h2>
-          <button onClick={w.closeSignIn} className="-mr-1 rounded-full p-1 text-muted hover:bg-panel-2 hover:text-ink" aria-label="Close">
+          <h2 id="signin-title" className="text-base font-semibold tracking-[-0.02em]">Sign in</h2>
+          <button onClick={close} className="-mr-1 rounded-full p-1 text-muted hover:bg-panel-2 hover:text-ink" aria-label="Close">
             <X size={16} />
           </button>
         </div>
 
-        {flow.step === "pick" && (
+        {flow.step === "pick" && busy === "reown" ? (
+          <div className="text-center" data-testid="signin-confirm">
+            <Loader2 size={20} className="mx-auto animate-spin text-muted" />
+            <p className="mt-3 text-sm text-ink">Confirm the sign-in in your wallet</p>
+            <p className="mt-1 text-xs text-muted">It&apos;s a free signature, not a transaction.</p>
+            <button onClick={() => setBusy(null)} className="mt-4 text-xs text-muted underline hover:text-ink">
+              Cancel
+            </button>
+          </div>
+        ) : flow.step === "pick" ? (
           <div className="space-y-2">
             {row("signin-qiepass", <ShieldCheck size={16} />, "QIE Pass", () => (setFlow({ step: "qieid" }), setErr(null)))}
-            {walletVia
-              ? row("signin-wallet", <Wallet size={16} />, "Wallet", () => void connect(walletVia), busy === walletVia)
-              : row("signin-wallet", <Wallet size={16} />, "Wallet", () => {}, false, true)}
+            {walletVia ? (
+              row("signin-wallet", <Wallet size={16} />, "Wallet", () => void connect(walletVia), busy === walletVia)
+            ) : (
+              <>
+                {row("signin-wallet", <Wallet size={16} />, "Wallet", () => {}, false, true)}
+                <p className="px-1 text-xs text-muted">No wallet found in this browser. Install QIE Wallet, or use QIE Pass.</p>
+              </>
+            )}
           </div>
-        )}
+        ) : null}
 
         {(flow.step === "qieid" || flow.step === "starting") && (
           <form
@@ -176,8 +243,8 @@ export function SignInDialog() {
               aria-label="Your QIE ID"
               data-testid="qieid-input"
             />
-            <button type="submit" disabled={!qieId.trim() || flow.step === "starting"} className="btn btn-primary w-full py-2.5 disabled:opacity-40" data-testid="qieid-submit">
-              {flow.step === "starting" ? spinner : "Continue"}
+            <button type="submit" disabled={!qieId.trim() || flow.step === "starting" || retryIn > 0} className="btn btn-primary w-full py-2.5 disabled:opacity-40" data-testid="qieid-submit">
+              {flow.step === "starting" ? spinner : retryIn > 0 ? `Try again in ${retryIn}s` : "Continue"}
             </button>
             <button type="button" onClick={() => (w.closeSignIn(), openQieIdWidget())} className="w-full text-center text-xs text-muted underline hover:text-ink" data-testid="signin-get-qieid">
               Get a QIE ID
@@ -194,7 +261,7 @@ export function SignInDialog() {
             <p className="num text-xs text-faint" data-testid="qieid-countdown">
               {flow.qieId} · {Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")} left
             </p>
-            <button onClick={() => setFlow({ step: "qieid" })} className="mt-4 text-xs text-muted underline hover:text-ink">
+            <button onClick={() => (void post("cancel").catch(() => {}), setFlow({ step: "qieid" }))} className="mt-4 text-xs text-muted underline hover:text-ink" data-testid="qieid-cancel">
               Cancel
             </button>
           </div>
@@ -212,7 +279,7 @@ export function SignInDialog() {
         )}
 
         {err && (
-          <p className="mt-3 rounded-lg border border-bad/30 bg-bad/5 px-3 py-2 text-xs text-bad" data-testid="signin-error">
+          <p className="mt-3 rounded-lg border border-bad/30 bg-bad/5 px-3 py-2 text-xs text-bad" role="alert" data-testid="signin-error">
             {err}
           </p>
         )}

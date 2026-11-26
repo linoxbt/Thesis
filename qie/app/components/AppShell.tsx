@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowUpRight, BadgeCheck, BarChart3, Coins, LayoutGrid, LogIn, LogOut, ShieldCheck, PanelLeftClose, PanelLeftOpen, PenLine, Trophy, User } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, AtSign, BarChart3, Coins, LayoutGrid, LogIn, LogOut, ShieldCheck, PanelLeftClose, PanelLeftOpen, PenLine, Trophy, User } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -86,7 +86,7 @@ export function WalletButton() {
       <button onClick={() => setOpen((o) => !o)} className="btn btn-ghost num text-sm" data-testid="account">
         {w.qieName ? (
           <span className="flex items-center gap-1 font-sans" data-testid="account-qieid">
-            <BadgeCheck size={13} className="text-yes" /> {w.qieName}
+            <AtSign size={13} className="text-muted" aria-hidden /> {w.qieName}
           </span>
         ) : (
           shortAddr(w.account)

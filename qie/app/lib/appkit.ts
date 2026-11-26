@@ -78,13 +78,15 @@ const providerOf = (k: AppKit) => k.getWalletProvider() as EIP1193Provider | und
 /**
  * Opens Reown's wallet picker (installed wallets, QIE Wallet app, QR code,
  * 700+ wallets) and resolves with the connected wallet. Rejects with an empty
- * message if the picker is closed without connecting.
+ * message if the picker is closed without connecting. With `fresh`, a wallet
+ * that is already connected is disconnected first, so the user always picks.
  */
-export async function connectWallet(): Promise<{ provider: EIP1193Provider; address: Address }> {
+export async function connectWallet(opts: { fresh?: boolean } = {}): Promise<{ provider: EIP1193Provider; address: Address }> {
   const k = await appKit();
   // After a reload AppKit reconnects a previous wallet in the background: wait
   // for that rather than open the picker over it.
   await settled(k);
+  if (opts.fresh && k.getIsConnectedState()) await k.disconnect().catch(() => {});
   const now = k.getAddress();
   const p = providerOf(k);
   if (k.getIsConnectedState() && now && p) return { provider: p, address: now as Address };
@@ -111,8 +113,14 @@ export async function connectWallet(): Promise<{ provider: EIP1193Provider; addr
       if (s.open) opened = true;
       else if (opened) setTimeout(() => !k.getIsConnectedState() && finish(() => reject(new Error(""))), 400);
     });
-    void k.open({ view: "Connect" });
+    k.open({ view: "Connect" }).catch((e: unknown) => finish(() => reject(e instanceof Error ? e : new Error("Reown couldn't open the wallet picker."))));
   });
+}
+
+/** Calls `fn(open)` whenever Reown's modal opens or closes; returns an unsubscribe. */
+export async function onModalChange(fn: (open: boolean) => void): Promise<() => void> {
+  const k = await appKit();
+  return k.subscribeState((s) => fn(!!s.open));
 }
 
 /** Resolves once AppKit isn't (re)connecting, or after `ms`. */

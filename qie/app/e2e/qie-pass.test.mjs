@@ -1,0 +1,195 @@
+// The QIE Pass function against a simulated QIE Pass API (node --test).
+//   cd qie/app && node --test e2e/qie-pass.test.mjs
+// The QIE Pass API is faked; the QIE RPC is real (wallet signature checks use it).
+import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import test from "node:test";
+import { privateKeyToAccount } from "viem/accounts";
+import { createSiweMessage } from "viem/siwe";
+
+process.env.QIE_PASS_PUBLIC_KEY = "pk_test";
+process.env.QIE_PASS_SECRET_KEY = "sk_test";
+process.env.SESSION_SECRET = crypto.randomBytes(32).toString("hex");
+
+const user = privateKeyToAccount("0x" + "11".repeat(32));
+const SITE = "https://thesis-qie.netlify.app";
+
+// ---- fake QIE Pass ----------------------------------------------------------
+const fake = { requests: new Map(), starts: 0, hmacOk: true };
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (url, init = {}) => {
+  const u = String(url);
+  if (!u.startsWith("https://pass-api.qie.digital")) return realFetch(url, init);
+  const h = init.headers;
+  const want = crypto.createHmac("sha256", "sk_test").update(h["X-Public-Key"] + h["X-Timestamp"]).digest("hex");
+  fake.hmacOk &&= h["X-Signature"] === want;
+  const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const path = new URL(u).pathname.replace("/api/v1/partners", "");
+  if (init.method === "POST" && path === "/qie-login/requests") {
+    fake.starts++;
+    const { qieId } = JSON.parse(init.body);
+    if (qieId !== "alice.qie") return json(404, { success: false, code: "QIE_ID_NOT_FOUND" });
+    const id = "req_" + crypto.randomBytes(8).toString("hex");
+    fake.requests.set(id, { status: "pending", collected: false });
+    return json(202, { success: true, data: { requestId: id, qieId, code: "123456", expiresAt: new Date(Date.now() + 120e3).toISOString() } });
+  }
+  const m = /^\/qie-login\/requests\/([^/]+)(\/collect)?$/.exec(path);
+  if (m) {
+    const r = fake.requests.get(decodeURIComponent(m[1]));
+    if (!r) return json(404, { success: false, code: "REQUEST_NOT_FOUND" });
+    if (!m[2]) return json(200, { success: true, data: { status: r.collected ? "completed" : r.status, expiresAt: new Date(Date.now() + 60e3).toISOString() } });
+    if (r.status !== "approved" || r.collected) return json(409, { success: false, code: "NOT_APPROVED" });
+    r.collected = true;
+    const message = `QIE ID login\nRequest: ${m[1]}\nPartner: Thesis`;
+    const signature = await (r.signer ?? user).signMessage({ message });
+    return json(200, { success: true, data: { walletAddress: user.address, qieId: "alice.qie", isVerifiedUser: true, approval: { message, signature } } });
+  }
+  if (path.startsWith("/verification-requests/is-verified")) return json(200, { success: true, data: { isVerified: true } });
+  return json(404, { success: false });
+};
+
+const { handler, _internal } = await import("../netlify/functions/qie-pass.mjs");
+
+// ---- a browser ----------------------------------------------------------------
+function browser(ip = "203.0.113." + Math.floor(Math.random() * 250)) {
+  const jar = {};
+  const call = async (action, { method = "GET", body, headers = {} } = {}) => {
+    const cookie = Object.entries(jar).map(([k, v]) => `${k}=${v}`).join("; ");
+    const base = { "x-nf-client-connection-ip": ip, cookie };
+    if (method === "POST") Object.assign(base, { "content-type": "application/json", origin: SITE, "sec-fetch-site": "same-origin" });
+    const res = await handler({ httpMethod: method, queryStringParameters: { action }, headers: { ...base, ...headers }, body: body ? JSON.stringify(body) : undefined });
+    for (const c of res.multiValueHeaders?.["set-cookie"] ?? []) {
+      const [kv, ...attrs] = c.split("; ");
+      const [k, v] = kv.split("=");
+      if (attrs.some((a) => a === "Max-Age=0")) delete jar[k];
+      else jar[k] = v;
+    }
+    return { status: res.statusCode, body: JSON.parse(res.body), headers: res.headers };
+  };
+  return { call, jar };
+}
+
+test("signs requests with HMAC-SHA256(publicKey + timestamp)", async () => {
+  const b = browser();
+  await b.call("start", { method: "POST", body: { qieId: "alice" } });
+  assert.equal(fake.hmacOk, true);
+});
+
+test("full QIE Pass sign-in: code, approval, verified signature, session, logout", async () => {
+  const b = browser();
+  const s = await b.call("start", { method: "POST", body: { qieId: "@Alice" } });
+  assert.equal(s.status, 202);
+  assert.equal(s.body.code, "123456");
+  assert.ok(!JSON.stringify(s.body).includes("req_"), "request id never reaches the browser");
+  assert.equal((await b.call("status")).body.status, "pending");
+  for (const r of fake.requests.values()) r.status = "approved";
+  const done = await b.call("status");
+  assert.equal(done.body.status, "completed");
+  assert.equal(done.body.address, user.address);
+  assert.equal(done.body.verified, true);
+  assert.equal((await b.call("me")).body.qieId, "alice.qie");
+  await b.call("logout", { method: "POST", body: {} });
+  assert.equal((await b.call("me")).status, 401);
+});
+
+test("an approval signed by another wallet is refused", async () => {
+  const b = browser();
+  await b.call("start", { method: "POST", body: { qieId: "alice" } });
+  const other = privateKeyToAccount("0x" + "22".repeat(32));
+  for (const r of fake.requests.values()) if (!r.collected) Object.assign(r, { status: "approved", signer: other });
+  const res = await b.call("status");
+  assert.equal(res.body.code, "APPROVAL_MISMATCH");
+  assert.equal((await b.call("me")).status, 401);
+});
+
+test("audit H7: cross-site, non-JSON or origin-less POSTs are refused", async () => {
+  const b = browser();
+  for (const headers of [
+    { origin: "https://evil.example", "sec-fetch-site": "cross-site" },
+    { "content-type": "text/plain" },
+    { origin: "https://thesis-qie.netlify.app.evil.example", "sec-fetch-site": "cross-site" },
+    { origin: undefined, "sec-fetch-site": undefined },
+  ]) {
+    const before = fake.starts;
+    const res = await b.call("start", { method: "POST", body: { qieId: "alice" }, headers });
+    assert.equal(res.status, 403, JSON.stringify(headers));
+    assert.equal(fake.starts, before, "nothing reached QIE");
+  }
+  // Deploy previews of this site are allowed.
+  const ok = await b.call("start", { method: "POST", body: { qieId: "nobody" }, headers: { origin: "https://deploy-preview-7--thesis-qie.netlify.app" } });
+  assert.equal(ok.status, 404);
+});
+
+test("audit H7: start is rate limited per IP and per QIE ID", async () => {
+  const b = browser("198.51.100.7");
+  const codes = [];
+  for (let i = 0; i < 8; i++) codes.push((await b.call("start", { method: "POST", body: { qieId: `ghost${i}` } })).status);
+  assert.deepEqual(codes.slice(0, 6), [404, 404, 404, 404, 404, 404]);
+  assert.equal(codes[6], 429);
+  // Per QIE ID across many IPs.
+  const id = [];
+  for (let i = 0; i < 5; i++) id.push((await browser().call("start", { method: "POST", body: { qieId: "target-person" } })).status);
+  assert.deepEqual(id, [404, 404, 404, 429, 429]);
+});
+
+test("audit M12: cancel forgets the sign-in in this browser", async () => {
+  _internal.resetLimits();
+  const b = browser();
+  await b.call("start", { method: "POST", body: { qieId: "alice" } });
+  assert.ok(b.jar.tq_login);
+  await b.call("cancel", { method: "POST", body: {} });
+  assert.equal(b.jar.tq_login, undefined);
+  assert.equal((await b.call("status")).body.code, "NO_SIGNIN");
+});
+
+test("audit L2: cookies are typed and fail closed without SESSION_SECRET", async () => {
+  const { seal, unseal } = _internal;
+  const login = seal("tq_login", { rid: "x", exp: Date.now() + 60e3 });
+  assert.equal(unseal("tq_session", login), null, "a login cookie can't pass as a session");
+  assert.equal(unseal("tq_login", login).rid, "x");
+  const tampered = Buffer.from(login, "base64url");
+  tampered[tampered.length - 1] ^= 1;
+  assert.equal(unseal("tq_login", tampered.toString("base64url")), null);
+  const saved = process.env.SESSION_SECRET;
+  delete process.env.SESSION_SECRET;
+  try {
+    const b = browser();
+    b.jar.tq_session = login; // a cookie can't be read (or forged) without the secret
+    const res = await b.call("me");
+    assert.equal(res.status, 503);
+    assert.equal(res.body.code, "NOT_CONFIGURED");
+    _internal.resetLimits();
+    assert.equal((await browser().call("start", { method: "POST", body: { qieId: "alice" } })).status, 503); // nor sealed
+  } finally {
+    process.env.SESSION_SECRET = saved;
+  }
+});
+
+async function siwe(b, overrides = {}) {
+  const { nonce } = (await b.call("nonce")).body;
+  const message = createSiweMessage({ address: user.address, chainId: 1990, domain: "thesis-qie.netlify.app", uri: SITE, version: "1", nonce, issuedAt: new Date(), statement: "Sign in to Thesis", ...overrides });
+  return { message, signature: await user.signMessage({ message }) };
+}
+
+test("audit L1: wallet sign-in needs the server's nonce, once", async () => {
+  const b = browser();
+  const body = await siwe(b);
+  const ok = await b.call("verify-wallet", { method: "POST", body });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  assert.equal(ok.body.verified, true);
+  const replay = await b.call("verify-wallet", { method: "POST", body });
+  assert.equal(replay.body.code, "NO_NONCE");
+  const forged = await siwe(b, { nonce: "a".repeat(24) });
+  assert.equal((await b.call("verify-wallet", { method: "POST", body: forged })).body.code, "BAD_NONCE");
+});
+
+test("audit L1: bad dates, other sites and other chains are refused", async () => {
+  const b = browser();
+  const bad = await siwe(b);
+  bad.message = bad.message.replace(/Issued At: .*/, "Issued At: not-a-date");
+  bad.signature = await user.signMessage({ message: bad.message });
+  assert.equal((await b.call("verify-wallet", { method: "POST", body: bad })).status, 401);
+  assert.equal((await b.call("verify-wallet", { method: "POST", body: await siwe(b, { domain: "evil.example", uri: "https://evil.example" }) })).body.code, "WRONG_SITE");
+  assert.equal((await b.call("verify-wallet", { method: "POST", body: await siwe(b, { chainId: 1 }) })).body.code, "WRONG_CHAIN");
+  assert.equal((await b.call("verify-wallet", { method: "POST", body: await siwe(b, { expirationTime: new Date(Date.now() - 1000) }) })).body.code, "STALE");
+});

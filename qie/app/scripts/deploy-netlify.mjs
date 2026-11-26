@@ -16,6 +16,9 @@ const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..")
 const out = path.join(root, "out");
 if (!fs.existsSync(out)) throw new Error("out/ missing: run `npx next build` first");
 
+// Security headers with per-page script hashes (rewrites out/_headers).
+execFileSync("node", [path.join(root, "scripts/csp.mjs")], { stdio: "inherit" });
+
 const auth = { Authorization: `Bearer ${TOKEN}` };
 async function api(method, url, body, headers = {}) {
   const res = await fetch(url.startsWith("http") ? url : API + url, { method, headers: { ...auth, ...headers }, body });
