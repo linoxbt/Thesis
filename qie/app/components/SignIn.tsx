@@ -90,6 +90,8 @@ export function SignInDialog() {
   }, [qieId]);
 
   if (!w.signInOpen || typeof document === "undefined") return null;
+  // Reown's own picker takes over while it's open; this dialog returns if it's closed.
+  if (busy === "reown") return null;
 
   const connect = async (via: "injected" | "reown") => {
     setErr(null);
@@ -103,8 +105,8 @@ export function SignInDialog() {
       setBusy(null);
     }
   };
-  // Wallet: the browser wallet if there is one, else Reown (QIE Wallet app and others).
-  const walletVia: "injected" | "reown" | null = w.available ? "injected" : w.reownAvailable ? "reown" : null;
+  // Wallet: Reown's picker (QIE Wallet first, plus every installed wallet); the browser wallet if Reown isn't set up.
+  const walletVia: "injected" | "reown" | null = w.reownAvailable ? "reown" : w.available ? "injected" : null;
   const waiting = flow.step === "code" || flow.step === "starting";
   const left = flow.step === "code" ? Math.max(0, Math.ceil((flow.expiresAt - now) / 1000)) : 0;
   const spinner = <Loader2 size={16} className="animate-spin" />;
@@ -151,11 +153,6 @@ export function SignInDialog() {
             {walletVia
               ? row("signin-wallet", <Wallet size={16} />, "Wallet", () => void connect(walletVia), busy === walletVia)
               : row("signin-wallet", <Wallet size={16} />, "Wallet", () => {}, false, true)}
-            {w.available && w.reownAvailable && (
-              <button onClick={() => void connect("reown")} disabled={!!busy} className="w-full pt-1 text-center text-xs text-muted underline hover:text-ink" data-testid="signin-reown">
-                {busy === "reown" ? "Opening…" : "Another wallet"}
-              </button>
-            )}
           </div>
         )}
 

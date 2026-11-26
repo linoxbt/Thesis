@@ -37,6 +37,13 @@ async function pushPrice(feed, price) {
   await client.waitForTransactionReceipt({ hash });
 }
 
+/** Picks "QIE Wallet" in Reown's wallet picker (AppKit; Playwright reaches into its shadow DOM). */
+async function pickQieWalletInReown(page) {
+  const item = page.locator("w3m-modal").getByText("QIE Wallet", { exact: true }).first();
+  await item.waitFor({ state: "visible", timeout: 30_000 });
+  await item.click();
+}
+
 async function main() {
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
@@ -152,6 +159,9 @@ async function main() {
   await page.fill('[data-testid="bet-amount"]', "5");
   await page.waitForFunction(() => /pays [\d.]+ QUSDC/.test(document.querySelector('[data-testid="bet-quote"]')?.textContent ?? ""));
   await page.click('[data-testid="bet-submit"]');
+  // Signed in with QIE ID: the first transaction links the wallet through Reown's picker.
+  await pickQieWalletInReown(page);
+  check("Reown's picker lists QIE Wallet (detected) for the first transaction", true);
   const backed = await page.waitForSelector('[data-testid="tx-confirmed"], [data-testid="tx-failed"]', { timeout: 60_000 });
   check("backs a call (approve-if-needed + bet)", (await backed.getAttribute("data-testid")) === "tx-confirmed", ((await backed.textContent()) ?? "").replace(/\s+/g, " ").slice(0, 80));
   await page.waitForSelector('[data-testid="position"]', { timeout: 20_000 });
@@ -196,6 +206,7 @@ async function main() {
   await page.click("text=Sign out");
   await page.click('[data-testid="connect"]');
   await page.click('[data-testid="signin-wallet"]');
+  await pickQieWalletInReown(page);
   await page.waitForSelector('[data-testid="account"]', { timeout: 20_000 });
   check("wallet sign-in works too (no QIE Pass badge)", !(await page.isVisible('[data-testid="account-qiepass"]')) && /tester\.qie/.test((await page.textContent('[data-testid="account"]')) ?? ""));
 

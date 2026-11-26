@@ -410,3 +410,7 @@ details[open] .faq-plus {
   [data-qie-widget] > div[aria-hidden] { bottom: 156px !important; }
   [data-qie-widget] > iframe { bottom: 152px !important; max-height: calc(100vh - 172px) !important; }
 }
+
+/* The QIE ID launcher steps aside while a sign-in dialog or Reown's wallet picker is open. */
+body:has(w3m-modal.open) [data-qie-widget],
+body:has([data-testid="signin-modal"]) [data-qie-widget] { display: none !important; }

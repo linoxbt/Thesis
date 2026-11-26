@@ -5,6 +5,7 @@ import { BaseError, ContractFunctionRevertedError, createWalletClient, custom, g
 import { createSiweMessage, generateSiweNonce } from "viem/siwe";
 import { publicClient } from "./chain";
 import { EXPLORER, qie, REOWN_PROJECT_ID, RPC_URL } from "./config";
+import { connectWallet, disconnectWallet, restoreWallet } from "./appkit";
 import { forgetQieId, qieIdOf } from "./qieid";
 import { QIE_ID_BOUGHT } from "./qieidWidget";
 
@@ -16,7 +17,6 @@ interface Announced {
 declare global {
   interface Window {
     qie?: EIP1193Provider;
-    ethereum?: EIP1193Provider;
   }
 }
 
@@ -26,7 +26,8 @@ function pickProvider(announced: Announced[]): { provider: EIP1193Provider; name
   if (q) return { provider: q.provider, name: "QIE Wallet" };
   if (typeof window !== "undefined" && window.qie) return { provider: window.qie, name: "QIE Wallet" };
   if (announced[0]) return { provider: announced[0].provider, name: announced[0].info.name };
-  if (typeof window !== "undefined" && window.ethereum) return { provider: window.ethereum, name: "Browser wallet" };
+  const eth = typeof window !== "undefined" ? (window.ethereum as unknown as EIP1193Provider | undefined) : undefined;
+  if (eth) return { provider: eth, name: "Browser wallet" };
   return null;
 }
 
@@ -149,31 +150,6 @@ function loadSession(): Session | null {
   }
 }
 
-type WcProvider = EIP1193Provider & { session?: unknown; connect(): Promise<void>; disconnect(): Promise<void>; enable(): Promise<string[]> };
-let wcPromise: Promise<WcProvider> | null = null;
-/** Reown (WalletConnect) provider, loaded on first use: QR code on desktop, wallet apps on phones. */
-function reownProvider(): Promise<WcProvider> {
-  if (!wcPromise) {
-    wcPromise = import("@walletconnect/ethereum-provider").then(
-      ({ EthereumProvider }) =>
-        EthereumProvider.init({
-          projectId: REOWN_PROJECT_ID,
-          optionalChains: [qie.id],
-          rpcMap: { [qie.id]: RPC_URL },
-          showQrModal: true,
-          metadata: {
-            name: "Thesis on QIE",
-            description: "Prove you called it: trade calls as markets on QIE.",
-            url: typeof window !== "undefined" ? window.location.origin : "https://thesis-qie.netlify.app",
-            icons: [typeof window !== "undefined" ? `${window.location.origin}/icon.svg` : ""],
-          },
-        }) as unknown as Promise<WcProvider>,
-    );
-    wcPromise.catch(() => (wcPromise = null));
-  }
-  return wcPromise;
-}
-
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [announced, setAnnounced] = useState<Announced[]>([]);
   const [account, setAccount] = useState<Address | null>(null);
@@ -183,7 +159,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [qieName, setQieName] = useState<string | null>(null);
   const [via, setVia] = useState<Via | null>(null);
-  const [wc, setWc] = useState<WcProvider | null>(null);
+  const [wc, setWc] = useState<EIP1193Provider | null>(null);
   // After Sign in with QIE ID: the wallet linked for signing transactions, once needed.
   const [signer, setSigner] = useState<EIP1193Provider | null>(null);
   const [signInOpen, setSignInOpen] = useState(false);
@@ -242,16 +218,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         .catch(() => {});
     }
     if (s.via === "reown" && REOWN_PROJECT_ID) {
-      reownProvider()
-        .then(async (p) => {
-          if (!p.session) return;
-          const a = (await p.request({ method: "eth_accounts" })) as string[];
-          if (a.some((x) => x.toLowerCase() === s.address.toLowerCase())) {
-            setWc(p);
-            setVia("reown");
-            setAccount(s.address);
-            setSession(s);
-          }
+      restoreWallet(s.address)
+        .then((p) => {
+          if (!p) return;
+          setWc(p);
+          setVia("reown");
+          setAccount(s.address);
+          setSession(s);
         })
         .catch(() => {});
     }
@@ -329,11 +302,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       // 2. Connect.
       let p: EIP1193Provider;
       if (route === "reown") {
-        if (!REOWN_PROJECT_ID) throw new Error("Reown isn't set up on this site yet.");
-        const r = await reownProvider();
-        if (!r.session) await r.connect();
-        setWc(r);
-        p = r;
+        // Reown's wallet picker: installed wallets, QIE Wallet app, QR code, 700+ wallets.
+        const r = await connectWallet();
+        setWc(r.provider);
+        p = r.provider;
       } else {
         if (!picked) throw new Error("No browser wallet found. Install QIE Wallet, or use Reown.");
         p = picked.provider;
@@ -413,7 +385,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const disconnect = useCallback(() => {
     localStorage.removeItem(SESSION_KEY);
-    if (via === "reown" || (via === "qieid" && signer === wc)) void wc?.disconnect().catch(() => {});
+    if (via === "reown" || (via === "qieid" && signer === wc)) void disconnectWallet();
     if (via === "qieid") void fetch(`${QIE_PASS_URL}?action=logout`, { method: "POST", credentials: "same-origin" }).catch(() => {});
     setSession(null);
     setAccount(null);
@@ -423,32 +395,28 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   /**
    * Signed in with QIE ID: sign-in proves the account, but transactions still
-   * need that wallet. Link it the first time one is sent: the browser wallet
-   * if it has the account, else Reown.
+   * need that wallet. Link it the first time one is sent, through Reown's
+   * wallet picker (or the browser wallet if Reown isn't set up).
    */
   const linkSigner = useCallback(async (): Promise<EIP1193Provider> => {
     if (!account) throw new Error("Sign in first.");
     const short = `${account.slice(0, 6)}…${account.slice(-4)}`;
-    if (picked) {
-      const a = ((await picked.provider.request({ method: "eth_requestAccounts" })) as string[]).map((x) => x.toLowerCase());
-      if (a.includes(account.toLowerCase())) {
-        setSigner(picked.provider);
-        return picked.provider;
-      }
-      if (!REOWN_PROJECT_ID) throw new Error(`Your QIE ID is on ${short}. Switch your wallet to that account to continue.`);
-    }
+    let p: EIP1193Provider;
+    let addr: string | undefined;
     if (REOWN_PROJECT_ID) {
-      const r = await reownProvider();
-      if (!r.session) await r.connect();
-      setWc(r);
-      const a = ((await r.request({ method: "eth_accounts" })) as string[]).map((x) => x.toLowerCase());
-      if (a.includes(account.toLowerCase())) {
-        setSigner(r);
-        return r;
-      }
+      const r = await connectWallet();
+      p = r.provider;
+      addr = r.address;
+      setWc(r.provider);
+    } else if (picked) {
+      p = picked.provider;
+      addr = ((await p.request({ method: "eth_requestAccounts" })) as string[])[0];
+    } else throw new Error(`Connect the wallet ${short} to continue.`);
+    if (addr?.toLowerCase() !== account.toLowerCase()) {
       throw new Error(`Your QIE ID is on ${short}, but the connected wallet isn't. Connect that wallet to continue.`);
     }
-    throw new Error(`Connect the wallet ${short} to continue: install QIE Wallet in this browser.`);
+    setSigner(p);
+    return p;
   }, [account, picked]);
 
   const dismiss = useCallback((id: number) => setToasts((t) => t.filter((x) => x.id !== id)), []);
