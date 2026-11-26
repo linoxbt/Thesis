@@ -12,6 +12,9 @@
 //   GET  ?action=nonce              → { nonce } single-use, for the Sign-In with Ethereum message
 //   POST ?action=verify-wallet { message, signature } → { address, verified } for a wallet that just
 //                                     signed that message
+// Leaderboard badges:
+//   GET  ?action=verified&addresses=0x…,0x… → { "0x…": true|false } QIE Pass (identity) verification,
+//                                     at most 50 addresses, cached 10 min
 //
 // The sign-in request ID, the nonce and the session live in sealed cookies
 // (AES-256-GCM, HttpOnly, SameSite=Strict): the browser can't read or choose
@@ -50,6 +53,7 @@ const LIMITS = {
   "start:id-ip": [3, 600], // one IP retrying one QIE ID
   "start:id": [10, 600], // all IPs together on one QIE ID: caps prompt spam to a victim
   "verify:ip": [20, 600],
+  "verified:ip": [30, 600],
 };
 const extraHosts = () =>
   String(process.env.ALLOWED_HOSTS || "")
@@ -360,6 +364,34 @@ async function verifyWallet(event) {
   return reply(200, { address, verified }, used);
 }
 
+/** QIE Pass verification of many addresses (public information), for badges. */
+async function verifiedMany(event) {
+  const list = String(event.queryStringParameters?.addresses ?? "")
+    .split(",")
+    .map((a) => a.trim())
+    .filter(Boolean);
+  if (!list.length || list.length > 50 || !list.every((a) => isAddress(a))) return fail(400, "BAD_REQUEST", "1 to 50 addresses, comma-separated");
+  const addrs = [...new Set(list.map((a) => getAddress(a)))];
+  const now = Date.now();
+  const todo = addrs.filter((a) => !(verifiedCache.get(a) && now - verifiedCache.get(a).at < 10 * 60_000));
+  if (todo.length) {
+    const wait = await overLimit(event, "verified:ip", clientIp(event) ?? "unknown");
+    if (wait) return tooMany(wait);
+    for (let i = 0; i < todo.length; i += 5) {
+      await Promise.all(
+        todo.slice(i, i + 5).map(async (a) => {
+          const r = await qie("GET", `/verification-requests/is-verified?identifier=${encodeURIComponent(a)}`);
+          if (r.ok) verifiedCache.set(a, { verified: r.json.data?.isVerified === true, at: now });
+        }),
+      );
+    }
+    if (verifiedCache.size > 5000) verifiedCache.clear();
+  }
+  const out = {};
+  for (const a of addrs) if (verifiedCache.has(a)) out[a] = verifiedCache.get(a).verified;
+  return reply(200, out, [], { "cache-control": "public, max-age=300" });
+}
+
 export const handler = async (event) => {
   const action = event.queryStringParameters?.action;
   const method = event.httpMethod;
@@ -372,6 +404,7 @@ export const handler = async (event) => {
     if (action === "logout" && method === "POST") return reply(200, { ok: true }, [clear(SESSION_COOKIE), clear(LOGIN_COOKIE), clear(NONCE_COOKIE)]);
     if (action === "nonce" && method === "GET") return nonce();
     if (action === "verify-wallet" && method === "POST") return await verifyWallet(event);
+    if (action === "verified" && method === "GET") return await verifiedMany(event);
     return fail(404, "NOT_FOUND", "Unknown action");
   } catch (e) {
     log("error", action, e?.code || e?.name || "Error", String(e?.message || "").slice(0, 120));

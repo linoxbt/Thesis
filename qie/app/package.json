@@ -20,11 +20,13 @@
     "@netlify/blobs": "^8.2.0",
     "@reown/appkit": "1.8.24",
     "@reown/appkit-adapter-ethers": "1.8.24",
+    "@resvg/resvg-wasm": "^2.6.2",
     "ethers": "6.17.0",
     "lucide-react": "^1.75.0",
     "next": "^16.4.6",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "satori": "^0.12.2",
     "viem": "^2.58.7"
   },
   "devDependencies": {

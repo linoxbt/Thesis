@@ -250,17 +250,16 @@ describe("ThesisCalls: trading", () => {
     await expect(f.calls.connect(f.alice).bet(9, true, 5n * USDC)).to.be.revertedWithCustomError(f.calls, "UnknownCall");
   });
 
-  it("refuses bets on an old print, and the margin grows with its age", async () => {
+  it("takes bets on an old print (no pause), but not on a stale one or right at the strike", async () => {
     const f = await loadFixture(withCall);
     await print(f, 103.5); // 1.43% under $105
-    await f.calls.connect(f.alice).bet(0, true, 5n * USDC); // fresh print: margin 0.25%
-    await time.increase(40 * MIN); // 3 * 60% * sqrt(40min) = 2.0% > 1.43%
-    const st = await f.calls.betStatus(0);
-    expect(st.open).to.equal(false);
-    expect(st.needBps).to.be.greaterThan(st.distBps);
-    await expect(f.calls.connect(f.alice).bet(0, true, 5n * USDC)).to.be.revertedWithCustomError(f.calls, "NearStrike");
-    await time.increase(2 * HOUR);
+    await time.increase(90 * MIN); // a quiet market: the print is 1.5 h old
+    expect((await f.calls.betStatus(0)).open).to.equal(true);
+    await f.calls.connect(f.alice).bet(0, true, 5n * USDC);
+    await time.increase(2 * HOUR); // past maxOracleAge: the oracle may be down
     await expect(f.calls.connect(f.alice).bet(0, false, 5n * USDC)).to.be.revertedWithCustomError(f.calls, "StaleOracle");
+    await print(f, 104.9); // within the 0.25% cutoff
+    await expect(f.calls.connect(f.alice).bet(0, true, 5n * USDC)).to.be.revertedWithCustomError(f.calls, "NearStrike");
     await print(f, 103.5);
     await f.calls.connect(f.alice).bet(0, true, 5n * USDC);
   });
@@ -397,15 +396,21 @@ describe("ThesisCalls: no racing the oracle", () => {
     expect([c.touched, c.settled, c.yesWon, c.touchPrice]).to.deep.equal([true, true, true, PX(105.5)]);
   });
 
-  it("audit C1: a YES bet on a stale print before an oracle catch-up is refused", async () => {
+  it("audit C1: a YES bet on a stale print can't profit: the catch-up round refunds it", async () => {
     // The audit's attack: the last print is hours old, the market is already
     // through the strike, the attacker bets YES at the stale odds.
     const f = await deploy();
     const feed = await f.feed.getAddress();
     const end = (await time.latest()) + 6 * HOUR;
     await f.calls.connect(f.creator).createCall(feed, true, PX(102.5), end, 250n * USDC, "");
-    await time.increase(2 * HOUR - 60); // print almost 2h old: margin 3*60%*sqrt(2h) = 2.6% > 2.5%
-    await expect(f.calls.connect(f.alice).bet(0, true, 10n * USDC)).to.be.revertedWithCustomError(f.calls, "NearStrike");
+    await later(f, 5 * MIN, 100.4); // a quiet round
+    await time.increase(2 * HOUR - 10 * MIN); // the print goes stale; off-chain, SOL runs past $102.50
+    const a0 = await f.token.balanceOf(f.alice.address);
+    await f.calls.connect(f.alice).bet(0, true, 10n * USDC);
+    const hit = await print(f, 102.7); // the oracle catches up
+    await f.calls.proveTouch(0, hit);
+    await f.calls.connect(f.alice).claim(0);
+    expect(await f.token.balanceOf(f.alice.address)).to.equal(a0); // got exactly her 10 back: no profit
   });
 
   it("audit C1: bets placed in the round before the touch (front-running the oracle) are refunded in full", async () => {

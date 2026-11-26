@@ -6,10 +6,11 @@ import { createPortal } from "react-dom";
 import { drawCard, type CardData } from "@/lib/shareCard";
 
 /**
- * Share a call with its card image (drawn in the browser from chain data).
- * Phones open the system share sheet with the PNG attached, so picking X
- * posts the image with the text and link. Desktop gets a dialog: the card,
- * a pre-filled post on X, "Download image" to attach it there, or copy link.
+ * Share a call with its card image. The shared link (/s/<id>) unfurls into
+ * the call's own card on X and elsewhere (netlify/functions/share.mjs).
+ * Phones open the system share sheet with the PNG (drawn in the browser)
+ * attached; desktop gets a dialog: the card, a pre-filled post on X,
+ * "Download image", or copy link.
  */
 export function ShareButton({ id, text, card }: { id: number; text: string; card: CardData }) {
   const [open, setOpen] = useState(false);
@@ -17,7 +18,10 @@ export function ShareButton({ id, text, card }: { id: number; text: string; card
   const [preview, setPreview] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const url = typeof window !== "undefined" ? `${window.location.origin}/t/?id=${id}` : `/t/?id=${id}`;
+  // On the live site, /s/<id> serves this call's own link preview (card image)
+  // and sends people on to /t/?id=<id>; a local server has no such function.
+  const local = typeof window !== "undefined" && /^(localhost|127\.)/.test(window.location.hostname);
+  const url = typeof window === "undefined" ? `/t/?id=${id}` : local ? `${window.location.origin}/t/?id=${id}` : `${window.location.origin}/s/${id}`;
   const key = JSON.stringify(card);
 
   // Draw the card up front: a share sheet must open inside the tap.
@@ -103,7 +107,7 @@ export function ShareButton({ id, text, card }: { id: number; text: string; card
               <div className="mt-3 grid gap-1 text-sm">
                 <a href={intent} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-lg bg-ink px-3 py-2.5 font-medium text-bg hover:opacity-90">
                   <span className="text-[13px] font-bold">𝕏</span> Post on X
-                  <span className="ml-auto text-xs font-normal opacity-70">then attach the image</span>
+                  <span className="ml-auto text-xs font-normal opacity-70">the link shows this card</span>
                 </a>
                 {preview && (
                   <a href={preview} download={`thesis-call-${id}.png`} className="flex items-center gap-2 rounded-lg px-3 py-2.5 hover:bg-panel-2" data-testid="share-download">

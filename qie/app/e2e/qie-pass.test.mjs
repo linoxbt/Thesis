@@ -209,6 +209,21 @@ test("re-audit N5: extra hosts (a custom domain) come from ALLOWED_HOSTS", async
   }
 });
 
+test("leaderboard badges: QIE Pass verification for many addresses, validated and capped", async () => {
+  _internal.resetLimits();
+  const b = browser();
+  const a1 = user.address, a2 = "0x000000000000000000000000000000000000dEaD";
+  const ok = await b.call("verified", { headers: {} , method: "GET" });
+  assert.equal(ok.status, 400);
+  const res = await handler({ httpMethod: "GET", queryStringParameters: { action: "verified", addresses: `${a1},${a2}` }, headers: { "x-nf-client-connection-ip": "203.0.113.200" } });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(JSON.parse(res.body), { [a1]: true, [a2]: true });
+  const tooMany = await handler({ httpMethod: "GET", queryStringParameters: { action: "verified", addresses: Array(51).fill(a1).join(",") }, headers: {} });
+  assert.equal(tooMany.statusCode, 400);
+  const bad = await handler({ httpMethod: "GET", queryStringParameters: { action: "verified", addresses: "0xnope" }, headers: {} });
+  assert.equal(bad.statusCode, 400);
+});
+
 test("audit L1: bad dates, other sites and other chains are refused", async () => {
   const b = browser();
   const bad = await siwe(b);

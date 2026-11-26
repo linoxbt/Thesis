@@ -43,25 +43,56 @@ const byHash = {};
   }
 })(out);
 
-// 2. The function, bundled and zipped.
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qie-fn-"));
-execFileSync(
-  "npx",
-  ["-y", "esbuild@0.25.0", path.join(root, "netlify/functions/qie-pass.mjs"), "--bundle", "--platform=node", "--target=node20", "--format=cjs", `--outfile=${path.join(tmp, "qie-pass.js")}`, "--log-level=warning"],
-  { stdio: "inherit" },
+// 2. The functions, each bundled (wasm and fonts inlined) and zipped. The
+// share function gets the contract address and site URL fixed at bundle time.
+const env = Object.fromEntries(
+  [".env.production", ".env.production.local"]
+    .map((f) => path.join(root, f))
+    .filter((f) => fs.existsSync(f))
+    .flatMap((f) => fs.readFileSync(f, "utf8").split("\n"))
+    .map((l) => l.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/))
+    .filter(Boolean)
+    .map((m) => [m[1], m[2]]),
 );
-execFileSync("zip", ["-qj", path.join(tmp, "qie-pass.zip"), path.join(tmp, "qie-pass.js")]);
-const fnZip = fs.readFileSync(path.join(tmp, "qie-pass.zip"));
-const fnSha = crypto.createHash("sha256").update(fnZip).digest("hex");
+const callsAddress = process.env.NEXT_PUBLIC_CALLS_ADDRESS ?? env.NEXT_PUBLIC_CALLS_ADDRESS;
+if (!callsAddress) throw new Error("NEXT_PUBLIC_CALLS_ADDRESS is not set (.env.production)");
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qie-fn-"));
+export function bundleFunction(name, outDir = tmp, defines = {}) {
+  execFileSync(
+    "npx",
+    [
+      "-y",
+      "esbuild@0.25.0",
+      path.join(root, `netlify/functions/${name}.mjs`),
+      "--bundle",
+      "--platform=node",
+      "--target=node20",
+      "--format=cjs",
+      "--loader:.wasm=binary",
+      "--loader:.woff=binary",
+      ...Object.entries(defines).map(([k, v]) => `--define:process.env.${k}=${JSON.stringify(v)}`),
+      `--outfile=${path.join(outDir, `${name}.js`)}`,
+      "--log-level=warning",
+    ],
+    { stdio: "inherit", cwd: root },
+  );
+  execFileSync("zip", ["-qj", path.join(outDir, `${name}.zip`), path.join(outDir, `${name}.js`)]);
+  return fs.readFileSync(path.join(outDir, `${name}.zip`));
+}
+const fns = {
+  "qie-pass": bundleFunction("qie-pass"),
+  share: bundleFunction("share", tmp, { THESIS_CALLS: callsAddress, THESIS_SITE: process.env.SITE_URL ?? "https://thesis-qie.netlify.app" }),
+};
+const fnSha = Object.fromEntries(Object.entries(fns).map(([n, z]) => [n, crypto.createHash("sha256").update(z).digest("hex")]));
 
 // 3. Create the deploy, upload what Netlify asks for, wait until it's live.
-const deploy = await api("POST", `/sites/${SITE}/deploys`, JSON.stringify({ files, functions: { "qie-pass": fnSha } }), { "Content-Type": "application/json" });
-console.log(`deploy ${deploy.id}: ${Object.keys(files).length} files, ${deploy.required?.length ?? 0} to upload, function ${deploy.required_functions?.length ? "to upload" : "unchanged"}`);
+const deploy = await api("POST", `/sites/${SITE}/deploys`, JSON.stringify({ files, functions: fnSha }), { "Content-Type": "application/json" });
+console.log(`deploy ${deploy.id}: ${Object.keys(files).length} files, ${deploy.required?.length ?? 0} to upload, functions to upload: ${deploy.required_functions?.length ?? 0}`);
 for (const sha of deploy.required ?? []) {
   await api("PUT", `/deploys/${deploy.id}/files${encodeURI(Object.keys(files).find((k) => files[k] === sha))}`, fs.readFileSync(byHash[sha]), { "Content-Type": "application/octet-stream" });
 }
-if (deploy.required_functions?.includes(fnSha)) {
-  await api("PUT", `/deploys/${deploy.id}/functions/qie-pass?runtime=js`, fnZip, { "Content-Type": "application/octet-stream" });
+for (const [name, sha] of Object.entries(fnSha)) {
+  if (deploy.required_functions?.includes(sha)) await api("PUT", `/deploys/${deploy.id}/functions/${name}?runtime=js`, fns[name], { "Content-Type": "application/octet-stream" });
 }
 for (let i = 0; i < 60; i++) {
   const d = await api("GET", `/deploys/${deploy.id}`);

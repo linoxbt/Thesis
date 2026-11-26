@@ -235,7 +235,7 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
             ? "Trading is paused on Thesis right now."
             : params && gate.oracleAge > params.maxOracleAge
               ? `Betting is paused: the latest oracle price is ${Math.round(gate.oracleAge / 60)} min old, too old to bet on. It reopens when the oracle prints again.`
-              : `Betting is paused: the target is ${pct(gate.distBps, 2)} from the latest oracle price, which is ${Math.round(gate.oracleAge / 60)} min old, and needs to be ${pct(gate.needBps, 2)} away. It reopens when the oracle prints again.`}
+              : `Betting is paused: the latest oracle price is within ${pct(gate.needBps, 2)} of the target. It reopens when the oracle prints a price further away (or the touch settles it).`}
         </p>
       ) : null}
       <button

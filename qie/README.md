@@ -25,7 +25,7 @@ version's AMM.
 2. **Back or challenge.** `bet(id, yes, amount)` in QUSDC. A 2% fee (fixed per
    call): half to the call's creator, half to the treasury. Winners split the
    whole pot. Betting closes in the last 10% of the window, and pauses while
-   the target is within z·σ·√age of the latest print.
+   the latest print is within 0.25% of the target (or over 3 hours old).
 3. **Settle from the oracle.** The first QIE Oracle round inside the window
    at or past the target settles YES. The contract scans the rounds itself, in
    order, before every bet, proof and NO settlement, so nobody can bet after a

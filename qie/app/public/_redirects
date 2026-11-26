@@ -1,0 +1,2 @@
+# Per-call link previews (netlify/functions/share.mjs).
+/s/:id  /.netlify/functions/share?id=:id  200

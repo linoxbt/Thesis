@@ -33,9 +33,9 @@ interface IPriceFeed {
 ///
 /// Oracle rounds arrive irregularly (minutes to hours apart), so the latest
 /// print can lag the market. Three rules keep that lag from being traded:
-/// - posting and betting need the strike at least z*sigma*sqrt(age) away from
-///   the latest print (age = how old it is), so the market can't already be
-///   through it; opening odds are priced over the unseen time since that print;
+/// - posting needs the strike at least z*sigma*sqrt(age) away from the latest
+///   print (age = how old it is), so the market can't already be through it,
+///   and opening odds are priced over the unseen time since that print;
 /// - every bet is tagged with the oracle round that was latest when it was
 ///   placed; if the very next round is the one that touches, those bets were
 ///   placed on a move the oracle hadn't printed yet, so they are refunded in
@@ -429,8 +429,8 @@ contract ThesisCalls is ReentrancyGuard {
     /// split between the call's creator and the treasury; the rest joins the pool.
     /// Before taking it, every oracle round since the last check is scanned: if
     /// one already touched the strike, the call settles YES and nothing is taken.
-    /// Betting closes at `closeAt`, while the latest print is too old, and while
-    /// the strike is within z*sigma*sqrt(age) (at least betCutoffBps) of it.
+    /// Betting closes at `closeAt`, while the latest print is too old
+    /// (maxOracleAge), and while the strike is within betCutoffBps of it.
     function bet(uint256 id, bool yes, uint256 amount) external nonReentrant whenNotPaused {
         Call storage c = _call(id);
         if (c.settled || block.timestamp >= c.closeAt) revert CallClosed();
@@ -487,8 +487,11 @@ contract ThesisCalls is ReentrancyGuard {
         if (last <= 0 || updatedAt > block.timestamp) revert BadPrice();
         uint256 age = block.timestamp - updatedAt;
         if (age > params.maxOracleAge) revert StaleOracle();
-        needBps = TouchMath.staleMoveBps(feeds[c.feed].volBps, age, params.staleZTenths);
-        if (needBps < params.betCutoffBps) needBps = params.betCutoffBps;
+        // No age-scaled margin for bets: a bet on a move the oracle hasn't
+        // printed yet is refunded when the next round shows it (see Pending),
+        // so a stale print can't be traded. Posting keeps the margin (it sets
+        // the opening odds and the creator's skill).
+        needBps = params.betCutoffBps;
         distBps = TouchMath.distanceBps(uint256(last), uint256(c.strike));
     }
 
@@ -778,8 +781,7 @@ contract ThesisCalls is ReentrancyGuard {
         oracleAge = updatedAt > block.timestamp ? 0 : block.timestamp - updatedAt;
         // (Indicative: bet() also checks unscanned rounds first.)
         if (last > 0) distBps = TouchMath.distanceBps(uint256(last), uint256(c.strike));
-        needBps = TouchMath.staleMoveBps(feeds[c.feed].volBps, oracleAge, params.staleZTenths);
-        if (needBps < params.betCutoffBps) needBps = params.betCutoffBps;
+        needBps = params.betCutoffBps;
         open = !paused && !c.settled && block.timestamp < c.closeAt && oracleAge <= params.maxOracleAge && last > 0
             && distBps >= needBps;
     }

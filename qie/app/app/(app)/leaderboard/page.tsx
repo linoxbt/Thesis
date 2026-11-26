@@ -1,12 +1,62 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { ShieldCheck } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import type { Address } from "viem";
 import { Avatar } from "@/components/ThesisCard";
 import { Who } from "@/components/Who";
 import { useData, useNow } from "@/lib/data";
 import { fmtSkill, pct } from "@/lib/format";
+import { QIE_PASS_URL } from "@/lib/wallet";
+
+const VERIFIED_KEY = "thesis-qiepass-verified";
+const VERIFIED_TTL = 3600_000;
+
+/**
+ * QIE Pass (identity) verification for creators, via our server function,
+ * cached in this browser for an hour. Null while unknown or unavailable.
+ */
+function useVerified(addresses: string[]): Record<string, boolean> | null {
+  const [map, setMap] = useState<Record<string, boolean> | null>(null);
+  const key = addresses.map((a) => a.toLowerCase()).sort().join(",");
+  useEffect(() => {
+    if (!key) return setMap({});
+    let on = true;
+    let cache: Record<string, [boolean, number]> = {};
+    try {
+      cache = JSON.parse(localStorage.getItem(VERIFIED_KEY) ?? "{}");
+    } catch {}
+    const now = Date.now();
+    const known: Record<string, boolean> = {};
+    const todo: string[] = [];
+    for (const a of key.split(",")) {
+      const hit = cache[a];
+      if (hit && now - hit[1] < VERIFIED_TTL) known[a] = hit[0];
+      else todo.push(a);
+    }
+    if (!todo.length) return setMap(known);
+    (async () => {
+      for (let i = 0; i < todo.length; i += 50) {
+        const r = await fetch(`${QIE_PASS_URL}?action=verified&addresses=${todo.slice(i, i + 50).join(",")}`);
+        if (!r.ok) throw new Error(String(r.status));
+        const got = (await r.json()) as Record<string, boolean>;
+        for (const [a, v] of Object.entries(got)) {
+          known[a.toLowerCase()] = v;
+          cache[a.toLowerCase()] = [v, now];
+        }
+      }
+      try {
+        localStorage.setItem(VERIFIED_KEY, JSON.stringify(cache));
+      } catch {}
+      if (on) setMap({ ...known });
+    })().catch(() => on && setMap(Object.keys(known).length ? known : null));
+    return () => {
+      on = false;
+    };
+  }, [key]);
+  return map;
+}
 
 interface Row {
   creator: Address;
@@ -69,6 +119,14 @@ export default function LeaderboardPage() {
     return [...by.values()].map((r) => ({ ...r, avg_open_bps: avgOpen(r.creator, r.ids) })).sort(byRank);
   }, [period, creators, calls, events.settlements, now]);
 
+  const verified = useVerified(rows.map((r) => r.creator));
+  const ranked = rows.filter((r) => r.calls >= MIN_CALLS);
+  const verifiedRanked = verified ? ranked.filter((r) => verified[r.creator.toLowerCase()]) : [];
+  // Throwaway wallets can't be identity-verified: once there are enough
+  // verified creators, the board shows them by default.
+  const [only, setOnly] = useState<boolean | null>(null);
+  const verifiedOnly = only ?? verifiedRanked.length >= 3;
+  const shown = verifiedOnly && verified ? rows.filter((r) => verified[r.creator.toLowerCase()]) : rows;
   const loaded = ready && historyReady;
 
   return (
@@ -85,6 +143,17 @@ export default function LeaderboardPage() {
             {params ? (Number(params.minScoredVolume) / 1e6).toFixed(0) : "5"} QUSDC on it.
           </p>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+        {verified && (
+          <button
+            onClick={() => setOnly(!verifiedOnly)}
+            aria-pressed={verifiedOnly}
+            className={"inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm " + (verifiedOnly ? "border-yes/40 bg-yes/10 text-yes" : "border-line text-muted hover:text-ink")}
+            data-testid="leaderboard-verified"
+          >
+            <ShieldCheck size={14} /> Verified only
+          </button>
+        )}
         <div className="grid grid-cols-2 gap-1 rounded-full border border-line bg-bg p-1 text-sm" role="tablist" aria-label="Period">
           {(["week", "all"] as const).map((p) => (
             <button
@@ -99,15 +168,20 @@ export default function LeaderboardPage() {
             </button>
           ))}
         </div>
+        </div>
       </div>
 
       {!loaded ? (
         <p className="text-sm text-muted">Reading from QIE…</p>
       ) : (
         <section className="panel overflow-x-auto p-0" data-testid="leaderboard">
-          {rows.length === 0 ? (
+          {shown.length === 0 ? (
             <div className="p-6 text-sm text-muted">
-              <p>No settled calls {period === "week" ? "this week" : "yet"}. Calls are scored when they settle.</p>
+              <p>
+                {verifiedOnly && rows.length > 0
+                  ? "No QIE Pass verified creators here yet."
+                  : `No settled calls ${period === "week" ? "this week" : "yet"}. Calls are scored when they settle.`}
+              </p>
               <Link href="/new/" className="btn btn-primary mt-4 inline-flex text-sm">
                 Post a call
               </Link>
@@ -125,13 +199,14 @@ export default function LeaderboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r, i) => (
+                {shown.map((r, i) => (
                   <tr key={r.creator} className={"border-b border-line last:border-0" + (r.calls < MIN_CALLS ? " opacity-60" : "")} data-testid="leaderboard-row">
                     <td className="px-5 py-3 text-muted">{r.calls >= MIN_CALLS ? i + 1 : "–"}</td>
                     <td className="py-3">
                       <Link href={`/u/?a=${r.creator}`} className="flex items-center gap-2 hover:text-ink">
                         <Avatar addr={r.creator} size={26} />
                         <Who addr={r.creator} className="text-ink" />
+                        {verified?.[r.creator.toLowerCase()] && <ShieldCheck size={13} className="text-yes" aria-label="QIE Pass verified" />}
                       </Link>
                     </td>
                     <td className={"py-3 text-right text-base " + (r.score_bps >= 0 ? "text-yes" : "text-bad")}>{fmtSkill(Math.round(perCall(r)))}</td>
@@ -150,7 +225,8 @@ export default function LeaderboardPage() {
       <p className="text-[11px] leading-relaxed text-faint">
         A call can&apos;t open with its target inside the move the oracle may not have printed yet (the older the latest oracle
         price, the further away the target must be), and a call that touches in the first oracle round after it's posted is voided. Scores are stored
-        onchain by the contract. Rows marked – have fewer than {MIN_CALLS} scored calls. Raw numbers:{" "}
+        onchain by the contract. Rows marked – have fewer than {MIN_CALLS} scored calls. The shield marks creators whose identity is
+        verified with QIE Pass: throwaway wallets can&apos;t be, so &quot;Verified only&quot; can&apos;t be gamed with them. Raw numbers:{" "}
         <Link href="/stats/" className="underline">
           Stats
         </Link>
