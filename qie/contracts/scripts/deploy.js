@@ -30,6 +30,9 @@ async function main() {
   const address = await calls.getAddress();
   console.log("ThesisCalls", address);
 
+  // The QUSDC limits are in 6-decimal units: refuse any other token.
+  const dec = await (await ethers.getContractAt(["function decimals() view returns (uint8)"], stake)).decimals();
+  if (Number(dec) !== 6) throw new Error(`stake token ${stake} has ${dec} decimals; the QUSDC limits need 6`);
   await (await calls.setStakeToken(stake, STAKE_LIMITS.QUSDC)).wait();
   console.log("stake token QUSDC", stake);
   await (await calls.setStakeToken(NATIVE, STAKE_LIMITS.QIE)).wait();

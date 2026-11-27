@@ -4,6 +4,7 @@ pragma solidity 0.8.24;
 interface IThesisCalls {
     function bet(uint256 id, bool yes, uint256 amount) external payable;
     function claim(uint256 id) external returns (uint256);
+    function claimTo(uint256 id, address to) external returns (uint256);
     function claimCreatorFees(address token) external returns (uint256);
 }
 
@@ -37,6 +38,10 @@ contract QieBettor {
 
     function claim(uint256 id) external returns (uint256) {
         return calls.claim(id);
+    }
+
+    function claimTo(uint256 id, address to) external returns (uint256) {
+        return calls.claimTo(id, to);
     }
 
     receive() external payable {

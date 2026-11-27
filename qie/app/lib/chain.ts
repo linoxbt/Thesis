@@ -47,6 +47,8 @@ export interface Call {
   openRound: bigint;
   voidAfter: number;
   minScored: bigint;
+  /** Smallest bet on this call, fixed at posting. */
+  minStake: bigint;
   checkedRound: bigint;
   scanDone: boolean;
   yesPool: bigint;
@@ -199,6 +201,7 @@ function toCall(id: number, c: RawCall, text: string): Call {
     openRound: c.openRound,
     voidAfter: Number(c.voidAfter),
     minScored: c.minScored,
+    minStake: c.minStake,
     checkedRound: c.checkedRound,
     scanDone: c.scanDone,
     yesPool: c.yesPool,

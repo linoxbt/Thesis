@@ -80,7 +80,7 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
     };
   }, [id, yes, micro, c?.yesPool, c?.noPool]);
 
-  const minStake = tok.minStake;
+  const minStake = c?.minStake ?? tok.minStake;
   const needsApprove = !tok.native && !!micro && !!bal && bal.allowance < micro;
   const short = !!micro && !!bal && bal.stake < micro;
   const tooSmall = !!micro && micro < minStake;

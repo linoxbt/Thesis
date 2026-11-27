@@ -1051,6 +1051,54 @@ export const THESIS_CALLS_ABI = [
   {
     "inputs": [
       {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "to",
+        "type": "address"
+      }
+    ],
+    "name": "claimCreatorFeesTo",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "id",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "to",
+        "type": "address"
+      }
+    ],
+    "name": "claimTo",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "id",
         "type": "uint256"
@@ -1418,6 +1466,11 @@ export const THESIS_CALLS_ABI = [
             "type": "uint128"
           },
           {
+            "internalType": "uint128",
+            "name": "minStake",
+            "type": "uint128"
+          },
+          {
             "internalType": "uint256",
             "name": "yesPool",
             "type": "uint256"
@@ -1596,6 +1649,11 @@ export const THESIS_CALLS_ABI = [
           {
             "internalType": "uint128",
             "name": "minScored",
+            "type": "uint128"
+          },
+          {
+            "internalType": "uint128",
+            "name": "minStake",
             "type": "uint128"
           },
           {

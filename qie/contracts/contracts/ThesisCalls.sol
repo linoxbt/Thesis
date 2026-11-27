@@ -147,6 +147,7 @@ contract ThesisCalls is ReentrancyGuard {
         uint80 openRound; // latest round when the call was posted
         uint32 voidAfter; // fixed at posting
         uint128 minScored; // outside volume needed to score, fixed at posting
+        uint128 minStake; // smallest bet, fixed at posting
         uint256 yesPool; // net of fees
         uint256 noPool;
         uint256 volume; // gross bets
@@ -310,7 +311,9 @@ contract ThesisCalls is ReentrancyGuard {
     }
 
     /// @notice Add a stake token (NATIVE for QIE), or change its amounts or
-    /// enable it. Calls already open keep their token and scoring threshold.
+    /// enable it. Calls already open keep their token, minimum bet and scoring
+    /// threshold. Only plain tokens: what arrives must equal what was sent (no
+    /// fee-on-transfer or rebasing tokens).
     function setStakeToken(address token, StakeToken calldata t) external onlyOwner {
         if (
             t.minSeed == 0 || t.minSeed > t.maxSeed || t.minStake == 0 || t.minScoredVolume == 0
@@ -394,8 +397,9 @@ contract ThesisCalls is ReentrancyGuard {
         }
     }
 
-    /// @dev Pays `amount` of `token` to `to`. Every payout goes to the caller
-    /// (or the treasury), so a recipient that refuses QIE only blocks itself.
+    /// @dev Pays `amount` of `token` to `to`. Every payout goes where its owner
+    /// asked (the caller, an address the caller named, or the treasury), so a
+    /// recipient that refuses QIE only blocks its own payout.
     function _pay(address token, address to, uint256 amount) internal {
         if (token == NATIVE) {
             bool ok;
@@ -461,6 +465,7 @@ contract ThesisCalls is ReentrancyGuard {
         c.openRound = roundId;
         c.voidAfter = p.voidAfter;
         c.minScored = t.minScoredVolume;
+        c.minStake = t.minStake;
         c.yesPool = yes;
         c.noPool = no;
         if (bytes(text).length > 0) callText[id] = text;
@@ -507,7 +512,7 @@ contract ThesisCalls is ReentrancyGuard {
     function bet(uint256 id, bool yes, uint256 amount) external payable nonReentrant whenNotPaused {
         Call storage c = _call(id);
         if (c.settled || block.timestamp >= c.closeAt) revert CallClosed();
-        if (amount < stakeTokens[c.token].minStake) revert StakeTooSmall();
+        if (amount < c.minStake) revert StakeTooSmall();
         if (amount > type(uint128).max) revert BadValue();
         bool caughtUp = _scan(id, c, SCAN_PER_TX);
         if (c.settled) {
@@ -747,22 +752,42 @@ contract ThesisCalls is ReentrancyGuard {
     /// @notice Winners take the whole pot pro rata to their winning stake;
     /// refunded stakes (void call, or placed right before the touch) come back.
     function claim(uint256 id) external nonReentrant returns (uint256 amount) {
+        return _claim(id, msg.sender);
+    }
+
+    /// @notice Like `claim`, paid to `to` (for a wallet that can't receive QIE itself).
+    function claimTo(uint256 id, address to) external nonReentrant returns (uint256 amount) {
+        if (to == address(0)) revert BadParams();
+        return _claim(id, to);
+    }
+
+    function _claim(uint256 id, address to) internal returns (uint256 amount) {
         Call storage c = _call(id);
         if (!c.settled) revert NotSettled();
         if (claimed[id][msg.sender]) revert NothingToClaim();
         amount = _claimable(id, c, msg.sender);
         if (amount == 0) revert NothingToClaim();
         claimed[id][msg.sender] = true;
-        _pay(c.token, msg.sender, amount);
+        _pay(c.token, to, amount);
         emit Claimed(id, msg.sender, amount);
     }
 
     /// @notice Withdraw your creator fees in `token` (NATIVE for QIE).
     function claimCreatorFees(address token) external nonReentrant returns (uint256 amount) {
+        return _claimCreatorFees(token, msg.sender);
+    }
+
+    /// @notice Like `claimCreatorFees`, paid to `to`.
+    function claimCreatorFeesTo(address token, address to) external nonReentrant returns (uint256 amount) {
+        if (to == address(0)) revert BadParams();
+        return _claimCreatorFees(token, to);
+    }
+
+    function _claimCreatorFees(address token, address to) internal returns (uint256 amount) {
         amount = creatorFeesOwed[msg.sender][token];
         if (amount == 0) revert NothingToClaim();
         creatorFeesOwed[msg.sender][token] = 0;
-        _pay(token, msg.sender, amount);
+        _pay(token, to, amount);
         emit CreatorFeesClaimed(msg.sender, token, amount);
     }
 

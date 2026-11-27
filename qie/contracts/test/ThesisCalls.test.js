@@ -683,11 +683,35 @@ describe("ThesisCalls: QIE stakes", () => {
     await w.setMode(1, 0); // refuse
     await expect(w.claim(0)).to.be.revertedWithCustomError(f.calls, "PayoutFailed");
     await expect(f.calls.connect(f.alice).claim(0)).to.not.be.reverted; // others are unaffected
+    // It can have its winnings paid elsewhere instead (here: back to accepting itself, below).
     await w.setMode(2, 0); // try to claim again while being paid
     await expect(w.claim(0)).to.changeEtherBalances([wAddr, addr], [owed, -owed]);
     expect(await w.reentered()).to.equal(true);
     expect(await w.reentryFailed()).to.equal(true);
     await expect(w.claim(0)).to.be.revertedWithCustomError(f.calls, "NothingToClaim");
+  });
+
+  it("a wallet that can't receive QIE can have its winnings and fees paid to another address", async () => {
+    const f = await loadFixture(withQieCall);
+    const w = await (await ethers.getContractFactory("QieBettor")).deploy(await f.calls.getAddress());
+    await w.bet(0, true, { value: 10n * QIE });
+    await later(f, 10 * MIN, 100.5);
+    await f.calls.proveTouch(0, await later(f, HOUR, 106));
+    const owed = await f.calls.claimable(0, await w.getAddress());
+    await w.setMode(1, 0); // refuses QIE
+    await expect(w.claimTo(0, f.carol.address)).to.changeEtherBalance(f.carol, owed);
+    await expect(w.claimTo(0, f.carol.address)).to.be.revertedWithCustomError(f.calls, "NothingToClaim");
+    await expect(f.calls.connect(f.alice).claimTo(0, ethers.ZeroAddress)).to.be.revertedWithCustomError(f.calls, "BadParams");
+    // Creator fees too.
+    const fees = await f.calls.creatorFeesOwed(f.creator.address, NATIVE);
+    expect(fees).to.be.greaterThan(0n);
+    await expect(f.calls.connect(f.creator).claimCreatorFeesTo(NATIVE, f.bob.address)).to.changeEtherBalance(f.bob, fees);
+  });
+
+  it("each call keeps the minimum bet it was posted with", async () => {
+    const f = await loadFixture(withQieCall);
+    await f.calls.setStakeToken(NATIVE, { ...QIE_LIMITS, minStake: 100n * QIE });
+    await f.calls.connect(f.alice).bet(0, true, 3n * QIE, { value: 3n * QIE }); // still 3 QIE on this call
   });
 
   it("a QIE bet that arrives after an unproven touch isn't taken, and its QIE comes back", async () => {
