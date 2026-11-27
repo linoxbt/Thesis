@@ -15,7 +15,7 @@ export interface Position {
   tpMovePct: number;
 }
 
-export function sideOf(direction: "above" | "below"): Side {
+function sideOf(direction: "above" | "below"): Side {
   return direction === "above" ? "long" : "short";
 }
 

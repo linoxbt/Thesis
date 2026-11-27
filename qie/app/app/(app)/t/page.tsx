@@ -9,7 +9,7 @@ import { LoadState } from "@/components/LoadState";
 import { MarketPanel } from "@/components/MarketPanel";
 import { PositionLevels, SidePill, usdPx } from "@/components/Position";
 import { ShareButton } from "@/components/ShareButton";
-import { Avatar, pairOf, positionOfCall, StateBadge } from "@/components/ThesisCard";
+import { Avatar, pairOf, positionOfCall, ScoredChip, StateBadge } from "@/components/ThesisCard";
 import { THESIS_CALLS_ABI } from "@/lib/abi";
 import { publicClient, readRounds } from "@/lib/chain";
 import { CALLS_ADDRESS, explorerAddress, explorerTx } from "@/lib/config";
@@ -100,7 +100,13 @@ function TradeView() {
       .finally(() => setClaiming(false));
   };
 
-  const shareText = `${pos.side === "long" ? "Long" : "Short"} ${asset}: take profit ${usdPx(pos.tp)} by ${when(c.end)}. The crowd says ${pct(impliedYesBps(c), 0)}.${c.text ? ` ${c.text}` : ""}\nBack it or challenge it on QIE:`;
+  // An X post is at most 280 characters, a link counting as 23 (plus a space):
+  // the reason is cut to fit.
+  const shareHead = `${pos.side === "long" ? "Long" : "Short"} ${asset}: take profit ${usdPx(pos.tp)} by ${when(c.end)}. The crowd says ${pct(impliedYesBps(c), 0)}.`;
+  const shareTail = "\nBack it or challenge it on QIE:";
+  const room = 280 - 24 - Array.from(shareHead + shareTail).length - 1;
+  const reason = c.text ? (Array.from(c.text).length <= room ? c.text : Array.from(c.text).slice(0, Math.max(0, room - 1)).join("").trimEnd() + "…") : "";
+  const shareText = `${shareHead}${reason ? ` ${reason}` : ""}${shareTail}`;
 
   return (
     <div className="space-y-5">
@@ -123,8 +129,17 @@ function TradeView() {
               )}
             </span>
           </Link>
-          <StateBadge touched={c.touched} settled={c.settled} yesWon={c.yesWon} voided={c.voided} />
+          <span className="flex items-center gap-1.5">
+            <ScoredChip scored={c.scored} />
+            <StateBadge touched={c.touched} settled={c.settled} yesWon={c.yesWon} voided={c.voided} />
+          </span>
         </div>
+        {!c.scored && (
+          <p className="mt-3 text-xs text-faint" data-testid="practice-note">
+            Practice call: seeded below the scoring size ({amtSym(tok.minScoredSeed, tok, 0)}), so it trades and settles like any other but
+            doesn&apos;t count toward the creator&apos;s skill. That was fixed when it was posted.
+          </p>
+        )}
         <span className="label mt-6">The trade</span>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <SidePill p={pos} size="lg" />

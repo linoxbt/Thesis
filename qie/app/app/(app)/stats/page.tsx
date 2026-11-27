@@ -99,7 +99,7 @@ export default function StatsPage() {
         <Tile label="Trading wallets" value={String(wallets.size)} />
         <Tile label="Trades" value={String(events.trades.length)} />
         <Tile label="Volume" value={volume} sub="bet (seeds not included)" />
-        <Tile label="Fees" value={fees} sub={`${pct(creatorShareBps, 0)} to creators`} />
+        <Tile label="Fees" value={fees} sub={`${pct(creatorShareBps, 0)} to creators; includes fees still held until their next oracle round`} />
         <Tile label="Calls posted" value={String(calls.length)} sub={`by ${creators.size} creator${creators.size === 1 ? "" : "s"}`} />
         <Tile label="In open pots" value={open} />
         <Tile label="Paid out" value={paid} sub="claimed" />

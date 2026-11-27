@@ -34,14 +34,21 @@ export function MarketPanel({ c, feed }: { c: Call; feed: Feed | undefined }) {
   const yes = impliedYesBps(c);
   const touch = events.touches.find((t) => t.id === c.id);
 
+  // The account the latest read is for: a read that finishes after a switch or
+  // sign-out is dropped, so another account's position never shows.
+  const forAccount = useRef(w.account);
+  forAccount.current = w.account;
   const loadPos = useCallback(async () => {
-    if (!w.account) return setPos(null);
+    const who = w.account;
+    if (!who) return setPos(null);
     try {
-      setPos(await readPosition(c.id, w.account));
+      const p = await readPosition(c.id, who);
+      if (forAccount.current === who) setPos(p);
     } catch {
       /* RPC hiccup: keep the last numbers, retry on the next tick */
     }
   }, [w.account, c.id]);
+  useEffect(() => setPos(null), [w.account]);
   useEffect(() => {
     void loadPos();
     const t = setInterval(() => document.visibilityState === "visible" && void loadPos(), 15_000);

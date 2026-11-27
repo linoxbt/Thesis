@@ -98,7 +98,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       if (!wantHistory.current) return;
       // History: from the last read block (a few blocks back, deduplicated) to the head.
       // Progress is kept range by range, so a flaky node only delays the rest.
-      const head = await publicClient.getBlockNumber();
+      const head = await publicClient.getBlockNumber().catch((e) => {
+        setState((s) => ({ ...s, historyError: "Couldn't reach QIE to read the history; retrying." }));
+        throw e;
+      });
       const from = cursor.current > DEPLOY_BLOCK + 5n ? cursor.current - 5n : DEPLOY_BLOCK;
       const next = cloneEvents(events.current);
       const applied = await readEvents(from, head, next, seen.current);
@@ -146,11 +149,20 @@ export function DataProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refresh();
     const t = setInterval(() => document.visibilityState === "visible" && void refresh(), 15_000);
-    return () => clearInterval(t);
+    // Back to a hidden tab: fresh data now, not up to 15 s later.
+    const onVisible = () => document.visibilityState === "visible" && void refresh();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [refresh]);
-  // Leaving the docs for a page with history: read it now, not in 15 s.
+  // Only when going from the docs (no history) to a page with history: read it
+  // now, not in 15 s. (Not on every navigation: the timer covers the rest.)
+  const hadHistory = useRef(wantHistory.current);
   useEffect(() => {
-    if (wantHistory.current) void refresh();
+    if (wantHistory.current && !hadHistory.current) void refresh();
+    hadHistory.current = wantHistory.current;
   }, [pathname, refresh]);
 
   const value = useMemo<Data>(() => {

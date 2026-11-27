@@ -46,6 +46,7 @@ export function SignInDialog() {
 
   const close = useCallback(() => {
     gen.current += 1;
+    walletGen.current += 1; // a wallet signature approved after closing signs no one in
     if (flow.step === "code" || flow.step === "starting") void post("cancel").catch(() => {});
     setFlow({ step: "pick" });
     w.closeSignIn();
@@ -183,10 +184,11 @@ export function SignInDialog() {
     try {
       await w.signIn(via, () => mine !== walletGen.current);
     } catch (e) {
+      if (mine !== walletGen.current) return; // cancelled, or a newer attempt owns the dialog now
       const m = explain(e);
       setErr(/reset|closed|cancel/i.test(m) ? null : m);
     } finally {
-      setBusy(null);
+      if (mine === walletGen.current) setBusy(null);
     }
   };
   // Wallet: Reown's picker (QIE Wallet first, plus every installed wallet); the browser wallet if Reown isn't set up.

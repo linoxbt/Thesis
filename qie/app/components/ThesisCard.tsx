@@ -59,6 +59,19 @@ export function positionOfCall(c: Call, feed: Feed | undefined) {
 
 export const pairOf = (feed: Feed | undefined) => `${feed?.asset ?? "…"} / USDT`;
 
+/** Whether a call counts toward its creator's skill (fixed when it was posted). */
+export function ScoredChip({ scored }: { scored: boolean }) {
+  return (
+    <span
+      className={"num rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide " + (scored ? "bg-brand/10 text-brand" : "bg-panel-3 text-faint")}
+      title={scored ? "Counts toward the creator's skill score" : "Practice call: seeded below the scoring size, so it doesn't count toward skill"}
+      data-testid={scored ? "chip-scored" : "chip-practice"}
+    >
+      {scored ? "scored" : "practice"}
+    </span>
+  );
+}
+
 export function ThesisCard({ c, feed }: { c: Call; feed: Feed | undefined }) {
   const now = useNow(1000);
   const { tradesOf, tokenOf } = useData();
@@ -78,6 +91,7 @@ export function ThesisCard({ c, feed }: { c: Call; feed: Feed | undefined }) {
           <Who addr={c.creator} className="truncate" />
         </Link>
         <div className="flex shrink-0 items-center gap-1.5">
+          <ScoredChip scored={c.scored} />
           <StateBadge touched={c.touched} settled={c.settled} yesWon={c.yesWon} voided={c.voided} />
         </div>
       </div>

@@ -332,11 +332,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback<WalletState["signIn"]>(
     async (route, cancelled = () => false) => {
-      const bail = () => {
-        if (!cancelled()) return false;
-        if (route === "reown") void disconnectWallet();
-        return true;
-      };
+      // Cancelled: sign no one in. (The connection is left alone: a newer
+      // attempt may be using it, and a fresh one replaces it anyway.)
+      const bail = () => cancelled();
       // 2. Connect.
       let p: EIP1193Provider;
       if (route === "reown") {
@@ -513,6 +511,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           if (e instanceof WaitForTransactionReceiptTimeoutError) {
             // Not failed: it may still be mined. Say so, so nobody sends it twice.
             set({ status: "pending", error: "Still pending after 3 minutes. Check the explorer before sending it again." });
+            // Keep watching: the toast updates when it lands (or fails).
+            void publicClient
+              .waitForTransactionReceipt({ hash, timeout: 30 * 60_000 })
+              .then((r) => set(r.status === "success" ? { status: "confirmed", error: undefined } : { status: "failed", error: "The transaction reverted." }))
+              .catch(() => {});
             throw new Error("Your transaction is still pending: check the explorer before sending another.");
           }
           throw e;

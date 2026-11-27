@@ -172,8 +172,12 @@ function WalletPanel({ who }: { who: Address }) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, run] = useOnce();
   const key = stakeTokens.map((t) => t.address).join(",");
+  const forWho = useRef(who);
+  forWho.current = who;
+  useEffect(() => (setBals(null), setGas(null)), [who]);
   const load = useCallback(async () => {
     if (!stakeTokens.length) return;
+    const asked = who;
     const got = await Promise.all(
       stakeTokens.map(async (t) => {
         const [b, owed] = await Promise.all([
@@ -183,6 +187,7 @@ function WalletPanel({ who }: { who: Address }) {
         return { token: t, stake: b.stake, owed, gas: b.gas };
       }),
     );
+    if (forWho.current !== asked) return; // the wallet changed meanwhile
     setBals(got);
     setGas(got[0]?.gas ?? null);
   }, [who, key]); // eslint-disable-line react-hooks/exhaustive-deps

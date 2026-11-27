@@ -9,7 +9,7 @@ import Link from "next/link";
  * Geometry (48 grid): bar 38x7 at y=7, stem 9 wide, dot r=4.5 at (24,16),
  * 2.5 clearance all round.
  */
-export const MARK_PATHS = {
+const MARK_PATHS = {
   bar: "M5 8.5A1.5 1.5 0 0 1 6.5 7H41.5A1.5 1.5 0 0 1 43 8.5V12.5A1.5 1.5 0 0 1 41.5 14H30.708A7 7 0 0 0 17.292 14H6.5A1.5 1.5 0 0 1 5 12.5Z",
   stem: "M19.5 21.362A7 7 0 0 0 28.5 21.362V41.5A1.5 1.5 0 0 1 27 43H21A1.5 1.5 0 0 1 19.5 41.5Z",
   dot: { cx: 24, cy: 16, r: 4.5 },

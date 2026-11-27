@@ -19,7 +19,7 @@ function resolve(p: ThemePref): "light" | "dark" {
   return p;
 }
 
-export function applyTheme(p: ThemePref) {
+function applyTheme(p: ThemePref) {
   const t = resolve(p);
   document.documentElement.dataset.theme = t;
   try {

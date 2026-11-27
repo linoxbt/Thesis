@@ -75,7 +75,7 @@ export function ProfileStats({ who }: { who: Address }) {
         <Tile label="Calls posted" value={String(s?.posted ?? 0)} />
         <Tile label="Hit / missed" value={`${s?.hits ?? 0} / ${s?.misses ?? 0}`} sub={avgOpen !== null ? `avg opening odds ${pct(avgOpen, 0)}` : undefined} />
         <Tile label="Volume generated" value={volume} sub="bet on their calls" />
-        <Tile label="Fees earned" value={feesEarned} sub={`${pct(creatorShareBps, 0)} of every fee on their calls`} />
+        <Tile label="Fees earned" value={feesEarned} sub={`${pct(creatorShareBps, 0)} of every fee on their calls, incl. fees still held until their next oracle round`} />
         <Tile label="Staked" value={staked} sub="backed or challenged" />
         <Tile label="Winnings claimed" value={won} />
       </div>

@@ -195,7 +195,7 @@ export default function LeaderboardPage() {
                 <tr className="border-b border-line">
                   <th className="px-5 py-3 font-normal">#</th>
                   <th className="py-3 font-normal">Creator</th>
-                  <th className="py-3 text-right font-normal">Per call</th>
+                  <th className="py-3 text-right font-normal" title="What the board is ranked by: skill ÷ (scored calls + 10)">Score</th>
                   <th className="py-3 text-right font-normal">Skill</th>
                   <th className="py-3 text-right font-normal">Hits</th>
                   <th className="px-5 py-3 text-right font-normal">Avg odds</th>
@@ -212,7 +212,10 @@ export default function LeaderboardPage() {
                         {verified?.[r.creator.toLowerCase()] && <ShieldCheck size={13} className="text-yes" aria-label="QIE Pass verified" />}
                       </Link>
                     </td>
-                    <td className={"py-3 text-right text-base " + (r.score_bps >= 0 ? "text-yes" : "text-bad")}>{fmtSkill(Math.round(perCall(r)))}</td>
+                    <td className={"py-3 text-right text-base " + (r.score_bps >= 0 ? "text-yes" : "text-bad")}>
+                      {fmtSkill(Math.round(rankScore(r.score_bps, r.calls)))}
+                      <span className="block text-[11px] text-faint">{fmtSkill(Math.round(perCall(r)))} per call</span>
+                    </td>
                     <td className="py-3 text-right text-muted">{fmtSkill(r.score_bps)}</td>
                     <td className="py-3 text-right">
                       {r.hits}/{r.calls}

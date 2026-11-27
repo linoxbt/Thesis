@@ -183,7 +183,7 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
           className="num w-full bg-transparent text-base outline-none"
           aria-label={`Amount in ${tok.symbol}`}
           aria-invalid={micro === null}
-          aria-describedby={`bet-err-${id}`}
+          aria-describedby={`bet-err-${id} bet-limit-${id}`}
           data-testid="bet-amount"
         />
         <span className="num flex items-center gap-1.5 rounded-full bg-panel-3 px-2 py-1 text-xs text-ink">
@@ -229,8 +229,9 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
             )}
           </div>
         )}
-        {tooSmall && <div className="text-bad">Minimum bet is {amtSym(minStake, tok)}.</div>}
-        {short && <div className="text-bad">Not enough {tok.symbol} in this wallet{tok.native ? " (keep a little for gas)" : ""}.</div>}
+        <div id={`bet-limit-${id}`} role="status" className="text-bad empty:hidden">
+          {tooSmall ? `Minimum bet is ${amtSym(minStake, tok)}.` : short ? `Not enough ${tok.symbol} in this wallet${tok.native ? " (keep a little for gas)" : ""}.` : ""}
+        </div>
       </div>
       {closed ? (
         <p className="mt-2 rounded-xl border border-line px-3 py-2 text-xs text-muted" data-testid="bet-closed">
@@ -240,8 +241,10 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
         <p className="mt-2 rounded-xl border border-line px-3 py-2 text-xs text-muted" data-testid="bet-paused">
           {tradingPaused
             ? "Trading is paused on Thesis right now."
-            : params && gate.oracleAge > params.maxOracleAge
-              ? `Betting is paused: the latest oracle price is ${Math.round(gate.oracleAge / 60)} min old, too old to bet on. It reopens when the oracle prints again.`
+            : gate.oracleAge > 10 * 365 * 86_400
+              ? "Betting is paused: the oracle feed isn't answering right now."
+              : c && gate.oracleAge > c.maxOracleAge
+                ? `Betting is paused: the latest oracle price is ${Math.round(gate.oracleAge / 60)} min old, too old to bet on. It reopens when the oracle prints again.`
               : `Betting is paused: the latest oracle price is within ${pct(gate.needBps, 2)} of the target. It reopens when the oracle prints a price further away (or the touch settles it).`}
         </p>
       ) : null}
