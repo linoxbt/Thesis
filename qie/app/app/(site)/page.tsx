@@ -360,7 +360,6 @@ export default function LandingPage() {
               <span className="text-[19px] font-semibold tracking-[-0.03em]">Thesis</span>
             </Link>
             <p className="mt-4 max-w-xs font-sans text-sm leading-relaxed text-muted">Trade calls as markets on QIE, settled by an oracle round anyone can prove.</p>
-            <p className="mt-2 max-w-xs font-sans text-xs leading-relaxed text-faint">The QIE edition of Thesis, first built on Solana.</p>
           </div>
           <FooterCol title="Product" links={[["Markets", "/app/"], ["Post a trade", "/new/"], ["Leaderboard", "/leaderboard/"], ["Traction", "/stats/"]]} />
           <FooterCol title="Protocol" links={[["Thesis contract", EXPLORER], ["QIE Blockchain", "https://www.qie.digital"], ["QUSDC", QUSDC_URL]]} />
