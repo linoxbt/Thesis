@@ -869,6 +869,19 @@ export const THESIS_CALLS_ABI = [
   },
   {
     "inputs": [],
+    "name": "EMERGENCY_AFTER",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "MAX_TEXT_BYTES",
     "outputs": [
       {
@@ -922,6 +935,19 @@ export const THESIS_CALLS_ABI = [
   {
     "inputs": [],
     "name": "VOID_WINDOW",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "VOL_UPDATE_GAP",
     "outputs": [
       {
         "internalType": "uint256",
@@ -1278,6 +1304,19 @@ export const THESIS_CALLS_ABI = [
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "id",
+        "type": "uint256"
+      }
+    ],
+    "name": "emergencyVoid",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -1810,25 +1849,6 @@ export const THESIS_CALLS_ABI = [
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "id",
-        "type": "uint256"
-      }
-    ],
-    "name": "impliedYesBps",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
     "inputs": [],
     "name": "keeper",
     "outputs": [
@@ -2026,6 +2046,21 @@ export const THESIS_CALLS_ABI = [
       {
         "internalType": "uint128",
         "name": "treasuryFee",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint128",
+        "name": "outsideYes",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint128",
+        "name": "creatorFeeYes",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint128",
+        "name": "treasuryFeeYes",
         "type": "uint128"
       }
     ],
@@ -2611,45 +2646,6 @@ export const THESIS_CALLS_ABI = [
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      },
-      {
-        "internalType": "address",
-        "name": "",
-        "type": "address"
-      }
-    ],
-    "name": "userPending",
-    "outputs": [
-      {
-        "internalType": "uint80",
-        "name": "round",
-        "type": "uint80"
-      },
-      {
-        "internalType": "uint128",
-        "name": "yesNet",
-        "type": "uint128"
-      },
-      {
-        "internalType": "uint128",
-        "name": "noNet",
-        "type": "uint128"
-      },
-      {
-        "internalType": "uint128",
-        "name": "gross",
-        "type": "uint128"
       }
     ],
     "stateMutability": "view",

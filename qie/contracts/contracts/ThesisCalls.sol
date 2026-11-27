@@ -4,7 +4,7 @@ pragma solidity 0.8.24;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {TouchMath} from "./TouchMath.sol";
+import {TouchMathLib as TouchMath} from "./TouchMathLib.sol";
 
 /// @notice The QIE Oracle feeds are Chainlink-style aggregators.
 interface IPriceFeed {
@@ -65,8 +65,14 @@ contract ThesisCalls is ReentrancyGuard {
     enum VoidReason {
         None,
         EarlyTouch, // touched in the first round after posting, or within VOID_WINDOW
-        OracleTimeout // no oracle round after the deadline within voidAfter, or the feed broke
+        OracleTimeout, // no oracle round after the deadline within voidAfter, or the feed broke
+        Emergency // owner, long after voidAfter, when the oracle can never settle it (e.g. its round ids jumped)
     }
+
+    /// @notice How long after a call's void period the owner may void it outright.
+    uint256 public constant EMERGENCY_AFTER = 30 days;
+    /// @notice The keeper may move a feed's volatility by at most 2x, at most once an hour.
+    uint256 public constant VOL_UPDATE_GAP = 1 hours;
 
     // ------------------------------------------------------------ config
 
@@ -173,6 +179,9 @@ contract ThesisCalls is ReentrancyGuard {
         uint128 outside; // gross, by others than the creator
         uint128 creatorFee;
         uint128 treasuryFee;
+        uint128 outsideYes; // the YES part of each total (only YES bets are refunded at a touch)
+        uint128 creatorFeeYes;
+        uint128 treasuryFeeYes;
     }
 
     /// @notice A wallet's bets in its latest round (see Pending).
@@ -181,6 +190,7 @@ contract ThesisCalls is ReentrancyGuard {
         uint128 yesNet;
         uint128 noNet;
         uint128 gross;
+        uint128 yesGross; // the YES part of gross
     }
 
     Call[] internal calls;
@@ -189,7 +199,7 @@ contract ThesisCalls is ReentrancyGuard {
     mapping(uint256 => mapping(address => uint256)) public noStake;
     mapping(uint256 => mapping(address => bool)) public claimed;
     mapping(uint256 => Pending) public pending;
-    mapping(uint256 => mapping(address => UserPending)) public userPending;
+    mapping(uint256 => mapping(address => UserPending)) internal userPending;
 
     struct Stats {
         uint32 posted;
@@ -352,6 +362,12 @@ contract ThesisCalls is ReentrancyGuard {
     function setVolatility(address feed, uint32 volBps, uint32 monitorSecs) external {
         if (msg.sender != keeper && msg.sender != owner) revert Unauthorized();
         if (feeds[feed].volUpdatedAt == 0 || volBps < 1_000 || volBps > 30_000 || monitorSecs > 1 days) revert BadParams();
+        // The keeper's key is a hot key: it may move volatility (which sets new
+        // calls' odds) by at most 2x, at most once an hour. The owner isn't bound.
+        if (msg.sender != owner) {
+            uint256 old = feeds[feed].volBps;
+            if (block.timestamp < uint256(feeds[feed].volUpdatedAt) + VOL_UPDATE_GAP || volBps > old * 2 || uint256(volBps) * 2 < old) revert BadParams();
+        }
         feeds[feed].volBps = volBps;
         feeds[feed].monitorSecs = monitorSecs;
         feeds[feed].volUpdatedAt = uint64(block.timestamp);
@@ -551,13 +567,17 @@ contract ThesisCalls is ReentrancyGuard {
         pd.creatorFee += uint128(toCreator);
         pd.treasuryFee += uint128(fee - toCreator);
         UserPending storage up = userPending[id][msg.sender];
-        if (up.round != tag) userPending[id][msg.sender] = UserPending({round: tag, yesNet: 0, noNet: 0, gross: 0});
+        if (up.round != tag) userPending[id][msg.sender] = UserPending({round: tag, yesNet: 0, noNet: 0, gross: 0, yesGross: 0});
         up.gross += uint128(amount);
         if (yes) {
             c.yesPool += net;
             yesStake[id][msg.sender] += net;
             pd.yesNet += uint128(net);
             up.yesNet += uint128(net);
+            up.yesGross += uint128(amount);
+            pd.creatorFeeYes += uint128(toCreator);
+            pd.treasuryFeeYes += uint128(fee - toCreator);
+            if (msg.sender != c.creator) pd.outsideYes += uint128(amount);
         } else {
             c.noPool += net;
             noStake[id][msg.sender] += net;
@@ -664,6 +684,16 @@ contract ThesisCalls is ReentrancyGuard {
         _void(id, c, VoidReason.OracleTimeout);
     }
 
+    /// @notice Owner, EMERGENCY_AFTER past a call's void period: voids a call the
+    /// oracle can never settle (e.g. its feed's round ids jumped, so the scan
+    /// can't catch up), refunding every stake. Funds are never stuck for good.
+    function emergencyVoid(uint256 id) external onlyOwner nonReentrant {
+        Call storage c = _call(id);
+        if (c.settled) revert AlreadyFinal();
+        if (block.timestamp <= uint256(c.end) + c.voidAfter + EMERGENCY_AFTER) revert TooEarly();
+        _void(id, c, VoidReason.Emergency);
+    }
+
     /// @dev For voidCall only: the scan as an external call, so a feed that
     /// reverts can be caught.
     function scanFor(uint256 id, uint256 maxRounds) external returns (bool) {
@@ -706,11 +736,18 @@ contract ThesisCalls is ReentrancyGuard {
         if (pd.creatorFee | pd.treasuryFee | pd.yesNet | pd.noNet | pd.outside == 0) return;
         creatorFeesOwed[c.creator][c.token] += pd.creatorFee;
         treasuryFees[c.token] += pd.treasuryFee;
+        _clearPending(pd);
+    }
+
+    function _clearPending(Pending storage pd) internal {
         pd.creatorFee = 0;
         pd.treasuryFee = 0;
         pd.yesNet = 0;
         pd.noNet = 0;
         pd.outside = 0;
+        pd.outsideYes = 0;
+        pd.creatorFeeYes = 0;
+        pd.treasuryFeeYes = 0;
     }
 
     function _touch(uint256 id, Call storage c, uint80 roundId, int256 price, uint256 updatedAt) internal {
@@ -725,14 +762,19 @@ contract ThesisCalls is ReentrancyGuard {
             _void(id, c, VoidReason.EarlyTouch);
             return;
         }
-        // Bets placed while the round just before this one was the latest were
-        // betting on a move not yet printed: refund them in full (their fees are
-        // still in escrow), and don't count them toward the creator's score.
+        // YES bets placed while the round just before this one was the latest
+        // were betting on a move not yet printed: refund them in full (their
+        // fees are still in escrow). NO bets of that round are final: refunding
+        // them would hand NO bettors a free option on the next print.
         Pending storage pd = pending[id];
-        if (uint256(pd.round) + 1 == roundId && _hasPending(pd)) {
+        if (uint256(pd.round) + 1 == roundId && pd.yesNet > 0) {
             c.voidYes = pd.yesNet;
-            c.voidNo = pd.noNet;
-            _refundPending(c, pd);
+            c.hasRefund = true;
+            c.refundRound = pd.round;
+            c.outsideVolume -= pd.outsideYes;
+            creatorFeesOwed[c.creator][c.token] += pd.creatorFee - pd.creatorFeeYes; // the NO side's fees are earned
+            treasuryFees[c.token] += pd.treasuryFee - pd.treasuryFeeYes;
+            _clearPending(pd);
         } else {
             _release(c, pd);
         }
@@ -744,14 +786,16 @@ contract ThesisCalls is ReentrancyGuard {
         c.yesWon = yesWon;
         int64 delta = int64(int256(yesWon ? BPS : 0) - int256(uint256(c.openBps)));
         Stats storage s = stats[c.creator];
-        if (yesWon) s.hits += 1;
-        else s.misses += 1;
         if (!yesWon) _release(c, pending[id]);
         // Whether a call counts toward skill was fixed when it was posted (by
         // the size of the creator's own seed), so nobody can choose afterwards
         // which calls count.
         bool scored = c.scored;
         if (scored) {
+            // Hits and misses count scored calls only, like skill: practice
+            // calls can't pad the record.
+            if (yesWon) s.hits += 1;
+            else s.misses += 1;
             s.skillBps += delta;
             s.scored += 1;
         } else {
@@ -768,6 +812,8 @@ contract ThesisCalls is ReentrancyGuard {
         c.outsideVolume -= pd.outside;
         pd.creatorFee = 0;
         pd.treasuryFee = 0;
+        pd.creatorFeeYes = 0;
+        pd.treasuryFeeYes = 0;
     }
 
     function _hasPending(Pending storage pd) internal view returns (bool) {
@@ -853,7 +899,7 @@ contract ThesisCalls is ReentrancyGuard {
         uint256 refund;
         uint256 stake = y;
         if (refunded) {
-            refund = up.gross;
+            refund = up.yesGross; // the YES bets of that round, fee included (NO bets lost)
             stake = y - up.yesNet;
         }
         uint256 side = c.yesPool - c.voidYes;
@@ -876,12 +922,6 @@ contract ThesisCalls is ReentrancyGuard {
         uint256 to = from + count > n ? n : from + count;
         out = new Call[](to - from);
         for (uint256 i = from; i < to; i++) out[i - from] = calls[i];
-    }
-
-    /// @notice YES probability implied by the pools, in bps.
-    function impliedYesBps(uint256 id) external view returns (uint256) {
-        Call storage c = _call(id);
-        return (c.yesPool * BPS) / (c.yesPool + c.noPool);
     }
 
     /// @notice What a bet would add to the pool and pay if its side wins (if no one else bets).

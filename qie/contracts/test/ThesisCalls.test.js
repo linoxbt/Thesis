@@ -1,5 +1,6 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
+const { deployThesisCalls } = require("../scripts/factory");
 const { time, loadFixture, mine } = require("@nomicfoundation/hardhat-network-helpers");
 const { anyValue } = require("@nomicfoundation/hardhat-chai-matchers/withArgs");
 
@@ -37,7 +38,7 @@ async function deploy() {
   const [owner, treasury, keeper, creator, alice, bob, carol] = await ethers.getSigners();
   const token = await (await ethers.getContractFactory("MockToken")).deploy();
   const feed = await (await ethers.getContractFactory("MockFeed")).deploy("SOL / USDT");
-  const calls = await (await ethers.getContractFactory("ThesisCalls")).deploy(treasury.address, keeper.address, 5_000, PARAMS);
+  const { calls } = await deployThesisCalls(ethers, [treasury.address, keeper.address, 5_000, PARAMS]);
   const tokenAddr = await token.getAddress();
   await calls.setStakeToken(tokenAddr, LIMITS);
   await calls.setStakeToken(NATIVE, QIE_LIMITS);
@@ -362,7 +363,7 @@ describe("ThesisCalls: resolution", () => {
     const hit = await later(f, HOUR, 106);
     await expect(f.calls.proveTouch(0, hit)).to.emit(f.calls, "Settled").withArgs(0, true, 0, f.creator.address, false);
     const s = await f.calls.stats(f.creator.address);
-    expect([s.hits, s.skillBps, s.scored]).to.deep.equal([1, 0n, 0]);
+    expect([s.hits, s.skillBps, s.scored]).to.deep.equal([0, 0n, 0]); // practice calls don't count as hits either (v5)
   });
 
   it("audit H2: a creator can't choose after posting which calls count (selective outside bets change nothing)", async () => {
@@ -565,15 +566,56 @@ describe("ThesisCalls: no racing the oracle", () => {
     expect(await f.calls.claimable(0, f.bob.address)).to.equal(0n);
   });
 
-  it("re-audit N6: refunded bets are taken out of outside volume; scoring stays as fixed at posting", async () => {
+  it("re-audit N6: refunded YES bets are taken out of outside volume; scoring stays as fixed at posting", async () => {
     const f = await loadFixture(withCall);
     await later(f, HOUR, 103);
-    await f.calls.connect(f.alice).bet(0, false, 6n * USDC); // a bet in the round before the touch
+    await f.calls.connect(f.alice).bet(0, true, 6n * USDC); // a YES bet in the round before the touch
     await time.increase(3 * MIN);
     const hit = await print(f, 105.4);
     const open = (await f.calls.getCall(0)).openBps;
     await expect(f.calls.proveTouch(0, hit)).to.emit(f.calls, "Settled").withArgs(0, true, 10_000n - open, f.creator.address, true);
     expect((await f.calls.getCall(0)).outsideVolume).to.equal(0n);
+  });
+
+  it("final review M1: NO bets in the round before a touch are not refunded (no free option for NO)", async () => {
+    const f = await loadFixture(withCall);
+    await later(f, HOUR, 104);
+    await f.calls.connect(f.alice).bet(0, false, 500n * USDC); // NO, right by the strike
+    await f.calls.connect(f.bob).bet(0, true, 10n * USDC); // YES in the same round
+    await time.increase(3 * MIN);
+    await f.calls.proveTouch(0, await print(f, 105.2)); // the very next print touches
+    expect(await f.calls.claimable(0, f.alice.address)).to.equal(0n); // the NO bet lost, like any NO bet
+    expect(await f.calls.claimable(0, f.bob.address)).to.equal(10n * USDC); // the YES bet is refunded in full
+    // The NO side's fee is earned; the YES side's fee funded Bob's refund.
+    expect(await f.calls.creatorFeesOwed(f.creator.address, f.tokenAddr)).to.equal(5n * USDC);
+    // Money balances: everyone claims, fees are withdrawn, nothing is left but dust.
+    await f.calls.connect(f.bob).claim(0);
+    await f.calls.connect(f.creator).claim(0);
+    await f.calls.connect(f.creator).claimCreatorFees(f.tokenAddr);
+    await f.calls.connect(f.treasury).withdrawTreasury(f.tokenAddr);
+    expect(await f.token.balanceOf(await f.calls.getAddress())).to.be.lessThan(5n);
+  });
+
+  it("final review L4: the owner can void a call the oracle can never settle, only long after its void period", async () => {
+    const f = await loadFixture(withCall);
+    await f.calls.connect(f.alice).bet(0, true, 20n * USDC);
+    await time.increaseTo(f.end + 3 * DAY + 1);
+    await expect(f.calls.emergencyVoid(0)).to.be.revertedWithCustomError(f.calls, "TooEarly");
+    await expect(f.calls.connect(f.alice).emergencyVoid(0)).to.be.revertedWithCustomError(f.calls, "Unauthorized");
+    await time.increaseTo(f.end + 3 * DAY + 30 * DAY + 1);
+    await expect(f.calls.emergencyVoid(0)).to.emit(f.calls, "Voided").withArgs(0, 3);
+    expect(await f.calls.claimable(0, f.alice.address)).to.equal(20n * USDC);
+  });
+
+  it("final review L6: the keeper can move volatility at most 2x, at most once an hour; the owner isn't bound", async () => {
+    const f = await deploy();
+    const feed = await f.feed.getAddress();
+    await expect(f.calls.connect(f.keeper).setVolatility(feed, 7_000, 0)).to.be.revertedWithCustomError(f.calls, "BadParams"); // too soon
+    await time.increase(HOUR + 1);
+    await expect(f.calls.connect(f.keeper).setVolatility(feed, 12_001, 0)).to.be.revertedWithCustomError(f.calls, "BadParams"); // > 2x of 6000
+    await expect(f.calls.connect(f.keeper).setVolatility(feed, 2_999, 0)).to.be.revertedWithCustomError(f.calls, "BadParams"); // < half
+    await f.calls.connect(f.keeper).setVolatility(feed, 12_000, 0);
+    await f.calls.setVolatility(feed, 3_000, 0); // the owner, at once and by 4x
   });
 
   it("audit M2: if the oracle stops, the call voids after voidAfter and everyone is refunded", async () => {

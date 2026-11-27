@@ -6,6 +6,7 @@
 // Writes deployments/localhost.json and ../app/.env.local.
 const { ethers } = require("hardhat");
 const { LAUNCH_PARAMS, STAKE_LIMITS, NATIVE, QIE } = require("./params");
+const { deployThesisCalls } = require("./factory");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -35,7 +36,7 @@ async function main() {
   const [owner, keeper, ...users] = await ethers.getSigners();
   const now = async () => (await ethers.provider.getBlock("latest")).timestamp;
   const token = await (await ethers.getContractFactory("MockToken")).deploy();
-  const calls = await (await ethers.getContractFactory("ThesisCalls")).deploy(owner.address, keeper.address, 5_000, LAUNCH_PARAMS);
+  const { calls } = await deployThesisCalls(ethers, [owner.address, keeper.address, 5_000, LAUNCH_PARAMS]);
   await calls.setStakeToken(await token.getAddress(), STAKE_LIMITS.QUSDC);
   await calls.setStakeToken(NATIVE, STAKE_LIMITS.QIE);
   const feeds = {};

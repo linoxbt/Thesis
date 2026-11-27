@@ -9,6 +9,7 @@ import { LoadState } from "@/components/LoadState";
 import { MarketPanel } from "@/components/MarketPanel";
 import { PositionLevels, SidePill, usdPx } from "@/components/Position";
 import { ShareButton } from "@/components/ShareButton";
+import { TokenIcon } from "@/components/TokenIcon";
 import { Avatar, pairOf, positionOfCall, ScoredChip, StateBadge } from "@/components/ThesisCard";
 import { THESIS_CALLS_ABI } from "@/lib/abi";
 import { publicClient, readRounds } from "@/lib/chain";
@@ -143,6 +144,7 @@ function TradeView() {
         <span className="label mt-6">The trade</span>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <SidePill p={pos} size="lg" />
+          {feed && <TokenIcon symbol={feed.asset} size={30} />}
           <h1 className="display text-3xl leading-tight sm:text-4xl" data-testid="call-title">
             {pairOf(feed)}
           </h1>

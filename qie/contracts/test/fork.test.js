@@ -2,6 +2,7 @@
 // Real QIE Oracle feeds and real round history; a mock token stands in for QUSDC.
 const { expect } = require("chai");
 const { ethers, network } = require("hardhat");
+const { deployThesisCalls } = require("../scripts/factory");
 const { time } = require("@nomicfoundation/hardhat-network-helpers");
 
 const FEEDS = {
@@ -24,7 +25,7 @@ const { USDC, LAUNCH_PARAMS, STAKE_LIMITS, FEEDS: FEED_CFG } = require("../scrip
   it("prices, scans real oracle rounds and settles", async () => {
     const [owner, creator, alice] = await ethers.getSigners();
     const token = await (await ethers.getContractFactory("MockToken")).deploy();
-    const calls = await (await ethers.getContractFactory("ThesisCalls")).deploy(owner.address, owner.address, 5_000, LAUNCH_PARAMS);
+    const { calls } = await deployThesisCalls(ethers, [owner.address, owner.address, 5_000, LAUNCH_PARAMS]);
     await calls.setStakeToken(await token.getAddress(), STAKE_LIMITS.QUSDC);
     for (const [name, addr] of Object.entries(FEEDS)) {
       const feed = await ethers.getContractAt("IPriceFeed", addr);
