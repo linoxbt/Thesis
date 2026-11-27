@@ -42,8 +42,10 @@ async function main() {
 
   const [usdc, gas, fee] = await Promise.all([token.balanceOf(wallet.address), provider.getBalance(wallet.address), provider.getFeeData()]);
   const need = SEED * BigInt(PLAN.length);
-  // In QIE mode the seeds and the gas both come out of the QIE balance (keep 0.05 QIE for gas).
-  const bal = QIE_MODE ? (gas > 5n * 10n ** 16n ? gas - 5n * 10n ** 16n : 0n) : usdc;
+  // In QIE mode the seeds and the gas both come out of the QIE balance: keep
+  // KEEP_QIE (default 0.05) back for gas.
+  const keep = ethers.parseEther(process.env.KEEP_QIE ?? "0.05");
+  const bal = QIE_MODE ? (gas > keep ? gas - keep : 0n) : usdc;
   console.log(`wallet ${wallet.address}: ${ethers.formatUnits(usdc, 6)} QUSDC, ${ethers.formatEther(gas)} QIE (gas price ${ethers.formatUnits(fee.gasPrice ?? 0n, "gwei")} gwei)`);
   console.log(`contract ${CALLS}; ${PLAN.length} calls × ${ethers.formatUnits(SEED, DEC)} ${UNIT} = ${ethers.formatUnits(need, DEC)} ${UNIT}\n`);
 

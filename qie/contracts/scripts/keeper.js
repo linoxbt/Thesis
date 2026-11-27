@@ -25,7 +25,8 @@ const RPC = process.env.RPC_URL ?? "https://rpc1mainnet.qie.digital";
 const ADDRESS = process.env.CALLS_ADDRESS;
 const INTERVAL_MS = Number(process.env.KEEPER_INTERVAL_MS ?? "60000");
 const VOL_EVERY_SECS = Number(process.env.VOL_EVERY_SECS ?? String(12 * 3600));
-const MIN_GAS_QIE = Number(process.env.MIN_GAS_QIE ?? "0.05");
+// Below this (about 20 actions at ~0.0005 QIE each) /health reports low gas.
+const MIN_GAS_QIE = Number(process.env.MIN_GAS_QIE ?? "0.01");
 const TX_TIMEOUT_MS = Number(process.env.TX_TIMEOUT_MS ?? "90000");
 const TICK_LIMIT_MS = Number(process.env.TICK_LIMIT_MS ?? String(30 * 60_000));
 const MAX_TX_PER_TICK = Number(process.env.MAX_TX_PER_TICK ?? "12");

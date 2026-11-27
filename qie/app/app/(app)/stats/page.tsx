@@ -19,8 +19,8 @@ function Tile({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
-/** Below this the keeper may stop settling promptly (each action costs ~0.0005 QIE). */
-const KEEPER_LOW_QIE = 0.05;
+/** Below this (about 20 actions at ~0.0005 QIE each) the keeper may soon stop settling promptly. */
+const KEEPER_LOW_QIE = 0.01;
 
 /**
  * The keeper's wallet and its gas, read live: anyone can see when it needs a

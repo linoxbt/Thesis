@@ -40,8 +40,9 @@ version's AMM.
    only once the oracle has printed past the deadline. If it never does (or
    the feed breaks), `voidCall` refunds everyone after 3 days; it settles the
    call instead whenever the oracle can.
-4. **Skill.** Each settled call that others traded (5 QUSDC or 30 QIE of outside bets,
-   refunds excluded) adds `(1 if hit, else 0) − opening odds` to the creator's
+4. **Skill.** Each settled call seeded with at least the token's scoring size
+   (5 QUSDC or 30 QIE; fixed when it's posted, so nobody can pick afterwards
+   which calls count) adds `(1 if hit, else 0) − opening odds` to the creator's
    onchain score. A 20% call that hits earns +0.80; a 90% call that misses
    costs −0.90; fair calls at random average zero. The leaderboard ranks skill
    per scored call once a creator has three.
@@ -65,7 +66,7 @@ Anyone can call `proveTouch`, `sync`, `settle` or `voidCall`; the keeper
 |---|---|
 | `contracts/contracts/ThesisCalls.sol` | the market contract |
 | `contracts/contracts/TouchMath.sol` | onchain opening odds |
-| `contracts/test/` | 43 contract tests (incl. the audit's attack cases, native-QIE payouts and re-entry, and an invariant fuzz across both stake tokens), 9 keeper tests, and a test on a QIE mainnet fork against the live oracle |
+| `contracts/test/` | 53 contract tests (incl. both audits' attack cases, native-QIE payouts and re-entry, scoring fixed at posting, voids over a backlog, and an invariant fuzz across both stake tokens), 12 keeper tests (incl. spam calls and its per-tick budget), and a test on a QIE mainnet fork against the live oracle |
 | `contracts/scripts/deploy.js` | mainnet deploy (stake tokens QIE + QUSDC, feeds) |
 | `contracts/scripts/keeper.js` | proves touches, keeps calls synced, settles or voids, posts 7-day volatility and round gaps |
 | `contracts/scripts/params.js` | launch parameters and measured feed settings |
