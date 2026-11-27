@@ -27,7 +27,9 @@ const QIE = 10n ** 18n;
 const NATIVE = "0x0000000000000000000000000000000000000000";
 const STAKE_LIMITS = {
   QUSDC: { enabled: true, minSeed: 2n * USDC, maxSeed: 250n * USDC, minStake: 500_000n, minScoredVolume: 5n * USDC },
-  QIE: { enabled: true, minSeed: 15n * QIE, maxSeed: 1_500n * QIE, minStake: 3n * QIE, minScoredVolume: 30n * QIE },
+  // Live since 27 Nov 2026: minimum seed 0.005 QIE and bet 0.001 QIE, so small
+  // QIE calls can open. Scoring still needs 30 QIE of outside bets.
+  QIE: { enabled: true, minSeed: QIE / 200n, maxSeed: 1_500n * QIE, minStake: QIE / 1_000n, minScoredVolume: 30n * QIE },
 };
 
 // 7-day realised volatility and median gap between rounds (seconds, for the

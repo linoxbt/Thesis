@@ -34,9 +34,11 @@ export const unknownToken = (address: Address): StakeToken => ({
   minScoredVolume: 0n,
 });
 
-/** A token amount as number text: "12.34". */
+/** A token amount as number text: "12.34"; amounts under 1 keep up to 4 decimals ("0.005"). */
 export function amt(v: bigint, t: Pick<StakeToken, "decimals">, digits = 2): string {
-  return Number(formatUnits(v, t.decimals)).toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  const n = Number(formatUnits(v, t.decimals));
+  const max = n !== 0 && Math.abs(n) < 1 ? Math.max(digits, 4) : digits;
+  return n.toLocaleString("en-US", { minimumFractionDigits: Math.min(digits, max), maximumFractionDigits: max });
 }
 
 /** A token amount with its symbol: "12.34 QIE". */

@@ -18,7 +18,8 @@ const ERC20 = ["function balanceOf(address) view returns (uint256)", "function a
 const FEED = ["function latestRoundData() view returns (uint80,int256,uint256,uint256,uint80)", "function decimals() view returns (uint8)"];
 
 const QIE_MODE = process.argv.includes("--qie");
-const SEED = QIE_MODE ? 25n * 10n ** 18n : 4_000_000n; // 25 QIE or 4 QUSDC each
+// Seed per call: SEED (in the token's own units, e.g. SEED=0.005), else 25 QIE or 4 QUSDC.
+const SEED = process.env.SEED ? ethers.parseUnits(process.env.SEED, QIE_MODE ? 18 : 6) : QIE_MODE ? 25n * 10n ** 18n : 4_000_000n;
 const DEC = QIE_MODE ? 18 : 6;
 const UNIT = QIE_MODE ? "QIE" : "QUSDC";
 const H = 3600;

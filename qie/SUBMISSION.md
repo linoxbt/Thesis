@@ -59,7 +59,7 @@ Callers earn half of every trade fee on their calls.
 - [ ] **Optional:** pause the old v1 contract `0x40fB…eF66` from your owner
       wallet (it has no calls). v2 (`0x6945…2AEf`, no calls) is already paused;
       v3 replaced both.
-- [ ] **QIE or QUSDC** in your wallet, then post the first calls (seed ≥ 15 QIE or 2 QUSDC) and
-      share them so others trade: traction is a judging criterion and decides
-      the second half of the prize.
+- [x] **First calls posted:** five opening calls from the team wallet, in QIE
+      (small seeds, 0.005 QIE each). Share them so others trade: traction is a
+      judging criterion and decides the second half of the prize.
 - [ ] Record the demo on the live site.

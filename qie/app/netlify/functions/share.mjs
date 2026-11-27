@@ -36,7 +36,8 @@ const pct = (bps, d = 0) => (bps / 100).toFixed(d) + "%";
 const NATIVE = "0x0000000000000000000000000000000000000000";
 const stake = (v, token) => {
   const native = token.toLowerCase() === NATIVE;
-  return `${(Number(v) / (native ? 1e18 : 1e6)).toLocaleString("en-US", { maximumFractionDigits: 0 })} ${native ? "QIE" : "QUSDC"}`;
+  const n = Number(v) / (native ? 1e18 : 1e6);
+  return `${n.toLocaleString("en-US", { maximumFractionDigits: n !== 0 && n < 1 ? 4 : 0 })} ${native ? "QIE" : "QUSDC"}`;
 };
 const short = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const when = (ts) => new Date(ts * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" }) + " UTC";
