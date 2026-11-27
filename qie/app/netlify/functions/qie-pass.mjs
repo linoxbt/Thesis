@@ -103,8 +103,9 @@ async function qie(method, path, body) {
 
 function sealKey() {
   const secret = process.env.SESSION_SECRET;
-  // At least 32 characters, and not a trivially repetitive one.
-  if (!secret || secret.length < 32 || new Set(secret).size < 16) throw Object.assign(new Error("SESSION_SECRET is not configured"), { status: 500, code: "NOT_CONFIGURED" });
+  // At least 32 characters, and not a trivially repetitive one (a random hex
+  // secret uses up to 16 different characters; ask for 10).
+  if (!secret || secret.length < 32 || new Set(secret).size < 10) throw Object.assign(new Error("SESSION_SECRET is not configured"), { status: 500, code: "NOT_CONFIGURED" });
   return Buffer.from(crypto.hkdfSync("sha256", secret, "thesis-qie", "cookie-seal-v2", 32));
 }
 /** Encrypts `obj` as a cookie of type `typ` (a login cookie can't pass as a session). */

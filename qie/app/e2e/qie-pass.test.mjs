@@ -338,7 +338,7 @@ test("responses carry nosniff; weak secrets and unknown upstream codes don't get
   const r = await browser().call("me");
   assert.equal(r.headers["x-content-type-options"], "nosniff");
   const saved = process.env.SESSION_SECRET;
-  process.env.SESSION_SECRET = "a".repeat(40);
+  process.env.SESSION_SECRET = "abcdefgh".repeat(5); // 40 characters, only 8 different
   try {
     assert.equal((await browser().call("challenge")).body.code, "NOT_CONFIGURED");
   } finally {
