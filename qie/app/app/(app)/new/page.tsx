@@ -108,6 +108,8 @@ export default function NewTrade() {
     return null;
   })();
 
+  // The settings by value: a refresh that reads the same settings mustn't blank the odds.
+  const paramsKey = params ? JSON.stringify(params) : "";
   useEffect(() => {
     setPreview(null); // never show odds for inputs that have since changed
     if (!feed || !strike || !params || inputErr) return;
@@ -119,7 +121,7 @@ export default function NewTrade() {
     return () => {
       on = false;
     };
-  }, [feed?.address, above, strike, windowSecs, params, inputErr]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [feed?.address, above, strike, windowSecs, paramsKey, inputErr]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!w.account || !stakeToken) return setBal(null);
@@ -341,8 +343,17 @@ export default function NewTrade() {
                 </span>
                 {preview && params && (
                   <div className="mt-1 text-xs text-faint">
-                    Hit it and your skill gains {((10_000 - preview.open) / 10_000).toFixed(2)}; miss and it loses {(preview.open / 10_000).toFixed(2)}. Skill counts once
-                    others have bet {tok ? amtSym(tok.minScoredVolume, tok, 0) : "…"} on it.
+                    {tok && seedMicro && seedMicro >= tok.minScoredSeed ? (
+                      <>
+                        Counts toward your skill: hit it and it gains {((10_000 - preview.open) / 10_000).toFixed(2)}; miss and it loses{" "}
+                        {(preview.open / 10_000).toFixed(2)}.
+                      </>
+                    ) : (
+                      <>
+                        Practice call: it trades and settles, but only calls seeded with {tok ? amtSym(tok.minScoredSeed, tok, 0) : "…"} or more count toward
+                        your skill (decided when you post).
+                      </>
+                    )}
                   </div>
                 )}
               </>

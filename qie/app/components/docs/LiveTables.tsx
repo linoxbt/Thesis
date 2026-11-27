@@ -65,7 +65,7 @@ export function TokensTable() {
   if (!ready) return <p className="my-5 text-sm text-muted">Reading the stake tokens from QIE…</p>;
   return (
     <Table
-      head={["Stake", "Seed", "Minimum bet", "Scores with", "New calls"]}
+      head={["Stake", "Seed", "Minimum bet", "Counts toward skill with", "New calls"]}
       testid="docs-tokens"
       rows={stakeTokens.map((t) => [
         t.native ? (
@@ -77,7 +77,7 @@ export function TokensTable() {
         ),
         `${amtSym(t.minSeed, t, 0)} – ${amtSym(t.maxSeed, t, 0)}`,
         amtSym(t.minStake, t),
-        `${amtSym(t.minScoredVolume, t, 0)} of outside bets`,
+        `a seed of ${amtSym(t.minScoredSeed, t, 0)} or more`,
         t.enabled ? "yes" : "no",
       ])}
     />

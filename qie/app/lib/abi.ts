@@ -308,6 +308,12 @@ export const THESIS_CALLS_ABI = [
         "internalType": "uint256",
         "name": "noPool",
         "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint80",
+        "name": "round",
+        "type": "uint80"
       }
     ],
     "name": "Bet",
@@ -412,6 +418,12 @@ export const THESIS_CALLS_ABI = [
         "internalType": "uint256",
         "name": "amount",
         "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "to",
+        "type": "address"
       }
     ],
     "name": "Claimed",
@@ -437,6 +449,12 @@ export const THESIS_CALLS_ABI = [
         "internalType": "uint256",
         "name": "amount",
         "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "to",
+        "type": "address"
       }
     ],
     "name": "CreatorFeesClaimed",
@@ -692,7 +710,7 @@ export const THESIS_CALLS_ABI = [
           },
           {
             "internalType": "uint128",
-            "name": "minScoredVolume",
+            "name": "minScoredSeed",
             "type": "uint128"
           }
         ],
@@ -1461,9 +1479,29 @@ export const THESIS_CALLS_ABI = [
             "type": "uint32"
           },
           {
-            "internalType": "uint128",
-            "name": "minScored",
-            "type": "uint128"
+            "internalType": "bool",
+            "name": "scored",
+            "type": "bool"
+          },
+          {
+            "internalType": "bool",
+            "name": "hasRefund",
+            "type": "bool"
+          },
+          {
+            "internalType": "uint80",
+            "name": "refundRound",
+            "type": "uint80"
+          },
+          {
+            "internalType": "uint16",
+            "name": "betCutoffBps",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint32",
+            "name": "maxOracleAge",
+            "type": "uint32"
           },
           {
             "internalType": "uint128",
@@ -1647,9 +1685,29 @@ export const THESIS_CALLS_ABI = [
             "type": "uint32"
           },
           {
-            "internalType": "uint128",
-            "name": "minScored",
-            "type": "uint128"
+            "internalType": "bool",
+            "name": "scored",
+            "type": "bool"
+          },
+          {
+            "internalType": "bool",
+            "name": "hasRefund",
+            "type": "bool"
+          },
+          {
+            "internalType": "uint80",
+            "name": "refundRound",
+            "type": "uint80"
+          },
+          {
+            "internalType": "uint16",
+            "name": "betCutoffBps",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint32",
+            "name": "maxOracleAge",
+            "type": "uint32"
           },
           {
             "internalType": "uint128",
@@ -2316,7 +2374,7 @@ export const THESIS_CALLS_ABI = [
           },
           {
             "internalType": "uint128",
-            "name": "minScoredVolume",
+            "name": "minScoredSeed",
             "type": "uint128"
           }
         ],
@@ -2443,7 +2501,7 @@ export const THESIS_CALLS_ABI = [
       },
       {
         "internalType": "uint128",
-        "name": "minScoredVolume",
+        "name": "minScoredSeed",
         "type": "uint128"
       }
     ],

@@ -1,5 +1,9 @@
 // Thesis on QIE keeper. Outcomes don't depend on it (the contract scans oracle
-// rounds itself before bets and NO settlements); it makes things prompt:
+// rounds itself before bets and NO settlements, and anyone can prove, settle
+// or void from the app); it makes things prompt for the calls that matter:
+// calls that count toward skill, and calls holding real money from others
+// (at least the token's scoring seed). Tiny calls nobody else bet on are left
+// to their creator, so spam can't drain the keeper. For those calls it:
 //   - proves a touch as soon as a crossing oracle round appears (YES settles, winners can claim)
 //   - keeps open calls' round checks caught up, so bets never hit SyncRequired
 //   - settles calls once their deadline + grace has passed and the oracle has
@@ -9,8 +13,10 @@
 //   KEEPER_KEY=0x… CALLS_ADDRESS=0x… RPC_URL=https://rpc1mainnet.qie.digital node scripts/keeper.js [--once]
 //
 // Hardening: every transaction has a confirmation timeout and is re-sent with
-// a higher gas price if it gets stuck; a tick that runs too long exits the
-// process so the host (Railway) restarts it; PORT (if set) serves /health.
+// a higher gas price if it gets stuck; at most MAX_TX_PER_TICK transactions a
+// tick; a tick that runs too long exits the process so the host (Railway)
+// restarts it; it refuses to run on any chain but CHAIN_ID. PORT (if set)
+// serves /health: 503 when gas is low, a call failed, or ticks have stopped.
 const { ethers } = require("ethers");
 const http = require("node:http");
 const CALLS_ABI = require("./keeper-abi.json");
@@ -22,6 +28,8 @@ const VOL_EVERY_SECS = Number(process.env.VOL_EVERY_SECS ?? String(12 * 3600));
 const MIN_GAS_QIE = Number(process.env.MIN_GAS_QIE ?? "0.05");
 const TX_TIMEOUT_MS = Number(process.env.TX_TIMEOUT_MS ?? "90000");
 const TICK_LIMIT_MS = Number(process.env.TICK_LIMIT_MS ?? String(30 * 60_000));
+const MAX_TX_PER_TICK = Number(process.env.MAX_TX_PER_TICK ?? "12");
+const CHAIN_ID = BigInt(process.env.CHAIN_ID ?? "1990");
 const SCAN_BATCH = 25;
 const SCAN_PER_TICK = 600; // rounds read off-chain per call per tick
 const SYNC_BACKLOG = 40; // on-chain sync once this many rounds are unchecked (contract scans 48 per bet)
@@ -59,9 +67,14 @@ function errorName(calls, e) {
  */
 async function send(ctx, contract, method, args, { timeoutMs = TX_TIMEOUT_MS, bumps = 3 } = {}) {
   const { wallet, provider } = ctx;
+  if (ctx.budget !== undefined) {
+    if (ctx.budget <= 0) throw new Error(`${method}: this tick's transaction budget is spent; next tick`);
+    ctx.budget -= 1;
+  }
   const data = contract.interface.encodeFunctionData(method, args);
   const to = await contract.getAddress();
-  const gasLimit = ((await provider.estimateGas({ from: wallet.address, to, data })) * 13n) / 10n;
+  const estimate = async () => ((await provider.estimateGas({ from: wallet.address, to, data })) * 13n) / 10n;
+  let gasLimit = await estimate();
   const nonce = await provider.getTransactionCount(wallet.address, "latest");
   let gasPrice = (await provider.getFeeData()).gasPrice ?? 1_125_000_000n;
   const hashes = [];
@@ -100,6 +113,9 @@ async function send(ctx, contract, method, args, { timeoutMs = TX_TIMEOUT_MS, bu
       const rc = await minedAttempt();
       if (rc) return done(rc);
       gasPrice = (gasPrice * 13n) / 10n;
+      // More oracle rounds may have arrived since: re-estimate (keep the larger).
+      const fresh = await estimate().catch(() => gasLimit);
+      if (fresh > gasLimit) gasLimit = fresh;
       log(`${method}: not mined in ${timeoutMs / 1000}s, re-sending at ${ethers.formatUnits(gasPrice, "gwei")} gwei`);
     }
   }
@@ -151,11 +167,6 @@ async function feedStats(feed, nowTs, days = 7) {
   };
 }
 
-/** Kept back-compatible for anything that imported it. */
-async function realisedVolBps(feed, days = 7, nowTs = Math.floor(Date.now() / 1000)) {
-  return (await feedStats(feed, nowTs, days)).volBps;
-}
-
 /**
  * The first round after `from` (up to `latest`, at most `limit` reads) that
  * touches the call's strike inside its window. Stops at the first round after
@@ -186,7 +197,17 @@ async function findTouch(feed, c, from, latest, limit) {
   return { touch: null, lastChecked: r, pastEnd: false };
 }
 
-async function handleCall(ctx, id, c, now, p) {
+/**
+ * Whether the keeper spends gas on a call: it counts toward skill, or others
+ * have put real money in (at least the token's scoring seed). Anything else
+ * can be settled by its creator or bettors from the app.
+ */
+function worthKeeping(c, tok) {
+  if (c.scored) return true;
+  return tok ? c.outsideVolume >= tok.minScoredSeed : false;
+}
+
+async function handleCall(ctx, id, c, now) {
   const { calls, feedOf, scanned, notes } = ctx;
   const feed = feedOf(c.feed);
   const end = Number(c.end);
@@ -270,22 +291,42 @@ async function settle(ctx, id, end, c, note = (_k, m) => log(`call ${id}: ${m}`)
 
 async function tick(ctx) {
   const { calls, wallet, provider, feedOf } = ctx;
+  ctx.budget = MAX_TX_PER_TICK;
+  let failures = 0;
   // The contract judges deadlines by block time, so the keeper does too.
-  const now = (await provider.getBlock("latest")).timestamp;
+  const blockTime = async () => (await provider.getBlock("latest")).timestamp;
+  let now = await blockTime();
   const p = await calls.params();
+  // New calls since the last tick join the open set; settled ones leave it.
   const n = Number(await calls.callCount());
-  let open = 0;
-  for (let from = 0; from < n; from += 50) {
+  for (let from = ctx.seen; from < n; from += 50) {
     const page = await calls.getCalls(from, 50);
-    for (let i = 0; i < page.length; i++) {
-      const c = page[i];
-      if (c.settled) continue;
-      open += 1;
-      try {
-        await handleCall(ctx, from + i, c, now, p);
-      } catch (e) {
-        log(`call ${from + i}: ${short(e)}`);
-      }
+    page.forEach((c, i) => !c.settled && ctx.open.add(from + i));
+  }
+  ctx.seen = Math.max(ctx.seen, n);
+  const tokens = new Map();
+  const tokenOf = async (a) => {
+    if (!tokens.has(a)) tokens.set(a, await calls.stakeTokens(a).catch(() => null));
+    return tokens.get(a);
+  };
+  let open = 0;
+  let kept = 0;
+  for (const id of [...ctx.open].sort((a, b) => a - b)) {
+    const c = await calls.getCall(id);
+    if (c.settled) {
+      ctx.open.delete(id);
+      continue;
+    }
+    open += 1;
+    if (!worthKeeping(c, await tokenOf(c.token))) continue;
+    kept += 1;
+    if (ctx.budget <= 0) continue; // the rest waits for the next tick
+    try {
+      now = await blockTime();
+      await handleCall(ctx, id, c, now);
+    } catch (e) {
+      failures += 1;
+      log(`call ${id}: ${short(e)}`);
     }
   }
 
@@ -311,6 +352,7 @@ async function tick(ctx) {
       await send(ctx, calls, "setVolatility", [addr, bps, mon]);
       log(`${await feedOf(addr).description()}: volatility ${(bps / 100).toFixed(1)}%, rounds ~${mon}s apart`);
     } catch (e) {
+      failures += 1;
       log(`volatility ${addr}: ${short(e)}`);
     }
   }
@@ -318,7 +360,7 @@ async function tick(ctx) {
 
   const gas = Number(ethers.formatEther(await provider.getBalance(wallet.address)));
   if (gas < MIN_GAS_QIE) log(`WARNING: keeper has ${gas.toFixed(4)} QIE for gas; top it up`);
-  return { open, gas };
+  return { open, kept, gas, failures, lowGas: gas < MIN_GAS_QIE };
 }
 
 function makeCtx(wallet, address) {
@@ -329,18 +371,21 @@ function makeCtx(wallet, address) {
     if (!cache.has(a)) cache.set(a, new ethers.Contract(a, FEED_ABI, provider));
     return cache.get(a);
   };
-  return { calls, wallet, provider, feedOf, scanned: new Map(), notes: new Map() };
+  return { calls, wallet, provider, feedOf, scanned: new Map(), notes: new Map(), open: new Set(), seen: 0 };
 }
 
 async function main() {
   const key = process.env.KEEPER_KEY;
-  const health = { ok: false, started: new Date().toISOString(), lastTick: null, lastError: null, address: null, open: 0, gas: null };
+  // Healthy = the last tick finished without a failed call, gas is above the
+  // floor, and ticks are still finishing (allowing for one long tick).
+  const health = { ok: false, started: new Date().toISOString(), lastTick: null, failures: 0, lowGas: false, open: 0, kept: 0, gas: null };
   if (process.env.PORT) {
     http
       .createServer((req, res) => {
-        const stale = health.lastTick && Date.now() - Date.parse(health.lastTick) > 5 * INTERVAL_MS;
-        res.writeHead(health.ok && !stale ? 200 : 503, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ...health, stale: Boolean(stale) }));
+        const stale = !health.lastTick || Date.now() - Date.parse(health.lastTick) > TICK_LIMIT_MS + 2 * INTERVAL_MS;
+        const healthy = health.ok && !stale && !health.lowGas && health.failures === 0;
+        res.writeHead(healthy ? 200 : 503, { "content-type": "application/json" });
+        res.end(JSON.stringify({ healthy, stale, ...health }));
       })
       .listen(Number(process.env.PORT));
   }
@@ -353,9 +398,10 @@ async function main() {
   if (!ADDRESS) throw new Error("set CALLS_ADDRESS");
   const provider = new ethers.JsonRpcProvider(RPC, undefined, { staticNetwork: true });
   const wallet = new ethers.Wallet(key, provider);
+  const chainId = (await provider.getNetwork()).chainId;
+  if (chainId !== CHAIN_ID) throw new Error(`RPC is chain ${chainId}, expected ${CHAIN_ID}; refusing to sign`);
   const ctx = makeCtx(wallet, ADDRESS);
-  health.address = wallet.address;
-  log(`keeper ${wallet.address} on chain ${(await provider.getNetwork()).chainId}, contract ${ADDRESS}`);
+  log(`keeper ${wallet.address} on chain ${chainId}, contract ${ADDRESS}`);
   let running = null;
   const run = async () => {
     if (running) {
@@ -369,10 +415,9 @@ async function main() {
     running = Date.now();
     try {
       const r = await tick(ctx);
-      Object.assign(health, { ok: true, lastTick: new Date().toISOString(), lastError: null, open: r.open, gas: r.gas });
+      Object.assign(health, { ok: true, lastTick: new Date().toISOString(), failures: r.failures, lowGas: r.lowGas, open: r.open, kept: r.kept, gas: r.gas });
     } catch (e) {
       health.ok = false;
-      health.lastError = short(e);
       log(`tick failed: ${short(e)}`);
     } finally {
       running = null;
@@ -383,7 +428,7 @@ async function main() {
   setInterval(run, INTERVAL_MS);
 }
 
-module.exports = { tick, makeCtx, send, feedStats, realisedVolBps, findTouch, errorName };
+module.exports = { tick, makeCtx, send, feedStats, findTouch, errorName, worthKeeping };
 
 if (require.main === module) {
   process.on("unhandledRejection", (e) => log(`unhandled: ${short(e)}`));

@@ -1,6 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { time, loadFixture, mine } = require("@nomicfoundation/hardhat-network-helpers");
+const { anyValue } = require("@nomicfoundation/hardhat-chai-matchers/withArgs");
 
 const USDC = 1_000_000n; // 6 decimals
 const PX = (usd) => BigInt(Math.round(usd * 1e8)); // feed units (8 decimals)
@@ -26,11 +27,11 @@ const PARAMS = {
 };
 
 /** QUSDC (6 decimals) as a stake token. */
-const LIMITS = { enabled: true, minSeed: 5n * USDC, maxSeed: 1_000n * USDC, minStake: 1n * USDC, minScoredVolume: 5n * USDC };
+const LIMITS = { enabled: true, minSeed: 5n * USDC, maxSeed: 1_000n * USDC, minStake: 1n * USDC, minScoredSeed: 50n * USDC };
 const QIE = 10n ** 18n;
 const NATIVE = ethers.ZeroAddress;
 /** Native QIE (18 decimals) as a stake token. */
-const QIE_LIMITS = { enabled: true, minSeed: 20n * QIE, maxSeed: 2_000n * QIE, minStake: 3n * QIE, minScoredVolume: 30n * QIE };
+const QIE_LIMITS = { enabled: true, minSeed: 20n * QIE, maxSeed: 2_000n * QIE, minStake: 3n * QIE, minScoredSeed: 30n * QIE };
 
 async function deploy() {
   const [owner, treasury, keeper, creator, alice, bob, carol] = await ethers.getSigners();
@@ -350,14 +351,39 @@ describe("ThesisCalls: resolution", () => {
     await expect(f.calls.settle(0)).to.be.revertedWithCustomError(f.calls, "AlreadyFinal");
   });
 
-  it("a call nobody else traded doesn't move skill (no free farming), even with self-bets", async () => {
-    const f = await loadFixture(withCall);
-    await f.calls.connect(f.creator).bet(0, true, 500n * USDC); // the creator's own volume doesn't count
-    await f.calls.connect(f.alice).bet(0, false, 4n * USDC); // under minScoredVolume
+  it("a call seeded under the scoring threshold never moves skill, whatever is bet on it later", async () => {
+    const f = await deploy();
+    const end = (await time.latest()) + 2 * DAY;
+    await f.calls.connect(f.creator).createCall(f.tokenAddr, await f.feed.getAddress(), true, PX(105), end, 10n * USDC, "small");
+    expect((await f.calls.getCall(0)).scored).to.equal(false);
+    await later(f, 5 * MIN, 100.2);
+    await f.calls.connect(f.alice).bet(0, true, 500n * USDC); // large outside bets don't make it count
+    await later(f, 10 * MIN, 100.5);
     const hit = await later(f, HOUR, 106);
     await expect(f.calls.proveTouch(0, hit)).to.emit(f.calls, "Settled").withArgs(0, true, 0, f.creator.address, false);
     const s = await f.calls.stats(f.creator.address);
     expect([s.hits, s.skillBps, s.scored]).to.deep.equal([1, 0n, 0]);
+  });
+
+  it("audit H2: a creator can't choose after posting which calls count (selective outside bets change nothing)", async () => {
+    const f = await deploy();
+    const feed = await f.feed.getAddress();
+    const end = (await time.latest()) + 2 * DAY;
+    // Two scored calls (seed >= 50): one will hit, one will miss.
+    await f.calls.connect(f.creator).createCall(f.tokenAddr, feed, true, PX(105), end, 60n * USDC, "hit");
+    await f.calls.connect(f.creator).createCall(f.tokenAddr, feed, false, PX(95), end, 60n * USDC, "miss");
+    await later(f, 5 * MIN, 100.2);
+    // A sybil wallet bets only into the call that's going well…
+    await later(f, HOUR, 104);
+    await f.calls.connect(f.alice).bet(0, true, 100n * USDC);
+    await later(f, 10 * MIN, 104.2);
+    await f.calls.proveTouch(0, await later(f, HOUR, 105.5));
+    // …but the miss counts anyway.
+    await time.increaseTo(end + HOUR + 1);
+    await print(f, 100);
+    await f.calls.sync(1, 500);
+    await expect(f.calls.settle(1)).to.emit(f.calls, "Settled").withArgs(1, false, -(await f.calls.getCall(1)).openBps, f.creator.address, true);
+    expect((await f.calls.stats(f.creator.address)).scored).to.equal(2);
   });
 
   it("pays creator fees and treasury fees to the right accounts only", async () => {
@@ -487,7 +513,10 @@ describe("ThesisCalls: no racing the oracle", () => {
     expect((await f.token.balanceOf(f.creator.address)) - k0).to.equal(100n * USDC);
     const a0 = await f.token.balanceOf(f.alice.address);
     await f.calls.connect(f.alice).claim(0);
-    expect((await f.token.balanceOf(f.alice.address)) - a0).to.equal(9_800_000n);
+    expect((await f.token.balanceOf(f.alice.address)) - a0).to.equal(10n * USDC); // fee included: nobody profits from a void
+    expect(await f.calls.creatorFeesOwed(f.creator.address, f.tokenAddr)).to.equal(0n);
+    expect(await f.calls.treasuryFees(f.tokenAddr)).to.equal(0n);
+    expect(await f.token.balanceOf(await f.calls.getAddress())).to.equal(0n);
   });
 
   it("NO only wins after every round up to the deadline is checked; a missed touch is found", async () => {
@@ -536,13 +565,15 @@ describe("ThesisCalls: no racing the oracle", () => {
     expect(await f.calls.claimable(0, f.bob.address)).to.equal(0n);
   });
 
-  it("re-audit N6: refunded outside bets don't make a call count toward skill", async () => {
+  it("re-audit N6: refunded bets are taken out of outside volume; scoring stays as fixed at posting", async () => {
     const f = await loadFixture(withCall);
     await later(f, HOUR, 103);
-    await f.calls.connect(f.alice).bet(0, false, 6n * USDC); // a 'sybil' bet in the round before the touch
+    await f.calls.connect(f.alice).bet(0, false, 6n * USDC); // a bet in the round before the touch
     await time.increase(3 * MIN);
     const hit = await print(f, 105.4);
-    await expect(f.calls.proveTouch(0, hit)).to.emit(f.calls, "Settled").withArgs(0, true, 0, f.creator.address, false);
+    const open = (await f.calls.getCall(0)).openBps;
+    await expect(f.calls.proveTouch(0, hit)).to.emit(f.calls, "Settled").withArgs(0, true, 10_000n - open, f.creator.address, true);
+    expect((await f.calls.getCall(0)).outsideVolume).to.equal(0n);
   });
 
   it("audit M2: if the oracle stops, the call voids after voidAfter and everyone is refunded", async () => {
@@ -553,11 +584,12 @@ describe("ThesisCalls: no racing the oracle", () => {
     await expect(f.calls.voidCall(0)).to.be.revertedWithCustomError(f.calls, "TooEarly");
     await time.increaseTo(f.end + 3 * DAY + 1);
     await expect(f.calls.voidCall(0)).to.emit(f.calls, "Voided").withArgs(0, 2);
-    expect(await f.calls.claimable(0, f.alice.address)).to.equal(19_600_000n);
+    // Alice's bet was still pending (no round after it was checked): fee included.
+    expect(await f.calls.claimable(0, f.alice.address)).to.equal(20n * USDC);
     expect(await f.calls.claimable(0, f.creator.address)).to.equal(100n * USDC);
     await f.calls.connect(f.alice).claim(0);
     await f.calls.connect(f.creator).claim(0);
-    expect(await f.token.balanceOf(await f.calls.getAddress())).to.equal(400_000n); // only the fees remain
+    expect(await f.token.balanceOf(await f.calls.getAddress())).to.equal(0n);
   });
 
   it("audit M2: a feed that starts reverting can't lock funds (and running out of gas can't fake that)", async () => {
@@ -571,7 +603,77 @@ describe("ThesisCalls: no racing the oracle", () => {
     await f.calls.voidCall(0); // needs nothing from the feed
     const a0 = await f.token.balanceOf(f.alice.address);
     await f.calls.connect(f.alice).claim(0);
-    expect((await f.token.balanceOf(f.alice.address)) - a0).to.equal(19_600_000n);
+    expect((await f.token.balanceOf(f.alice.address)) - a0).to.equal(20n * USDC);
+  });
+
+  it("a void keeps fees already earned: bets whose round passed are refunded net", async () => {
+    const f = await loadFixture(withCall);
+    await f.calls.connect(f.alice).bet(0, true, 20n * USDC);
+    await later(f, 10 * MIN, 100.3);
+    await f.calls.sync(0, 0); // alice's round passed: her fee is credited
+    await time.increaseTo(f.end + 3 * DAY + 1); // the oracle never prints past the deadline
+    await expect(f.calls.voidCall(0)).to.emit(f.calls, "Voided").withArgs(0, 2);
+    expect(await f.calls.claimable(0, f.alice.address)).to.equal(19_600_000n);
+    expect(await f.calls.creatorFeesOwed(f.creator.address, f.tokenAddr)).to.equal(200_000n);
+  });
+
+  it("audit M5: voidCall never voids over an unscanned backlog; sync finds the touch in it", async () => {
+    const f = await loadFixture(withCall);
+    for (let i = 0; i < 310; i++) await print(f, 100.1); // > PROVE_SCAN_MAX unchecked rounds…
+    await print(f, 106); // …then a touch
+    await time.increaseTo(f.end + 7 * DAY); // long past 2 x voidAfter
+    await print(f, 100);
+    await expect(f.calls.voidCall(0)).to.be.revertedWithCustomError(f.calls, "SyncRequired");
+    await f.calls.sync(0, 1_000);
+    const c = await f.calls.getCall(0);
+    expect([c.settled, c.voided, c.yesWon]).to.deep.equal([true, false, true]);
+  });
+
+  it("a touch found by voidCall's scan credits the caller, not the contract", async () => {
+    const f = await loadFixture(withCall);
+    await later(f, HOUR, 106); // touched; nobody proved it
+    await time.increaseTo(f.end + 3 * DAY + 1);
+    await expect(f.calls.connect(f.carol).voidCall(0)).to.emit(f.calls, "Touched").withArgs(0, anyValue, anyValue, anyValue, f.carol.address);
+  });
+
+  it("betStatus answers (closed) when the feed breaks, instead of reverting", async () => {
+    const f = await loadFixture(withCall);
+    await f.feed.setBroken(true);
+    const [open] = await f.calls.betStatus(0);
+    expect(open).to.equal(false);
+  });
+
+  it("betting cutoff and oracle-age limit are fixed per call at posting", async () => {
+    const f = await loadFixture(withCall);
+    await f.calls.setParams({ ...PARAMS, maxOracleAge: 60, betCutoffBps: 90 });
+    await time.increase(30 * MIN); // the latest print is now 30 min old: fine under this call's 2 h limit
+    await f.calls.connect(f.alice).bet(0, true, 5n * USDC);
+    const c = await f.calls.getCall(0);
+    expect([Number(c.maxOracleAge), Number(c.betCutoffBps)]).to.deep.equal([2 * HOUR, 25]);
+  });
+
+  it("events carry what integrators need: the bet's round tag and the claim's recipient", async () => {
+    const f = await loadFixture(withCall);
+    const [round] = await f.feed.latestRoundData();
+    await expect(f.calls.connect(f.alice).bet(0, true, 5n * USDC)).to.emit(f.calls, "Bet").withArgs(0, f.alice.address, true, 5n * USDC, anyValue, anyValue, anyValue, round);
+    await later(f, 10 * MIN, 100.3);
+    await f.calls.proveTouch(0, await later(f, HOUR, 106));
+    await expect(f.calls.connect(f.alice).claimTo(0, f.bob.address)).to.emit(f.calls, "Claimed").withArgs(0, f.alice.address, anyValue, f.bob.address);
+  });
+
+  it("position() after a YES with refunds matches what can be claimed", async () => {
+    const f = await loadFixture(withCall);
+    await f.calls.connect(f.alice).bet(0, true, 20n * USDC); // final once the next round passes
+    await later(f, HOUR, 103);
+    await f.calls.connect(f.bob).bet(0, true, 10n * USDC); // in the round right before the touch: refunded
+    await time.increase(3 * MIN);
+    await f.calls.proveTouch(0, await print(f, 105.4));
+    for (const u of [f.alice, f.bob]) {
+      const p = await f.calls.position(0, u.address);
+      expect(p.payoutIfYes).to.equal(await f.calls.claimable(0, u.address));
+      expect(p.payoutIfNo).to.equal(0n);
+    }
+    expect(await f.calls.claimable(0, f.bob.address)).to.equal(10n * USDC);
   });
 });
 
@@ -594,7 +696,7 @@ describe("ThesisCalls: QIE stakes", () => {
       .to.changeEtherBalances([f.creator, addr], [-100n * QIE, 100n * QIE]);
     const c = await f.calls.getCall(0);
     expect(c.token).to.equal(NATIVE);
-    expect(c.minScored).to.equal(30n * QIE);
+    expect(c.scored).to.equal(true); // 100 QIE seed >= 30 QIE
     await later(f, 5 * MIN, 100.2);
     await expect(f.calls.connect(f.alice).bet(0, true, 10n * QIE, { value: 10n * QIE })).to.changeEtherBalance(f.alice, -10n * QIE);
     await f.calls.connect(f.bob).bet(0, false, 50n * QIE, { value: 50n * QIE });
@@ -641,11 +743,10 @@ describe("ThesisCalls: QIE stakes", () => {
     await expect(f.calls.connect(f.creator).createCall(NATIVE, feed, true, PX(106), end, 2_001n * QIE, "", { value: 2_001n * QIE })).to.be.revertedWithCustomError(f.calls, "BadSeed");
     await expect(f.calls.connect(f.alice).bet(0, true, 2n * QIE, { value: 2n * QIE })).to.be.revertedWithCustomError(f.calls, "StakeTooSmall");
     await f.calls.connect(f.creator).createCall(f.tokenAddr, feed, true, PX(106), end, 5n * USDC, ""); // QUSDC's own minimum
-    // 29 QIE of outside bets is under QIE's scoring threshold (30 QIE).
-    await f.calls.connect(f.alice).bet(0, true, 29n * QIE, { value: 29n * QIE });
-    await later(f, 10 * MIN, 100.5);
-    const hit = await later(f, HOUR, 106);
-    await expect(f.calls.proveTouch(0, hit)).to.emit(f.calls, "Settled").withArgs(0, true, 0, f.creator.address, false);
+    // A 29 QIE seed is under QIE's scoring threshold (30 QIE): that call doesn't count.
+    await f.calls.connect(f.creator).createCall(NATIVE, feed, true, PX(106), end, 29n * QIE, "", { value: 29n * QIE });
+    expect((await f.calls.getCall(2)).scored).to.equal(false);
+    expect((await f.calls.getCall(1)).scored).to.equal(false); // 5 QUSDC < 50 QUSDC
   });
 
   it("a disabled or unknown stake token can't open calls; open calls keep trading", async () => {
@@ -662,11 +763,11 @@ describe("ThesisCalls: QIE stakes", () => {
   it("bounds each stake token's settings and leaves them to the owner", async () => {
     const f = await deploy();
     await expect(f.calls.connect(f.alice).setStakeToken(NATIVE, QIE_LIMITS)).to.be.revertedWithCustomError(f.calls, "Unauthorized");
-    for (const bad of [{ minSeed: 0n }, { minSeed: 3_000n * QIE }, { minStake: 0n }, { minScoredVolume: 0n }, { minSeed: 10n, maxSeed: 10n }])
+    for (const bad of [{ minSeed: 0n }, { minSeed: 3_000n * QIE }, { minStake: 0n }, { minScoredSeed: 0n }, { minScoredSeed: 3_000n * QIE }, { minSeed: 10n, maxSeed: 10n }])
       await expect(f.calls.setStakeToken(NATIVE, { ...QIE_LIMITS, ...bad })).to.be.revertedWithCustomError(f.calls, "BadParams");
     await expect(f.calls.setStakeToken(f.alice.address, LIMITS)).to.be.revertedWithCustomError(f.calls, "BadParams"); // not a contract
     // Params can't make any token's minimum seed too small to open both pools.
-    await f.calls.setStakeToken(f.tokenAddr, { ...LIMITS, minSeed: 100n, maxSeed: 1_000n });
+    await f.calls.setStakeToken(f.tokenAddr, { ...LIMITS, minSeed: 100n, maxSeed: 1_000n, minScoredSeed: 500n });
     await expect(f.calls.setParams({ ...PARAMS, minOpenBps: 99 })).to.be.revertedWithCustomError(f.calls, "BadParams");
   });
 

@@ -86,7 +86,7 @@ const FAQ: [string, string][] = [
   ["What happens if the oracle goes down?", "NO can only win after the oracle prints a price past the deadline. If that never happens within the void period (or the feed breaks), anyone can void the call and every stake is refunded."],
   ["Can the team take the money in a pot?", "No. Pot money can only go to winners or back to bettors. The owner can tune limits within hard bounds, pause new calls and bets (claims and settlement always work) and withdraw the treasury's share of fees, nothing else."],
   ["Why does my call need a target further away sometimes?", "When the latest oracle price is older, the market may have moved since. New calls then need a target at least z·σ·√age away, so nobody can post a call the market has already reached. It resets as soon as the oracle prints again."],
-  ["Why is my skill score still empty?", "A call counts toward skill once it settles and others have bet enough on it (the scored-volume threshold below). A call only you traded proves nothing, so it doesn't move your score."],
+  ["Why is my skill score still empty?", "A call counts toward skill if you seeded it with at least the scoring size for its token (see the stake table), and it counts once it settles. Smaller calls are practice: they trade and settle like any other, but don't move your score. Whether a call counts is fixed when you post it, so nobody can choose afterwards."],
   ["Is this real money?", "Yes. On QIE mainnet, each call is staked in QIE or QUSDC (its creator picks), and its seeds, bets and payouts are in that token. Gas is paid in QIE. Start small; this is not financial advice."],
 ];
 
@@ -310,9 +310,10 @@ export default function DocsPage() {
               ]}
             />
             <P>
-              A keeper runs these automatically: it proves touches as soon as they print, keeps open calls&apos; round checks caught up,
-              settles calls after their deadline, and posts each feed&apos;s volatility. Outcomes never depend on it: anyone can do the
-              same.
+              A keeper runs these automatically for the calls that matter (calls that count toward skill, and calls holding a real
+              amount of other people&apos;s money): it proves touches as soon as they print, keeps their round checks caught up, settles
+              them after the deadline, and posts each feed&apos;s volatility. Outcomes never depend on it: anyone can do the same from a
+              call&apos;s page, and small practice calls are settled that way. Its wallet and gas are shown on the Stats page.
             </P>
 
             <H2 id="refunds">Refunds and voids</H2>
@@ -331,12 +332,15 @@ export default function DocsPage() {
               </li>
               <li>
                 <Strong>The oracle went silent.</Strong> If, by the void period after the deadline, the oracle has never printed past the
-                deadline (or the feed has stopped working), anyone can void the call. A call the oracle can still settle is settled instead.
+                deadline (or the feed has stopped working), anyone can void the call. A call the oracle can still settle is settled
+                instead, and a call is never voided over oracle rounds that haven&apos;t been checked yet: those are checked first (anyone
+                can run the check).
               </li>
             </UL>
             <P>
-              In a void call every stake, including the creator&apos;s seed, is refunded (fees already credited are kept), and the call
-              doesn&apos;t count toward anyone&apos;s skill.
+              In a void call every stake, including the creator&apos;s seed, is refunded, and the call doesn&apos;t count toward
+              anyone&apos;s skill. Bets still waiting on their next oracle round get their fee back too; fees already earned (on bets whose
+              round had passed) are kept.
             </P>
 
             <H2 id="skill">Skill and the leaderboard</H2>
@@ -352,8 +356,9 @@ export default function DocsPage() {
                 better than the market expected climbs the board. The odds are set by the contract, so nobody can choose favourable ones.
               </li>
               <li>
-                <Strong>Only traded calls count.</Strong> A call scores once others have bet the scored-volume threshold on it (refunded bets
-                excluded). A call nobody else traded cost its creator nothing, so it proves nothing.
+                <Strong>Decided at posting.</Strong> A call counts toward skill if its creator seeded at least the token&apos;s scoring size
+                (the stake table above). That&apos;s fixed the moment it&apos;s posted, so nobody can pick afterwards which calls count:
+                every scored call, hit or miss, is on the record. Smaller calls are practice.
               </li>
               <li>
                 <Strong>Ranking.</Strong> The leaderboard ranks skill per scored call, once a creator has three; this week and all time.
@@ -431,9 +436,9 @@ export default function DocsPage() {
                 ["sync(id, maxRounds)", "Checks unchecked oracle rounds; settles YES on a touch."],
                 ["proveTouch(id, roundId)", "Checks rounds up to roundId in order; settles on the first touch."],
                 ["settle(id)", "Settles NO after the deadline, grace and a print past the deadline."],
-                ["voidCall(id)", "After the void period: settles if possible, otherwise voids."],
-                ["claim(id)", "Pays winnings or refunds."],
-                ["claimCreatorFees(token)", "Withdraws your creator fees in that token."],
+                ["voidCall(id)", "After the void period: settles if possible, otherwise voids (never over unchecked rounds: sync first)."],
+                ["claim(id) / claimTo(id, to)", "Pays winnings or refunds (to another address, for a wallet that can't receive QIE)."],
+                ["claimCreatorFees(token) / claimCreatorFeesTo(token, to)", "Withdraws your creator fees in that token."],
               ]}
             />
             <H3>Reads</H3>
@@ -451,7 +456,8 @@ export default function DocsPage() {
             />
             <H3>Events</H3>
             <P>
-              <C>CallCreated</C>, <C>Bet</C>, <C>Touched</C>, <C>Settled</C>, <C>Voided</C>, <C>Synced</C>, <C>Claimed</C>,{" "}
+              <C>CallCreated</C>, <C>Bet</C> (with the bet&apos;s oracle-round tag), <C>Touched</C>, <C>Settled</C>, <C>Voided</C>,{" "}
+              <C>Synced</C>, <C>Claimed</C> (with the recipient),{" "}
               <C>CreatorFeesClaimed</C>, plus admin events (<C>ParamsSet</C>, <C>StakeTokenSet</C>, <C>FeedSet</C>, <C>VolatilitySet</C>, <C>PausedSet</C>, …).
               The app reads its whole history from these events: there&apos;s no indexer or database.
             </P>

@@ -64,7 +64,7 @@ async function create() {
 }
 
 /** Reown AppKit, created on first use (it's large, and only needed to connect). */
-export function appKit(): Promise<AppKit> {
+function appKit(): Promise<AppKit> {
   if (!REOWN_PROJECT_ID) return Promise.reject(new Error("Reown isn't set up on this site yet."));
   if (!kit) {
     kit = create();

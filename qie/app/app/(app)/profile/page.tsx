@@ -254,7 +254,7 @@ type Row = { id: number; yes: bigint; no: bigint; claimable: bigint; claimed: bo
 
 function Positions({ who }: { who: Address }) {
   const w = useWallet();
-  const { calls, events, feedOf, tokenOf, refresh, historyReady } = useData();
+  const { calls, events, feedOf, tokenOf, refresh, historyReady, historyError } = useData();
   const [rows, setRows] = useState<Row[] | null>(null);
   const [failed, setFailed] = useState(0);
   const [err, setErr] = useState<string | null>(null);
@@ -262,7 +262,14 @@ function Positions({ who }: { who: Address }) {
   const me = who.toLowerCase();
   // Calls this wallet has bet on or posted (a seed is a position on both sides).
   const ids = [...new Set([...events.trades.filter((t) => t.user.toLowerCase() === me).map((t) => t.id), ...calls.filter((c) => c.creator.toLowerCase() === me).map((c) => c.id)])];
-  const key = ids.sort((a, b) => b - a).join(",") + "|" + calls.filter((c) => c.settled).length + "|" + events.claims.length;
+  // Re-read when anything that changes a position changes: its calls' pools or
+  // state, or claims. A read that failed is retried on the next data refresh.
+  const pools = calls.filter((c) => ids.includes(c.id)).map((c) => `${c.id}:${c.yesPool}:${c.noPool}:${c.settled}`).join(",");
+  const [retry, setRetry] = useState(0);
+  const key = ids.sort((a, b) => b - a).join(",") + "|" + pools + "|" + events.claims.length + "|" + retry;
+  useEffect(() => {
+    if (failed > 0) setRetry((r) => r + 1); // a failed read: try again with the next refresh
+  }, [calls]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(async () => {
     const got = await Promise.allSettled(ids.map((id) => readPosition(id, who)));
@@ -274,12 +281,19 @@ function Positions({ who }: { who: Address }) {
       const paid = events.claims.filter((x) => x.id === ids[i] && x.user.toLowerCase() === me).reduce((s, x) => s + x.amount, 0n);
       if (p.yes > 0n || p.no > 0n) out.push({ id: ids[i], yes: p.yes, no: p.no, claimable: p.claimable, claimed: p.hasClaimed, paid, payoutIfYes: p.payoutIfYes, payoutIfNo: p.payoutIfNo });
     });
-    setRows(out);
-    setFailed(bad);
+    return { out, bad };
   }, [key, who]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (historyReady) void load().catch(() => setFailed(1));
+    if (!historyReady) return;
+    let live = true; // an account switch mid-read must not show the old account's rows
+    load()
+      .then(({ out, bad }) => live && (setRows(out), setFailed(bad)))
+      .catch(() => live && setFailed(1));
+    return () => {
+      live = false;
+    };
   }, [load, historyReady]);
+  useEffect(() => setRows(null), [who]);
 
   const claim = (id: number, amount: bigint) =>
     run(`claim-${id}`, () =>
@@ -293,7 +307,7 @@ function Positions({ who }: { who: Address }) {
     <section className="panel p-6" data-testid="positions">
       <span className="label">Positions</span>
       {!historyReady || rows === null ? (
-        <p className="mt-3 text-sm text-muted">Reading from QIE…</p>
+        <p className="mt-3 text-sm text-muted">{historyError ?? "Reading from QIE…"}</p>
       ) : rows.length === 0 && failed === 0 ? (
         <p className="mt-3 text-sm text-muted">
           No positions yet.{" "}

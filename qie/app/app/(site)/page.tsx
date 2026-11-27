@@ -7,6 +7,7 @@ import { CodeTabs } from "@/components/landing/CodeTabs";
 import { DotField } from "@/components/landing/DotField";
 import { LiveLine } from "@/components/landing/LiveStats";
 import { Reveal } from "@/components/landing/Reveal";
+import { LiveParam } from "@/components/landing/LiveParam";
 import { ProductWindow } from "@/components/landing/ProductWindow";
 import { SiteNav } from "@/components/landing/SiteNav";
 import { CALLS_ADDRESS, EXPLORER as EXPLORER_URL, NETWORK, QUSDC_URL } from "@/lib/config";
@@ -76,10 +77,30 @@ const FAQ: [string, ReactNode][] = [
     "How is the skill score calculated?",
     "Each settled call scores 1 if it hit, minus the probability the contract gave it when it was posted (so nobody can choose it). A 20% call that hits earns +0.80; a 90% call that misses costs −0.90. Posting safe or random calls averages zero, so the leaderboard only rewards real edge. Only calls others actually bet on count, and the leaderboard ranks skill per call once you have three. The score is stored onchain.",
   ],
-  ["What do creators earn?", "Every bet currently pays a 2% fee: half to the creator of the call, half to the Thesis treasury. A call's fee is fixed when it's posted. Creators claim their share any time from their profile."],
-  ["When does betting close?", "In the last 10% of the window (a 48h call closes about 4.8 hours before its deadline), so nobody can pile in once the outcome is all but known. Betting also pauses while the latest oracle price is within 0.25% of the target, or more than 3 hours old."],
+  [
+    "What do creators earn?",
+    <>
+      Every bet currently pays a <LiveParam k="fee" /> fee: <LiveParam k="creatorShare" /> to the creator of the call, the rest to the
+      Thesis treasury. A call&apos;s fee is fixed when it&apos;s posted. Creators claim their share any time from their profile.
+    </>,
+  ],
+  [
+    "When does betting close?",
+    <>
+      In the last <LiveParam k="close" /> of the window, so nobody can pile in once the outcome is all but known. Betting also pauses
+      while the latest oracle price is within <LiveParam k="cutoff" /> of the target, or more than <LiveParam k="oracleAge" /> old. A
+      call keeps the cutoff and age limit it was posted with.
+    </>,
+  ],
   ["Can a quick wick be missed?", "Only between oracle rounds. Calls settle from the QIE Oracle's published rounds, typically 3 to 6 minutes apart and sometimes over an hour in quiet markets, so a wick that starts and ends between two rounds can't count. Every round that is published inside the window does, and the opening odds account for it."],
-  ["What if the oracle stops?", "NO only wins once the oracle has printed a price after the deadline, so an outage can't hand NO a win. If no price comes within 3 days of the deadline (or the feed breaks), anyone can void the call and every stake is refunded. A call the oracle can still settle is never voided."],
+  [
+    "What if the oracle stops?",
+    <>
+      NO only wins once the oracle has printed a price after the deadline, so an outage can&apos;t hand NO a win. If no price comes
+      within <LiveParam k="voidAfter" /> of the deadline (or the feed breaks), anyone can void the call and every stake is refunded. A
+      call the oracle can still settle is never voided.
+    </>,
+  ],
   ["Is this real money?", `Yes, on QIE ${NETWORK === "mainnet" ? "mainnet" : NETWORK}: each call is staked in QIE or in QUSDC (QIE's stablecoin), its creator's choice, and seeds, bets and payouts are in that token. Gas is paid in QIE. Start small; this is a hackathon build and not financial advice.`],
 ];
 
@@ -169,9 +190,9 @@ export default function LandingPage() {
           </div>
           </Reveal>
           <Reveal className="h-full" delay={220}>
-          <StatCard chip="Grace" big="5 min" icon={<Timer size={44} strokeWidth={1.25} />}>
-            A touch settles YES at once. After the deadline and a five-minute grace window, anyone can settle NO once the oracle
-            prints past it; with no print in 3 days, the call is void and refunded.
+          <StatCard chip="Grace" big={<LiveParam k="grace" />} icon={<Timer size={44} strokeWidth={1.25} />}>
+            A touch settles YES at once. After the deadline and a short grace window, anyone can settle NO once the oracle prints
+            past it; with no print in <LiveParam k="voidAfter" />, the call is void and refunded.
           </StatCard>
           </Reveal>
         </div>
@@ -291,7 +312,7 @@ export default function LandingPage() {
             </div>
           </Bento>
           <Bento icon={<Coins size={18} />} title="Get paid to be followed">
-            Creators claim half of the fee (currently 2%) on every bet on their call.
+            Creators claim <LiveParam k="creatorShare" /> of the fee (currently <LiveParam k="fee" />) on every bet on their call.
             <div>
               <div className="flex h-2 gap-1">
                 <span className="w-1/2 rounded-full bg-line-2" />
@@ -374,7 +395,7 @@ export default function LandingPage() {
   );
 }
 
-function StatCard({ chip, big, icon, children }: { chip: string; big: string; icon: ReactNode; children: ReactNode }) {
+function StatCard({ chip, big, icon, children }: { chip: string; big: ReactNode; icon: ReactNode; children: ReactNode }) {
   return (
     <div className="lift flex h-full min-h-[380px] flex-col items-center rounded-3xl border border-line bg-panel p-7 text-center">
       <span className="chip">{chip}</span>
@@ -416,6 +437,7 @@ function MiniCard({ className, title, tone, lines }: { className: string; title:
       <div className="flex items-center gap-2 text-[13px] font-medium">
         <span className="h-2 w-2 rounded-full" style={{ background: tone }} />
         {title}
+        <span className="ml-auto rounded-full bg-white/[0.08] px-2 py-0.5 text-[10px] font-normal text-white/50">example</span>
       </div>
       <dl className="num mt-4 space-y-2 text-[12px]">
         {lines.map(([k, v]) => (

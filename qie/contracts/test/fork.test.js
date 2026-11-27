@@ -59,7 +59,8 @@ const { USDC, LAUNCH_PARAMS, STAKE_LIMITS, FEEDS: FEED_CFG } = require("../scrip
     await calls.voidCall(0);
     const c = await calls.getCall(0);
     expect([c.settled, c.voided]).to.deep.equal([true, true]);
-    expect(await calls.claimable(0, alice.address)).to.equal(9_800_000n);
+    // Her bet was still pending (no oracle round after it): refunded in full, fee included.
+    expect(await calls.claimable(0, alice.address)).to.equal(10n * USDC);
 
     // Proving with a real historical round outside the window is refused.
     const [latest] = await sol.latestRoundData();

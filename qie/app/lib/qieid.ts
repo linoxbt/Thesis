@@ -29,7 +29,7 @@ const STORE_ABI = [
 const mainnet = createPublicClient({ transport: http(MAINNET_RPC) });
 
 /** "Alex", "@alex", "alex.qie" → "alex.qie"; null if it can't be a QIE ID. */
-export function normalizeQieId(input: string): string | null {
+function normalizeQieId(input: string): string | null {
   let s = input.trim().toLowerCase().replace(/^@/, "");
   if (!s) return null;
   if (!s.includes(".")) s += ".qie";
@@ -55,7 +55,7 @@ async function lookup<T>(tool: string, args: Record<string, string>): Promise<T 
 const forward = new Map<string, Promise<Address | null>>();
 
 /** The wallet address a QIE ID points to, or null if it isn't registered. */
-export function resolveQieId(input: string): Promise<Address | null> {
+function resolveQieId(input: string): Promise<Address | null> {
   const name = normalizeQieId(input);
   if (!name) return Promise.resolve(null);
   if (!forward.has(name)) {

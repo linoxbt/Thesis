@@ -5,8 +5,8 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Pills } from "@/components/Pills";
 import { ThesisCard } from "@/components/ThesisCard";
-import { useData, useNow, volumeSince } from "@/lib/data";
-import { inMinBets, perToken } from "@/lib/tokens";
+import { useData, useNow } from "@/lib/data";
+import { perToken } from "@/lib/tokens";
 
 const SORTS = [
   { key: "hot", label: "Hot" },
@@ -15,9 +15,13 @@ const SORTS = [
 ] as const;
 
 /** Markets: every call on the contract, newest data every 15 s. */
+const PAGE = 24;
+
 export default function FeedPage() {
   const [sort, setSort] = useState<(typeof SORTS)[number]["key"]>("hot");
-  const { ready, calls, events, feedOf, tradesOf, tokenOf, stakeTokens } = useData();
+  // Render a page of cards at a time: each card has a chart, a timer and a name lookup.
+  const [limit, setLimit] = useState(PAGE);
+  const { ready, calls, events, feedOf, tradesOf, stakeTokens } = useData();
   const now = useNow(30_000);
 
   const shown = useMemo(() => {
@@ -28,12 +32,13 @@ export default function FeedPage() {
     // Hot: open calls first, by the last day's volume, then all-time volume.
     return list.sort((a, b) => {
       if (live(a) !== live(b)) return live(a) ? -1 : 1;
-      // Compared in minimum bets, so QIE and QUSDC calls rank fairly.
-      const day = (c: typeof a) => inMinBets(volumeSince(tradesOf(c.id), now - 86_400), tokenOf(c.token));
-      const all = (c: typeof a) => inMinBets(c.volume, tokenOf(c.token));
+      // By number of trades (the last day's, then all time): a count means the
+      // same whether a call is staked in QIE or QUSDC.
+      const day = (c: typeof a) => tradesOf(c.id).filter((t) => t.ts >= now - 86_400).length;
+      const all = (c: typeof a) => tradesOf(c.id).length;
       return day(b) - day(a) || all(b) - all(a) || b.start - a.start;
     });
-  }, [calls, sort, now, tradesOf, tokenOf]);
+  }, [calls, sort, now, tradesOf]);
 
   const traders = new Set([...events.trades.map((t) => t.user.toLowerCase()), ...calls.map((c) => c.creator.toLowerCase())]).size;
   const volume = perToken(calls.map((c) => ({ token: c.token, value: c.volume })), stakeTokens);
@@ -93,10 +98,17 @@ export default function FeedPage() {
           </div>
         )}
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {shown.map((c) => (
+          {shown.slice(0, limit).map((c) => (
             <ThesisCard key={c.id} c={c} feed={feedOf(c.feed)} />
           ))}
         </div>
+        {shown.length > limit && (
+          <div className="mt-6 text-center">
+            <button onClick={() => setLimit((l) => l + PAGE)} className="btn btn-ghost text-sm" data-testid="show-more">
+              Show more ({shown.length - limit} left)
+            </button>
+          </div>
+        )}
       </section>
     </div>
   );

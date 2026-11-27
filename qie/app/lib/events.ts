@@ -18,6 +18,8 @@ export interface Trade {
   /** Pools right after the bet: the crowd odds at that moment. */
   yesPool: bigint;
   noPool: bigint;
+  /** The oracle round that was latest when it was placed (its refund tag). */
+  round: bigint;
   tx: Hash;
   ts: number;
 }
@@ -33,16 +35,9 @@ export interface Settlement {
   id: number;
   yesWon: boolean;
   skillDeltaBps: number;
-  /** Counted toward the creator's skill (the call had enough outside volume). */
+  /** Counted toward the creator's skill (seeded at the scoring size, fixed at posting). */
   scored: boolean;
   creator: Address;
-  tx: Hash;
-  ts: number;
-}
-export interface Voiding {
-  id: number;
-  /** 1: touched in the first round after posting; 2: no oracle print past the deadline, or the feed broke. */
-  reason: number;
   tx: Hash;
   ts: number;
 }
@@ -53,32 +48,22 @@ export interface Claim {
   tx: Hash;
   ts: number;
 }
-export interface CreatorFeeClaim {
-  creator: Address;
-  token: Address;
-  amount: bigint;
-  ts: number;
-}
 export interface Events {
   trades: Trade[];
   touches: Touch[];
   settlements: Settlement[];
-  voids: Voiding[];
   claims: Claim[];
-  feeClaims: CreatorFeeClaim[];
   /** Transaction that posted each call. */
   createdTx: Record<number, Hash>;
 }
 
-export const emptyEvents = (): Events => ({ trades: [], touches: [], settlements: [], voids: [], claims: [], feeClaims: [], createdTx: {} });
+export const emptyEvents = (): Events => ({ trades: [], touches: [], settlements: [], claims: [], createdTx: {} });
 
 export const cloneEvents = (e: Events): Events => ({
   trades: [...e.trades],
   touches: [...e.touches],
   settlements: [...e.settlements],
-  voids: [...e.voids],
   claims: [...e.claims],
-  feeClaims: [...e.feeClaims],
   createdTx: { ...e.createdTx },
 });
 
@@ -120,26 +105,40 @@ async function pool<T>(tasks: (() => Promise<T>)[], limit: number): Promise<T[]>
   return out;
 }
 
+/** Log keys already read (tx:logIndex) with their block, to dedupe overlapping reads. */
+export type Seen = Map<string, bigint>;
+
 /**
  * Reads the contract's events in [from, to] and appends them to `into`
  * (deduplicated by tx and log index, so overlapping reads are harmless).
  * Everything the history views show comes from here: no indexer, no database.
- * Nothing is marked as seen until the whole read has succeeded, so a failed
- * read is simply retried next time without losing events.
+ * Ranges are fetched a few at a time but applied in order, up to the first one
+ * that fails even after retries; returns the last block applied (from - 1 if
+ * none), so the caller saves progress and resumes from there next time.
  */
-/** Log keys already read (tx:logIndex) with their block, to dedupe overlapping reads. */
-export type Seen = Map<string, bigint>;
-
-export async function readEvents(from: bigint, to: bigint, into: Events, seen: Seen): Promise<void> {
-  if (to < from) return;
+export async function readEvents(from: bigint, to: bigint, into: Events, seen: Seen): Promise<bigint> {
+  if (to < from) return to;
   const ranges: [bigint, bigint][] = [];
   for (let a = from; a <= to; a += SPAN + 1n) ranges.push([a, a + SPAN > to ? to : a + SPAN]);
-  const raw = (
-    await pool(
-      ranges.map(([a, b]) => () => withRetry(() => publicClient.getLogs({ address: CALLS_ADDRESS, fromBlock: a, toBlock: b }))),
-      CONCURRENCY,
-    )
-  ).flat();
+  const pages = await pool(
+    ranges.map(([a, b]) => () => withRetry(() => publicClient.getLogs({ address: CALLS_ADDRESS, fromBlock: a, toBlock: b })).catch(() => null)),
+    CONCURRENCY,
+  );
+  let applied = from - 1n;
+  for (let i = 0; i < ranges.length; i++) {
+    const raw = pages[i];
+    if (!raw) break; // resume here next time
+    try {
+      await apply(raw, into, seen);
+    } catch {
+      break; // block times couldn't be read: retry this range next time
+    }
+    applied = ranges[i][1];
+  }
+  return applied;
+}
+
+async function apply(raw: Awaited<ReturnType<typeof publicClient.getLogs>>, into: Events, seen: Seen) {
   const fresh = new Map<string, bigint>();
   const logs = parseEventLogs({ abi: THESIS_CALLS_ABI, logs: raw }).filter((l) => {
     const k = `${l.transactionHash}:${l.logIndex}`;
@@ -148,14 +147,14 @@ export async function readEvents(from: bigint, to: bigint, into: Events, seen: S
     return true;
   });
   logs.sort((a, b) => (a.blockNumber === b.blockNumber ? (a.logIndex ?? 0) - (b.logIndex ?? 0) : a.blockNumber! < b.blockNumber! ? -1 : 1));
-  await timesOf(logs.filter((l) => ["Bet", "Settled", "Voided", "Claimed", "CreatorFeesClaimed"].includes(l.eventName)).map((l) => l.blockNumber!));
+  await timesOf(logs.filter((l) => ["Bet", "Settled", "Claimed"].includes(l.eventName)).map((l) => l.blockNumber!));
   for (const l of logs) {
     const ts = blockTimes.get(l.blockNumber!) ?? 0;
     const tx = l.transactionHash!;
     switch (l.eventName) {
       case "Bet": {
         const a = l.args;
-        into.trades.push({ id: Number(a.id), user: a.user, yes: a.yes, amount: a.amount, fee: a.fee, yesPool: a.yesPool, noPool: a.noPool, tx, ts });
+        into.trades.push({ id: Number(a.id), user: a.user, yes: a.yes, amount: a.amount, fee: a.fee, yesPool: a.yesPool, noPool: a.noPool, round: a.round, tx, ts });
         break;
       }
       case "Touched": {
@@ -168,19 +167,9 @@ export async function readEvents(from: bigint, to: bigint, into: Events, seen: S
         into.settlements.push({ id: Number(a.id), yesWon: a.yesWon, skillDeltaBps: Number(a.skillDeltaBps), scored: a.scored, creator: a.creator, tx, ts });
         break;
       }
-      case "Voided": {
-        const a = l.args;
-        into.voids.push({ id: Number(a.id), reason: Number(a.reason), tx, ts });
-        break;
-      }
       case "Claimed": {
         const a = l.args;
         into.claims.push({ id: Number(a.id), user: a.user, amount: a.amount, tx, ts });
-        break;
-      }
-      case "CreatorFeesClaimed": {
-        const a = l.args;
-        into.feeClaims.push({ creator: a.creator, token: a.token, amount: a.amount, ts });
         break;
       }
       case "CallCreated":
@@ -197,7 +186,7 @@ export async function readEvents(from: bigint, to: bigint, into: Events, seen: S
 // ignored. A reorg deeper than the 5-block overlap is not expected on QIE
 // (CometBFT finality).
 
-const CACHE_KEY = `thesis-events:v4:${qie.id}:${CALLS_ADDRESS.toLowerCase()}`;
+const CACHE_KEY = `thesis-events:v5:${qie.id}:${CALLS_ADDRESS.toLowerCase()}`;
 const big = (_k: string, v: unknown) => (typeof v === "bigint" ? { $b: v.toString() } : v);
 const unbig = (_k: string, v: unknown) => (v && typeof v === "object" && "$b" in v ? BigInt((v as { $b: string }).$b) : v);
 
@@ -218,7 +207,12 @@ export function saveCachedEvents(events: Events, cursor: bigint, seen: Seen) {
   for (const [k, b] of seen) if (b + 20n < cursor) seen.delete(k);
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify({ events, cursor, seen: [...seen] }, big));
-  } catch {
-    // Storage full or blocked: the app works without the cache.
+  } catch (e) {
+    // Storage full or blocked: the app works without the cache (it re-reads
+    // history on the next visit). Drop the stale copy so it can't be reused.
+    console.warn("Thesis: couldn't save the event cache;", (e as Error)?.name ?? e);
+    try {
+      localStorage.removeItem(CACHE_KEY);
+    } catch {}
   }
 }

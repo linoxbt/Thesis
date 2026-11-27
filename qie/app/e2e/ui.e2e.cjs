@@ -124,6 +124,10 @@ async function main() {
     const action = new URL(route.request().url()).searchParams.get("action");
     const json = (status, body) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
     if (action === "start") {
+      // The page must send a solved proof-of-work with every start.
+      const pow = JSON.parse(route.request().postData() || "{}").pow;
+      const ok = pow && pow.challenge === "e2e-challenge" && require("node:crypto").createHash("sha256").update(`${pow.challenge}:${pow.nonce}`).digest("hex").startsWith("0000") && parseInt(require("node:crypto").createHash("sha256").update(`${pow.challenge}:${pow.nonce}`).digest("hex")[4], 16) < 4;
+      fn.powOk = (fn.powOk ?? true) && Boolean(ok);
       const { qieId } = JSON.parse(route.request().postData() ?? "{}");
       if (!/^tester(\.qie)?$/.test(qieId)) return json(404, { code: "QIE_ID_NOT_FOUND", message: "That QIE ID isn't registered. Check the spelling and try again." });
       fn.polls = 0;
@@ -137,6 +141,8 @@ async function main() {
     }
     if (action === "me") return fn.session ? json(200, fn.session) : json(401, { code: "NO_SESSION" });
     if (action === "nonce") return json(200, { nonce: "e2e0nonce0000001" });
+    // A real-sized proof-of-work (the page solves it before starting a sign-in).
+    if (action === "challenge") return json(200, { challenge: "e2e-challenge", bits: 18 });
     if (action === "cancel") return (fn.cancels = (fn.cancels ?? 0) + 1), json(200, { ok: true });
     if (action === "logout") return (fn.session = null), json(200, { ok: true });
     if (action === "verify-wallet") return fn.verifyWallet === "down" ? json(502, { code: "QIE_UNREACHABLE" }) : json(200, { address: ACCOUNT, verified: false });
@@ -173,6 +179,7 @@ async function main() {
   fn.outcome = "approved";
   await page.click('[data-testid="qieid-submit"]');
   await page.waitForSelector('[data-testid="account-qiepass"]', { timeout: 20_000 });
+  check("every sign-in start carried a solved proof-of-work", fn.powOk === true);
   check("approving in QIE Wallet signs in with the QIE ID", /tester\.qie/.test((await page.textContent('[data-testid="account"]')) ?? ""));
   // d) the session survives a reload (server session cookie)
   await page.reload();
@@ -242,6 +249,18 @@ async function main() {
     await page.waitForFunction(() => /pot\s*30\.00 QIE/.test(document.body.textContent ?? ""), null, { timeout: 20_000 }).catch(() => {});
     check("the QIE call's pot is in QIE", /pot\s*30\.00 QIE/.test((await page.textContent("body")) ?? ""));
   }
+
+  // 4a2. A call with a 280-byte reason (the contract's maximum): its page and card render (no hang).
+  await page.goto(BASE + "/t/?id=3");
+  await page.waitForSelector('[data-testid="call-title"]', { timeout: 20_000 });
+  const responsive = await Promise.race([page.evaluate(() => 1 + 1), new Promise((r) => setTimeout(() => r(null), 10_000))]);
+  await page.click('[data-testid="share-button"]');
+  const longCard = await page
+    .waitForFunction(() => { const i = document.querySelector('[data-testid="share-card"]'); return !!i && i.complete && i.naturalWidth > 0; }, null, { timeout: 20_000 })
+    .then(() => true)
+    .catch(() => false);
+  check("a call with a 280-byte reason renders its page and share card (no freeze)", responsive === 2 && longCard);
+  await page.keyboard.press("Escape");
 
   // 4b. Share: the dialog draws the call's card image
   await page.goto(BASE + "/t/?id=0");

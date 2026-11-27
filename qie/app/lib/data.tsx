@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import type { Address } from "viem";
 import { publicClient, readCalls, readCreators, readFeeds, readParams, readStakeTokens, type Call, type Feed, type Params, type Stats } from "./chain";
 import { DEPLOY_BLOCK, DEPLOYED } from "./config";
@@ -11,6 +12,8 @@ interface Data {
   ready: boolean;
   /** Event history has been read up to the chain head at least once. */
   historyReady: boolean;
+  /** Reading history keeps failing (it resumes where it stopped, on the next refresh). */
+  historyError: string | null;
   error: string | null;
   params: Params | null;
   /** What calls can be staked in: native QIE first, then tokens (QUSDC). */
@@ -42,6 +45,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<State>({
     ready: false,
     historyReady: false,
+    historyError: null,
     error: null,
     params: null,
     stakeTokens: [],
@@ -59,6 +63,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const seen = useRef<Seen>(new Map());
   const callsRef = useRef<Call[]>([]);
   const loaded = useRef(false);
+  const round = useRef(0);
+  const creatorsKey = useRef("");
+  const creatorsRef = useRef<{ creator: Address; stats: Stats }[]>([]);
+  // The docs pages don't show history: skip reading it there.
+  const pathname = usePathname() ?? "";
+  const wantHistory = useRef(true);
+  wantHistory.current = !pathname.startsWith("/docs");
 
   const once = useCallback(async () => {
     if (!loaded.current) {
@@ -72,18 +83,37 @@ export function DataProvider({ children }: { children: ReactNode }) {
       }
     }
     try {
-      const [p, stakeTokens, feeds, calls, creators] = await Promise.all([readParams(), readStakeTokens(), readFeeds(), readCalls(callsRef.current), readCreators()]);
+      // Every 4th refresh is a full one (also re-reads calls long past their void deadline).
+      const full = round.current++ % 4 === 0;
+      const [p, stakeTokens, feeds, calls] = await Promise.all([readParams(), readStakeTokens(), readFeeds(), readCalls(callsRef.current, full)]);
       callsRef.current = calls;
+      // Creators' stats change only when a call is posted or settles.
+      const key = `${calls.length}:${calls.filter((c) => c.settled).length}`;
+      if (key !== creatorsKey.current || full) {
+        creatorsRef.current = await readCreators();
+        creatorsKey.current = key;
+      }
+      const creators = creatorsRef.current;
       setState((s) => ({ ...s, ready: true, error: null, ...p, stakeTokens, feeds, calls, creators }));
+      if (!wantHistory.current) return;
       // History: from the last read block (a few blocks back, deduplicated) to the head.
+      // Progress is kept range by range, so a flaky node only delays the rest.
       const head = await publicClient.getBlockNumber();
       const from = cursor.current > DEPLOY_BLOCK + 5n ? cursor.current - 5n : DEPLOY_BLOCK;
       const next = cloneEvents(events.current);
-      await readEvents(from, head, next, seen.current);
-      events.current = next;
-      cursor.current = head + 1n;
-      saveCachedEvents(next, cursor.current, seen.current);
-      setState((s) => ({ ...s, historyReady: true, events: next }));
+      const applied = await readEvents(from, head, next, seen.current);
+      if (applied >= from) {
+        events.current = next;
+        cursor.current = applied + 1n;
+        saveCachedEvents(next, cursor.current, seen.current);
+      }
+      const done = applied >= head;
+      setState((s) => ({
+        ...s,
+        events: events.current,
+        historyReady: s.historyReady || done,
+        historyError: done ? null : `Couldn't read the full history from QIE yet (up to block ${applied < from ? from - 1n : applied} of ${head}); retrying.`,
+      }));
     } catch (e) {
       setState((s) => ({ ...s, error: (e as Error).message.split("\n")[0] }));
     }
@@ -118,6 +148,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const t = setInterval(() => document.visibilityState === "visible" && void refresh(), 15_000);
     return () => clearInterval(t);
   }, [refresh]);
+  // Leaving the docs for a page with history: read it now, not in 15 s.
+  useEffect(() => {
+    if (wantHistory.current) void refresh();
+  }, [pathname, refresh]);
 
   const value = useMemo<Data>(() => {
     const byCall = new Map<number, Trade[]>();
@@ -142,15 +176,47 @@ export function useData(): Data {
   return v;
 }
 
+/**
+ * One shared clock per interval: every component asking for `ms` reads the
+ * same timer (a page of 50 cards runs one 1 s timer, not 50). Paused while the
+ * tab is hidden.
+ */
+const clocks = new Map<number, { now: number; subs: Set<() => void>; timer: ReturnType<typeof setInterval> | null }>();
+function clock(ms: number) {
+  let c = clocks.get(ms);
+  if (!c) {
+    c = { now: Math.floor(Date.now() / 1000), subs: new Set(), timer: null };
+    clocks.set(ms, c);
+  }
+  return c;
+}
+function subscribe(ms: number, fn: () => void) {
+  const c = clock(ms);
+  c.subs.add(fn);
+  if (!c.timer) {
+    c.now = Math.floor(Date.now() / 1000);
+    c.timer = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      c.now = Math.floor(Date.now() / 1000);
+      c.subs.forEach((f) => f());
+    }, ms);
+  }
+  return () => {
+    c.subs.delete(fn);
+    if (!c.subs.size && c.timer) {
+      clearInterval(c.timer);
+      c.timer = null;
+    }
+  };
+}
+
 /** Seconds since epoch, ticking every `ms`; 0 until mounted (prebuilt HTML has no clock). */
 export function useNow(ms = 1000): number {
-  const [now, setNow] = useState(0);
-  useEffect(() => {
-    setNow(Math.floor(Date.now() / 1000));
-    const t = setInterval(() => setNow(Math.floor(Date.now() / 1000)), ms);
-    return () => clearInterval(t);
-  }, [ms]);
-  return now;
+  return useSyncExternalStore(
+    useCallback((fn: () => void) => subscribe(ms, fn), [ms]),
+    () => clock(ms).now,
+    () => 0,
+  );
 }
 
 export const impliedYesBps = (c: Pick<Call, "yesPool" | "noPool" | "openBps">) =>
@@ -162,3 +228,11 @@ export function oddsHistory(c: Call, trades: Trade[]): { t: number; v: number }[
 }
 
 export const volumeSince = (trades: Trade[], since: number) => trades.filter((t) => t.ts >= since).reduce((s, t) => s + t.amount, 0n);
+
+/**
+ * Whether a trade was refunded in full (fee included): it was placed in the
+ * call's refund round (the round right before a touch, or still pending when
+ * the call was voided). Its fee was never earned.
+ */
+export const isRefunded = (t: Pick<Trade, "round">, c: Pick<Call, "hasRefund" | "refundRound"> | undefined) =>
+  !!c && c.hasRefund && t.round === c.refundRound;

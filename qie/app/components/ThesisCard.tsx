@@ -64,7 +64,8 @@ export function ThesisCard({ c, feed }: { c: Call; feed: Feed | undefined }) {
   const { tradesOf, tokenOf } = useData();
   const [open, setOpen] = useState<null | "yes" | "no">(null);
   const trades = tradesOf(c.id);
-  const live = !c.touched && !c.settled && c.end > now;
+  // Betting closes before the deadline (closeAt): the card stops offering it then.
+  const live = !c.touched && !c.settled && c.closeAt > now;
   const pos = positionOfCall(c, feed);
   const mark = feed ? price(feed.price, feed.decimals) : null;
   const yes = impliedYesBps(c);
@@ -109,7 +110,7 @@ export function ThesisCard({ c, feed }: { c: Call; feed: Feed | undefined }) {
         </span>
         <span className="flex items-center gap-1">
           <Clock size={11} />
-          {!now ? "…" : live ? `${timeLeft(c.end, now)} left` : c.end > now ? "trading closed" : "ended"}
+          {!now ? "…" : live ? `${timeLeft(c.closeAt, now)} to bet` : c.end > now && !c.settled ? `betting closed · ${timeLeft(c.end, now)} left` : "ended"}
         </span>
       </div>
 

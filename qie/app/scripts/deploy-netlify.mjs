@@ -1,33 +1,74 @@
-// Deploys qie/app to Netlify: the static export (out/) plus the QIE Pass
-// function (netlify/functions/qie-pass.mjs, bundled with esbuild).
-//   NETLIFY_SITE_ID=… NETLIFY_AUTH_TOKEN=… node scripts/deploy-netlify.mjs
-// Run `npx next build` first. Uses Netlify's file-digest deploy, which uploads
-// only files Netlify doesn't already have.
+// Deploys qie/app to Netlify (production): builds the static export with the
+// mainnet settings from .env.production, checks the build points where it
+// should, bundles the functions, uploads, waits until live, then smoke-tests
+// the live site and restores the previous deploy if anything fails.
+//
+//   NETLIFY_AUTH_TOKEN=… node scripts/deploy-netlify.mjs
+//
+// Refuses to run if a local env file could override the production settings,
+// or if qie/ has uncommitted or unpushed changes (DEPLOY_ALLOW_DIRTY=1 skips
+// the git check). Uses Netlify's file-digest deploy, which uploads only files
+// Netlify doesn't already have.
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { bundleFunctions, FUNCTIONS } from "./bundle-functions.mjs";
 
-const SITE = process.env.NETLIFY_SITE_ID ?? "c3c94038-082f-4368-8cf6-747775fe78ad";
-const TOKEN = process.env.NETLIFY_AUTH_TOKEN ?? "set-by-proxy";
+const SITE_ID = process.env.NETLIFY_SITE_ID ?? "c3c94038-082f-4368-8cf6-747775fe78ad";
+const SITE_URL = (process.env.SITE_URL ?? "https://thesis-qie.netlify.app").replace(/\/$/, "");
+// In the hosted dev environment an HTTPS proxy injects the Netlify credential;
+// anywhere else the token must be given.
+const TOKEN = process.env.NETLIFY_AUTH_TOKEN ?? (process.env.HTTPS_PROXY ? "injected-by-proxy" : null);
+if (!TOKEN) throw new Error("set NETLIFY_AUTH_TOKEN");
 const API = "https://api.netlify.com/api/v1";
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const out = path.join(root, "out");
-if (!fs.existsSync(out)) throw new Error("out/ missing: run `npx next build` first");
+const fail = (m) => {
+  console.error(`deploy: ${m}`);
+  process.exit(1);
+};
 
-// Security headers with per-page script hashes (rewrites out/_headers).
-execFileSync("node", [path.join(root, "scripts/csp.mjs")], { stdio: "inherit" });
-
-const auth = { Authorization: `Bearer ${TOKEN}` };
-async function api(method, url, body, headers = {}) {
-  const res = await fetch(url.startsWith("http") ? url : API + url, { method, headers: { ...auth, ...headers }, body });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`${method} ${url}: ${res.status} ${text.slice(0, 300)}`);
-  return text ? JSON.parse(text) : null;
+// 0. Preconditions: production settings only, and code that's committed and pushed.
+for (const f of [".env.local", ".env.production.local", ".env.development.local"]) {
+  if (fs.existsSync(path.join(root, f))) fail(`${f} exists and would override .env.production (e.g. the local chain); move it away first`);
+}
+const env = Object.fromEntries(
+  fs
+    .readFileSync(path.join(root, ".env.production"), "utf8")
+    .split("\n")
+    .map((l) => l.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/))
+    .filter(Boolean)
+    .map((m) => [m[1], m[2]]),
+);
+const callsAddress = env.NEXT_PUBLIC_CALLS_ADDRESS;
+if (env.NEXT_PUBLIC_QIE_NETWORK !== "mainnet" || !/^0x[0-9a-fA-F]{40}$/.test(callsAddress ?? "")) fail(".env.production must set NEXT_PUBLIC_QIE_NETWORK=mainnet and NEXT_PUBLIC_CALLS_ADDRESS");
+if (!process.env.DEPLOY_ALLOW_DIRTY) {
+  const git = (...a) => execFileSync("git", a, { cwd: root, encoding: "utf8" }).trim();
+  if (git("status", "--porcelain", "--", "..")) fail("qie/ has uncommitted changes (commit them, or DEPLOY_ALLOW_DIRTY=1)");
+  const head = git("rev-parse", "HEAD");
+  if (!git("branch", "-r", "--contains", head)) fail(`HEAD ${head.slice(0, 7)} isn't pushed (push it, or DEPLOY_ALLOW_DIRTY=1)`);
 }
 
-// 1. Static files: path -> sha1.
+// 1. Build with only .env.production: no NEXT_PUBLIC_* from the shell.
+const buildEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("NEXT_PUBLIC_")));
+execFileSync("pnpm", ["run", "build"], { cwd: root, stdio: "inherit", env: { ...buildEnv, NODE_ENV: "production", NEXT_TELEMETRY_DISABLED: "1" } });
+
+// 2. Check the build: it points at the mainnet contract, never a local chain.
+const js = [];
+(function walk(dir) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) walk(p);
+    else if (p.endsWith(".js")) js.push(fs.readFileSync(p, "utf8"));
+  }
+})(path.join(out, "_next"));
+const bundle = js.join("\n");
+if (!bundle.includes(callsAddress)) fail(`the build doesn't contain the contract address ${callsAddress}`);
+// Our local-chain RPC, or the demo chain's contract address (Hardhat's first deploy).
+if (/127\.0\.0\.1:8545|0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512/i.test(bundle)) fail("the build points at a local chain");
+
+// 3. Static files: path -> sha1.
 const files = {};
 const byHash = {};
 (function walk(dir) {
@@ -43,64 +84,78 @@ const byHash = {};
   }
 })(out);
 
-// 2. The functions, each bundled (wasm and fonts inlined) and zipped. The
-// share function gets the contract address and site URL fixed at bundle time.
-const env = Object.fromEntries(
-  [".env.production", ".env.production.local"]
-    .map((f) => path.join(root, f))
-    .filter((f) => fs.existsSync(f))
-    .flatMap((f) => fs.readFileSync(f, "utf8").split("\n"))
-    .map((l) => l.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/))
-    .filter(Boolean)
-    .map((m) => [m[1], m[2]]),
-);
-const callsAddress = process.env.NEXT_PUBLIC_CALLS_ADDRESS ?? env.NEXT_PUBLIC_CALLS_ADDRESS;
-if (!callsAddress) throw new Error("NEXT_PUBLIC_CALLS_ADDRESS is not set (.env.production)");
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qie-fn-"));
-export function bundleFunction(name, outDir = tmp, defines = {}) {
-  execFileSync(
-    "npx",
-    [
-      "-y",
-      "esbuild@0.25.0",
-      path.join(root, `netlify/functions/${name}.mjs`),
-      "--bundle",
-      "--platform=node",
-      "--target=node20",
-      "--format=cjs",
-      "--loader:.wasm=binary",
-      "--loader:.woff=binary",
-      ...Object.entries(defines).map(([k, v]) => `--define:process.env.${k}=${JSON.stringify(v)}`),
-      `--outfile=${path.join(outDir, `${name}.js`)}`,
-      "--log-level=warning",
-    ],
-    { stdio: "inherit", cwd: root },
-  );
-  execFileSync("zip", ["-qj", path.join(outDir, `${name}.zip`), path.join(outDir, `${name}.js`)]);
-  return fs.readFileSync(path.join(outDir, `${name}.zip`));
+// 4. Functions, bundled exactly as tested (scripts/bundle-functions.mjs), zipped.
+const { dir: fnDir, files: fnFiles } = await bundleFunctions({ callsAddress, site: SITE_URL });
+const fns = {};
+for (const name of FUNCTIONS) {
+  execFileSync("zip", ["-qj", path.join(fnDir, `${name}.zip`), fnFiles[name]]);
+  fns[name] = fs.readFileSync(path.join(fnDir, `${name}.zip`));
 }
-const fns = {
-  "qie-pass": bundleFunction("qie-pass"),
-  share: bundleFunction("share", tmp, { THESIS_CALLS: callsAddress, THESIS_SITE: process.env.SITE_URL ?? "https://thesis-qie.netlify.app" }),
-};
 const fnSha = Object.fromEntries(Object.entries(fns).map(([n, z]) => [n, crypto.createHash("sha256").update(z).digest("hex")]));
 
-// 3. Create the deploy, upload what Netlify asks for, wait until it's live.
-const deploy = await api("POST", `/sites/${SITE}/deploys`, JSON.stringify({ files, functions: fnSha }), { "Content-Type": "application/json" });
-console.log(`deploy ${deploy.id}: ${Object.keys(files).length} files, ${deploy.required?.length ?? 0} to upload, functions to upload: ${deploy.required_functions?.length ?? 0}`);
-for (const sha of deploy.required ?? []) {
-  await api("PUT", `/deploys/${deploy.id}/files${encodeURI(Object.keys(files).find((k) => files[k] === sha))}`, fs.readFileSync(byHash[sha]), { "Content-Type": "application/octet-stream" });
+const auth = { Authorization: `Bearer ${TOKEN}` };
+async function api(method, url, body, headers = {}) {
+  const res = await fetch(url.startsWith("http") ? url : API + url, { method, headers: { ...auth, ...headers }, body });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`${method} ${url}: ${res.status} ${text.slice(0, 300)}`);
+  return text ? JSON.parse(text) : null;
 }
-for (const [name, sha] of Object.entries(fnSha)) {
-  if (deploy.required_functions?.includes(sha)) await api("PUT", `/deploys/${deploy.id}/functions/${name}?runtime=js`, fns[name], { "Content-Type": "application/octet-stream" });
-}
-for (let i = 0; i < 60; i++) {
-  const d = await api("GET", `/deploys/${deploy.id}`);
-  if (d.state === "ready") {
-    console.log(`live: ${d.ssl_url}`);
-    process.exit(0);
+
+try {
+  // 5. Create the deploy, upload what Netlify asks for, wait until it's live.
+  const previous = (await api("GET", `/sites/${SITE_ID}`)).published_deploy?.id ?? null;
+  const deploy = await api("POST", `/sites/${SITE_ID}/deploys`, JSON.stringify({ files, functions: fnSha }), { "Content-Type": "application/json" });
+  console.log(`deploy ${deploy.id}: ${Object.keys(files).length} files, ${deploy.required?.length ?? 0} to upload, functions to upload: ${deploy.required_functions?.length ?? 0}`);
+  for (const sha of deploy.required ?? []) {
+    await api("PUT", `/deploys/${deploy.id}/files${encodeURI(Object.keys(files).find((k) => files[k] === sha))}`, fs.readFileSync(byHash[sha]), { "Content-Type": "application/octet-stream" });
   }
-  if (d.state === "error") throw new Error(`deploy failed: ${d.error_message}`);
-  await new Promise((r) => setTimeout(r, 3000));
+  for (const [name, sha] of Object.entries(fnSha)) {
+    if (deploy.required_functions?.includes(sha)) await api("PUT", `/deploys/${deploy.id}/functions/${name}?runtime=js`, fns[name], { "Content-Type": "application/octet-stream" });
+  }
+  let state = null;
+  for (let i = 0; i < 100 && state !== "ready"; i++) {
+    const d = await api("GET", `/deploys/${deploy.id}`);
+    state = d.state;
+    if (state === "error") fail(`deploy ${deploy.id} failed: ${d.error_message}`);
+    if (state !== "ready") await new Promise((r) => setTimeout(r, 3000));
+  }
+  if (state !== "ready") fail(`deploy ${deploy.id} is still "${state}" after 5 minutes: it may yet go live; check it on Netlify before deploying again`);
+
+  // 6. Smoke tests against the live site; restore the previous deploy if any fails.
+  const problems = await smoke();
+  if (problems.length) {
+    console.error(`deploy: smoke tests failed:\n  - ${problems.join("\n  - ")}`);
+    if (previous) {
+      await api("POST", `/sites/${SITE_ID}/deploys/${previous}/restore`);
+      console.error(`deploy: restored the previous deploy ${previous}`);
+    }
+    process.exit(1);
+  }
+  console.log(`live and checked: ${SITE_URL}`);
+} finally {
+  fs.rmSync(fnDir, { recursive: true, force: true });
 }
-throw new Error("deploy did not become ready in time");
+
+async function smoke() {
+  const problems = [];
+  const get = (p, opts = {}) => fetch(SITE_URL + p, { redirect: "manual", ...opts });
+  const home = await get("/");
+  if (home.status !== 200) problems.push(`/ answered ${home.status}`);
+  if (!home.headers.get("content-security-policy")?.includes("script-src")) problems.push("/ has no content-security-policy");
+  const html = await home.text();
+  if (!html.includes("Thesis")) problems.push("/ doesn't look like the app");
+  // A shared link must unfurl into its call (when there is a call).
+  const share = await get("/s/0");
+  if (share.status === 200) {
+    const page = await share.text();
+    if (!/og:title/.test(page) || !/\/t\/\?id=0/.test(page)) problems.push("/s/0 doesn't carry the call's preview tags");
+  } else if (!(share.status === 302 && /\/app\/$/.test(share.headers.get("location") ?? ""))) {
+    problems.push(`/s/0 answered ${share.status} → ${share.headers.get("location")}`);
+  }
+  const junk = await get("/s/0?utm=x");
+  if (junk.status !== 301 && junk.status !== 302) problems.push(`/s/0?utm=x answered ${junk.status} (expected a redirect to the canonical URL)`);
+  const me = await get("/.netlify/functions/qie-pass?action=me");
+  if (me.status !== 401) problems.push(`qie-pass ?action=me answered ${me.status} (expected 401 without a session)`);
+  if (me.headers.get("x-content-type-options") !== "nosniff") problems.push("qie-pass responses lack x-content-type-options");
+  return problems;
+}

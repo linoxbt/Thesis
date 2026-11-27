@@ -2,7 +2,7 @@
 //   npx hardhat node &   then   npx hardhat run scripts/dev-chain.js --network localhost
 // Mock BTC/ETH/SOL feeds start at the live QIE Oracle prices; a 6-decimal test
 // token stands in for QUSDC; test accounts get 1,000 each; three demo calls
-// (two in QUSDC, one in native QIE).
+// (two in QUSDC, one in native QIE), plus one with a 280-byte reason.
 // Writes deployments/localhost.json and ../app/.env.local.
 const { ethers } = require("hardhat");
 const { LAUNCH_PARAMS, STAKE_LIMITS, NATIVE, QIE } = require("./params");
@@ -63,6 +63,9 @@ async function main() {
   await calls.connect(users[3]).bet(0, false, 5n * USDC);
   await calls.connect(users[2]).createCall(NATIVE, feeds.ETH.address, true, (eth * 10_400n) / 10_000n, (await now()) + 3 * 86_400, 100n * QIE, "ETH breaks out in QIE terms", { value: 100n * QIE });
   await calls.connect(users[4]).bet(2, false, 40n * QIE, { value: 40n * QIE });
+  // A call whose reason is as long as the contract allows (280 bytes): its page must still render.
+  const long = "SOL holds the range lows and squeezes into resistance; funding is negative, open interest is climbing and every dip gets bought within the hour. I expect a sweep of the highs before the window closes, then a fast move through the take profit as shorts cover. Patience pays off!!!!";
+  await calls.connect(users[5]).createCall(usdc, feeds.SOL.address, true, (sol * 10_400n) / 10_000n, (await now()) + 2 * 86_400, 10n * USDC, long);
 
   const out = { network: "localhost", chainId: 31337, ThesisCalls: await calls.getAddress(), stakeTokens: { QUSDC: usdc, QIE: NATIVE }, feeds, keeper: keeper.address };
   fs.writeFileSync(path.join(__dirname, "..", "deployments", "localhost.json"), JSON.stringify(out, null, 2) + "\n");

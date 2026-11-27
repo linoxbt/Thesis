@@ -5,6 +5,9 @@ test-ledger/
 *.log
 .env
 .env.*
+# The web app's production settings are public (they ship in its JS): tracked,
+# so a fresh clone and CI build exactly what's deployed.
+!qie/app/.env.production
 # keypairs never go in git
 *-keypair.json
 id.json

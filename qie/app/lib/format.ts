@@ -67,3 +67,10 @@ export function callLine(asset: string, above: boolean, strike: bigint, decimals
   const p = price(strike, decimals);
   return `${asset} ${above ? "≥" : "≤"} ${usd(p, p >= 1000 ? 0 : 2)}`;
 }
+
+/** A whole duration as words: "3 days", "36 h", "45 min". */
+export function durationText(secs: number): string {
+  if (secs % 86_400 === 0) return `${secs / 86_400} day${secs === 86_400 ? "" : "s"}`;
+  if (secs % 3600 === 0) return `${secs / 3600} h`;
+  return `${Math.round(secs / 60)} min`;
+}

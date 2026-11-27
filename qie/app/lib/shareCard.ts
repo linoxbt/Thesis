@@ -66,6 +66,24 @@ function fit(g: CanvasRenderingContext2D, text: string, font: (px: number) => st
   return p;
 }
 
+/**
+ * The longest prefix of `text` that fits in `max` px with `suffix` after it
+ * (the whole text if it already fits). Binary search: always finishes, in
+ * about log2(length) measurements, whatever the text.
+ */
+export function ellipsize(measure: (s: string) => number, text: string, max: number, suffix = "…"): string {
+  if (measure(text) <= max) return text;
+  const chars = Array.from(text); // whole code points: never split an emoji
+  let lo = 0;
+  let hi = chars.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (measure(chars.slice(0, mid).join("").trimEnd() + suffix) <= max) lo = mid;
+    else hi = mid - 1;
+  }
+  return chars.slice(0, lo).join("").trimEnd() + suffix;
+}
+
 export async function drawCard(d: CardData): Promise<Blob> {
   await Promise.all(
     ["600 64px Sora", "400 28px Inter", "500 28px 'JetBrains Mono'"].map((f) => document.fonts.load(f).catch(() => null)),
@@ -155,8 +173,8 @@ export async function drawCard(d: CardData): Promise<Blob> {
   if (d.text) {
     g.fillStyle = C.muted;
     fit(g, `“${d.text}”`, inter, 24, W - 128);
-    let t = `“${d.text}”`;
-    while (g.measureText(t).width > W - 128 && t.length > 4) t = t.slice(0, -2) + "…”";
+    const m = (x: string) => g.measureText(x).width;
+    const t = m(`“${d.text}”`) <= W - 128 ? `“${d.text}”` : "“" + ellipsize((x) => m("“" + x), d.text, W - 128, "…”");
     g.fillText(t, 64, 566);
   }
 
@@ -170,9 +188,8 @@ export async function drawCard(d: CardData): Promise<Blob> {
   g.textAlign = "left";
   g.fillStyle = C.faint;
   const room = W - 128 - siteW - 32;
-  let by = `by ${d.creator}`;
-  fit(g, by, mono, 20, room);
-  while (g.measureText(by).width > room && by.length > 6) by = by.slice(0, -2) + "…";
+  fit(g, `by ${d.creator}`, mono, 20, room);
+  const by = ellipsize((x) => g.measureText(x).width, `by ${d.creator}`, room);
   g.fillText(by, 64, 604);
   g.fillStyle = C.brand;
   g.fillRect(0, H - 8, W, 8);

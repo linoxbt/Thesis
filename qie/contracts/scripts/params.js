@@ -1,4 +1,4 @@
-// Launch parameters for ThesisCalls (v3), shared by deploy, verification and the dev chain.
+// Launch parameters for ThesisCalls (v4), shared by deploy, verification and the dev chain.
 const USDC = 1_000_000n;
 
 const LAUNCH_PARAMS = {
@@ -21,15 +21,16 @@ const LAUNCH_PARAMS = {
   voidAfter: 3 * 86_400, // no oracle print 3 days past the deadline: void, refund all
 };
 
-// What calls can be staked in. Amounts are in each token's own units. QIE was
-// $0.158 on 27 Nov 2026, so its limits match QUSDC's in dollars, rounded.
+// What calls can be staked in. Amounts are in each token's own units.
+// minScoredSeed: a call counts toward skill only if its creator seeded at least
+// this much (about $5 either way; QIE was $0.158 on 27 Nov 2026). Smaller calls
+// still trade and settle; they just don't move the leaderboard.
+// QIE's minimum seed and bet are kept small so anyone can try a call.
 const QIE = 10n ** 18n;
 const NATIVE = "0x0000000000000000000000000000000000000000";
 const STAKE_LIMITS = {
-  QUSDC: { enabled: true, minSeed: 2n * USDC, maxSeed: 250n * USDC, minStake: 500_000n, minScoredVolume: 5n * USDC },
-  // Live since 27 Nov 2026: minimum seed 0.005 QIE and bet 0.001 QIE, so small
-  // QIE calls can open. Scoring still needs 30 QIE of outside bets.
-  QIE: { enabled: true, minSeed: QIE / 200n, maxSeed: 1_500n * QIE, minStake: QIE / 1_000n, minScoredVolume: 30n * QIE },
+  QUSDC: { enabled: true, minSeed: 2n * USDC, maxSeed: 250n * USDC, minStake: 500_000n, minScoredSeed: 5n * USDC },
+  QIE: { enabled: true, minSeed: QIE / 200n, maxSeed: 1_500n * QIE, minStake: QIE / 1_000n, minScoredSeed: 30n * QIE },
 };
 
 // 7-day realised volatility and median gap between rounds (seconds, for the

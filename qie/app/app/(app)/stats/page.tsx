@@ -1,7 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { THESIS_CALLS_ABI } from "@/lib/abi";
+import { publicClient } from "@/lib/chain";
 import { CALLS_ADDRESS, explorerAddress, explorerTx, NETWORK } from "@/lib/config";
-import { useData, useNow } from "@/lib/data";
+import { isRefunded, useData, useNow } from "@/lib/data";
 import { callLine, pct, price, when } from "@/lib/format";
 import { perToken } from "@/lib/tokens";
 import { usdPx } from "@/components/Position";
@@ -16,19 +19,64 @@ function Tile({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
+/** Below this the keeper may stop settling promptly (each action costs ~0.0005 QIE). */
+const KEEPER_LOW_QIE = 0.05;
+
+/**
+ * The keeper's wallet and its gas, read live: anyone can see when it needs a
+ * top-up. (Outcomes never depend on it: anyone can settle from a call page.)
+ */
+function KeeperStatus() {
+  const [k, setK] = useState<{ address: `0x${string}`; gas: number } | null>(null);
+  useEffect(() => {
+    let live = true;
+    const load = async () => {
+      const address = await publicClient.readContract({ address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI, functionName: "keeper" });
+      const gas = Number(await publicClient.getBalance({ address })) / 1e18;
+      if (live) setK({ address, gas });
+    };
+    void load().catch(() => {});
+    const t = setInterval(() => document.visibilityState === "visible" && void load().catch(() => {}), 60_000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, []);
+  if (!k) return null;
+  const low = k.gas < KEEPER_LOW_QIE;
+  return (
+    <p className={"num text-xs " + (low ? "text-bad" : "text-faint")} data-testid="keeper-status">
+      Keeper{" "}
+      <a href={explorerAddress(k.address)} target="_blank" rel="noreferrer" className="underline hover:text-ink">
+        {k.address.slice(0, 6)}…{k.address.slice(-4)}
+      </a>{" "}
+      · {k.gas.toFixed(4)} QIE for gas
+      {low ? " · low: it may stop settling promptly until topped up (anyone can still settle from a call page)" : ""}
+    </p>
+  );
+}
+
 /** Public traction, straight from the contract and its events. */
 export default function StatsPage() {
-  const { ready, historyReady, calls, events, feedOf, stakeTokens, creatorShareBps } = useData();
+  const { ready, historyReady, historyError, calls, events, feedOf, stakeTokens, creatorShareBps } = useData();
   const now = useNow(60_000);
-  if (!ready || !historyReady) return <p className="text-sm text-muted">Reading from QIE…</p>;
+  if (!ready || !historyReady) return <p className="text-sm text-muted">{historyError ?? "Reading from QIE…"}</p>;
   const wallets = new Set([...events.trades.map((t) => t.user.toLowerCase()), ...calls.map((c) => c.creator.toLowerCase())]);
   const creators = new Set(calls.map((c) => c.creator.toLowerCase()));
   // Amounts per stake token: a call is in QIE or in QUSDC.
-  const tokenOfCall = new Map(calls.map((c) => [c.id, c.token]));
-  const tk = (id: number) => tokenOfCall.get(id) ?? calls[0]?.token;
+  // Events of a call not loaded yet are left out rather than guessed.
+  const callOf = new Map(calls.map((c) => [c.id, c]));
   const volume = perToken(calls.map((c) => ({ token: c.token, value: c.volume })), stakeTokens);
-  const fees = perToken(events.trades.map((t) => ({ token: tk(t.id), value: t.fee })), stakeTokens, 2);
-  const paid = perToken(events.claims.map((c) => ({ token: tk(c.id), value: c.amount })), stakeTokens);
+  // Fees earned: refunded bets' fees (round before a touch, or pending at a void) were given back.
+  const fees = perToken(
+    events.trades.flatMap((t) => {
+      const c = callOf.get(t.id);
+      return c && !isRefunded(t, c) ? [{ token: c.token, value: t.fee }] : [];
+    }),
+    stakeTokens,
+    2,
+  );
+  const paid = perToken(events.claims.flatMap((x) => (callOf.has(x.id) ? [{ token: callOf.get(x.id)!.token, value: x.amount }] : [])), stakeTokens);
   const open = perToken(calls.filter((c) => !c.settled && c.end > now).map((c) => ({ token: c.token, value: c.yesPool + c.noPool })), stakeTokens);
   const voided = calls.filter((c) => c.voided).length;
   const touched = calls.filter((c) => c.touched && !c.voided);
@@ -45,6 +93,7 @@ export default function StatsPage() {
           </a>{" "}
           on QIE {NETWORK}. Every number is read from the chain in your browser.
         </p>
+        <KeeperStatus />
       </div>
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-4" data-testid="stats">
         <Tile label="Trading wallets" value={String(wallets.size)} />

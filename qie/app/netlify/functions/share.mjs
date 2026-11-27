@@ -2,10 +2,13 @@
 // own card on X, Telegram, Discord and the rest (the site itself is a static
 // export, so it can't put per-call tags in /t/?id=N).
 //
-//   GET /s/<id>                                  (rewritten here by _redirects)
+//   GET /s/<id>                       (rewritten to /.netlify/functions/share/<id> by _redirects)
 //       → a tiny HTML page with the call's Open Graph / X card tags that sends
 //         people on to /t/?id=<id>
-//   GET /.netlify/functions/share?id=<id>&img=1  → the 1200×630 PNG card
+//   GET /.netlify/functions/share/<id>?img=1&v=<state>  → the 1200×630 PNG card
+// The id is read from the path (or ?id=). Any other query (junk, or an
+// out-of-date `v`) gets a redirect to the canonical URL, so the CDN caches
+// one response per call state and junk can't force fresh renders.
 //
 // Everything on the card is read from the chain (and QIE's name service).
 // THESIS_CALLS / THESIS_RPC / THESIS_SITE are fixed at bundle time
@@ -32,13 +35,39 @@ const C = { bg: "#f4f2ec", panel: "#ffffff", ink: "#16171b", muted: "#6b6a64", f
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const usd = (v) => "$" + v.toLocaleString("en-US", { minimumFractionDigits: v >= 1000 ? 0 : 2, maximumFractionDigits: v >= 1000 ? 0 : 2 });
 const pct = (bps, d = 0) => (bps / 100).toFixed(d) + "%";
-// A call is staked in native QIE (the zero address, 18 decimals) or QUSDC (6 decimals).
+// A call is staked in native QIE (the zero address, 18 decimals) or a token
+// (its own symbol and decimals, read from the token).
 const NATIVE = "0x0000000000000000000000000000000000000000";
-const stake = (v, token) => {
-  const native = token.toLowerCase() === NATIVE;
-  const n = Number(v) / (native ? 1e18 : 1e6);
-  return `${n.toLocaleString("en-US", { maximumFractionDigits: n !== 0 && n < 1 ? 4 : 0 })} ${native ? "QIE" : "QUSDC"}`;
+const ERC20_META = [
+  { type: "function", name: "symbol", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
+  { type: "function", name: "decimals", stateMutability: "view", inputs: [], outputs: [{ type: "uint8" }] },
+];
+const tokenMeta = new Map();
+async function tokenOf(token) {
+  if (token.toLowerCase() === NATIVE) return { symbol: "QIE", decimals: 18 };
+  if (!tokenMeta.has(token)) {
+    const [symbol, decimals] = await Promise.all([
+      client.readContract({ address: token, abi: ERC20_META, functionName: "symbol" }),
+      client.readContract({ address: token, abi: ERC20_META, functionName: "decimals" }),
+    ]);
+    tokenMeta.set(token, { symbol: String(symbol).replace(/[^\w.-]/g, "").slice(0, 12) || "token", decimals: Number(decimals) });
+  }
+  return tokenMeta.get(token);
+}
+const stake = (v, t) => {
+  const n = Number(v) / 10 ** t.decimals;
+  return `${n.toLocaleString("en-US", { maximumFractionDigits: n !== 0 && n < 1 ? 4 : 0 })} ${t.symbol}`;
 };
+
+/** The call id from /s/<id>, /share/<id> or ?id=<id>; null if none or malformed. */
+export function callIdFrom(event) {
+  const q = event.queryStringParameters ?? {};
+  const fromQuery = q.id != null ? String(q.id).replace(/\/$/, "") : null;
+  const paths = [event.path, event.rawUrl, event.headers?.["x-nf-original-path"]].filter(Boolean).map(String);
+  const fromPath = paths.map((p) => /\/(?:s|share)\/(\d{1,9})\/?(?:[?#]|$)/.exec(p)?.[1]).find(Boolean) ?? null;
+  const raw = fromQuery ?? fromPath;
+  return raw != null && /^\d{1,9}$/.test(raw) ? Number(raw) : null;
+}
 const short = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const when = (ts) => new Date(ts * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" }) + " UTC";
 
@@ -69,11 +98,12 @@ async function qieName(address) {
 async function readCall(id) {
   const calls = { address: CALLS, abi: THESIS_CALLS_ABI };
   const c = await client.readContract({ ...calls, functionName: "getCall", args: [BigInt(id)] });
-  const [text, desc, decimals, name] = await Promise.all([
+  const [text, desc, decimals, name, tok] = await Promise.all([
     client.readContract({ ...calls, functionName: "callText", args: [BigInt(id)] }),
     client.readContract({ address: c.feed, abi: PRICE_FEED_ABI, functionName: "description" }),
     client.readContract({ address: c.feed, abi: PRICE_FEED_ABI, functionName: "decimals" }),
     qieName(c.creator),
+    tokenOf(c.token),
   ]);
   const scale = 10 ** decimals;
   const entry = Number(c.spotAtOpen) / scale;
@@ -93,7 +123,7 @@ async function readCall(id) {
     crowd,
     open: c.openBps,
     pot,
-    token: c.token,
+    token: tok,
     creator: name ?? short(c.creator),
     status,
     text,
@@ -156,9 +186,9 @@ async function png(d) {
 function page(d) {
   const url = `${SITE}/t/?id=${d.id}`;
   const title = `${d.long ? "Long" : "Short"} ${d.asset}: take profit ${usd(d.tp)} — crowd says ${pct(d.crowd)}`;
-  const desc = `${d.text ? d.text + " · " : ""}Entry ${usd(d.entry)}, deadline ${when(d.end)}. Back it or challenge it in ${d.token.toLowerCase() === NATIVE ? "QIE" : "QUSDC"} on Thesis, settled by the QIE Oracle.`;
+  const desc = `${d.text ? d.text + " · " : ""}Entry ${usd(d.entry)}, deadline ${when(d.end)}. Back it or challenge it in ${d.token.symbol} on Thesis, settled by the QIE Oracle.`;
   // The image URL changes with the call's state, so caches pick up new odds and outcomes.
-  const img = `${SITE}/.netlify/functions/share?id=${d.id}&img=1&v=${d.status.replace(/\W/g, "")}-${d.crowd}`;
+  const img = imageUrl(d);
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(desc)}">
@@ -172,21 +202,32 @@ function page(d) {
 </head><body style="font-family:sans-serif;background:#f4f2ec;color:#16171b"><p><a href="${esc(url)}">Open this call on Thesis</a></p></body></html>`;
 }
 
-const notFound = () => ({ statusCode: 302, headers: { location: `${SITE}/app/`, "cache-control": "no-store" }, body: "" });
+const NOSNIFF = { "x-content-type-options": "nosniff" };
+const notFound = () => ({ statusCode: 302, headers: { ...NOSNIFF, location: `${SITE}/app/`, "cache-control": "no-store" }, body: "" });
+const redirect = (to) => ({ statusCode: 301, headers: { ...NOSNIFF, location: to, "cache-control": "public, max-age=60" }, body: "" });
+const stateTag = (d) => `${d.status.replace(/\W/g, "")}-${d.crowd}`;
+const imageUrl = (d) => `${SITE}/.netlify/functions/share/${d.id}?img=1&v=${stateTag(d)}`;
 
 export const handler = async (event) => {
   const q = event.queryStringParameters ?? {};
-  const raw = String(q.id ?? "").replace(/\/$/, "");
-  if (!/^\d{1,9}$/.test(raw) || !CALLS) return notFound();
-  const id = Number(raw);
+  const id = callIdFrom(event);
+  if (id === null || !CALLS) return notFound();
+  const wantImg = q.img === "1";
+  // Only canonical queries are served: the page takes none (beyond a legacy
+  // ?id=), the image takes img=1 and v. Anything else is redirected before
+  // any RPC read or render.
+  const extra = Object.keys(q).filter((k) => !(k === "id" || (wantImg && (k === "img" || k === "v"))));
+  if (extra.length) return redirect(wantImg ? `${SITE}/.netlify/functions/share/${id}?img=1` : `${SITE}/s/${id}`);
   try {
     if (id >= Number(await client.readContract({ address: CALLS, abi: THESIS_CALLS_ABI, functionName: "callCount" }))) return notFound();
     const d = await readCall(id);
-    if (q.img) {
+    if (wantImg) {
+      // An out-of-date (or made-up) state tag: point at the current one, without rendering.
+      if (q.v !== stateTag(d)) return redirect(imageUrl(d));
       const buf = await png(d);
       return {
         statusCode: 200,
-        headers: { "content-type": "image/png", "cache-control": "public, max-age=300", "netlify-cdn-cache-control": "public, s-maxage=300, stale-while-revalidate=600" },
+        headers: { ...NOSNIFF, "content-type": "image/png", "cache-control": "public, max-age=300", "netlify-cdn-cache-control": "public, s-maxage=300, stale-while-revalidate=600" },
         body: Buffer.from(buf).toString("base64"),
         isBase64Encoded: true,
       };
@@ -194,8 +235,10 @@ export const handler = async (event) => {
     return {
       statusCode: 200,
       headers: {
+        ...NOSNIFF,
         "content-type": "text/html; charset=utf-8",
         "cache-control": "public, max-age=60",
+        "netlify-cdn-cache-control": "public, s-maxage=60, stale-while-revalidate=120",
         "content-security-policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
       },
       body: page(d),
@@ -203,8 +246,8 @@ export const handler = async (event) => {
   } catch (e) {
     console.log("[share] error", id, e?.shortMessage || e?.message);
     // Never strand a visitor: send them to the call page anyway.
-    return { statusCode: 302, headers: { location: `${SITE}/t/?id=${id}`, "cache-control": "no-store" }, body: "" };
+    return { statusCode: 302, headers: { ...NOSNIFF, location: `${SITE}/t/?id=${id}`, "cache-control": "no-store" }, body: "" };
   }
 };
 
-export const _internal = { card, page, png, readCall };
+export const _internal = { card, page, png, readCall, stateTag, imageUrl };

@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import type { Address } from "viem";
-import { useData } from "@/lib/data";
+import { isRefunded, useData } from "@/lib/data";
 import { callLine, fmtSkill, pct } from "@/lib/format";
-import { amtSym, NATIVE, perToken } from "@/lib/tokens";
+import { amtSym, perToken } from "@/lib/tokens";
 
 function Tile({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
@@ -44,12 +44,22 @@ export function ProfileStats({ who }: { who: Address }) {
   const scored = s?.scored ?? 0;
   const avgOpen = mine.length ? Math.round(mine.reduce((a, c) => a + c.openBps, 0) / mine.length) : null;
   // Amounts are kept per stake token (a call is in QIE or in QUSDC, never both).
-  const tokenOfCall = new Map(calls.map((c) => [c.id, c.token]));
-  const tk = (id: number) => tokenOfCall.get(id) ?? NATIVE;
+  // Events of a call not loaded yet are left out rather than guessed.
+  const callOf = new Map(calls.map((c) => [c.id, c]));
+  const of = <T extends { id: number }>(xs: T[], value: (x: T) => bigint, keep: (x: T) => boolean = () => true) =>
+    xs.flatMap((x) => {
+      const c = callOf.get(x.id);
+      return c && keep(x) ? [{ token: c.token, value: value(x) }] : [];
+    });
   const volume = perToken(mine.map((c) => ({ token: c.token, value: c.volume })), stakeTokens);
-  const feesEarned = perToken(events.trades.filter((t) => ids.has(t.id)).map((t) => ({ token: tk(t.id), value: (t.fee * BigInt(creatorShareBps)) / 10_000n })), stakeTokens, 2);
-  const won = perToken(events.claims.filter((c) => c.user.toLowerCase() === me).map((c) => ({ token: tk(c.id), value: c.amount })), stakeTokens, 2);
-  const staked = perToken(events.trades.filter((t) => t.user.toLowerCase() === me).map((t) => ({ token: tk(t.id), value: t.amount })), stakeTokens);
+  // Refunded bets' fees (round before a touch, or pending at a void) were never earned.
+  const feesEarned = perToken(
+    of(events.trades.filter((t) => ids.has(t.id)), (t) => (t.fee * BigInt(creatorShareBps)) / 10_000n, (t) => !isRefunded(t, callOf.get(t.id))),
+    stakeTokens,
+    2,
+  );
+  const won = perToken(of(events.claims.filter((c) => c.user.toLowerCase() === me), (c) => c.amount), stakeTokens, 2);
+  const staked = perToken(of(events.trades.filter((t) => t.user.toLowerCase() === me), (t) => t.amount), stakeTokens);
   const skillOf = new Map(events.settlements.map((x) => [x.id, x.skillDeltaBps]));
   const history = [...mine].reverse();
   return (
@@ -58,7 +68,7 @@ export function ProfileStats({ who }: { who: Address }) {
         <Tile
           label="Skill score"
           value={scored > 0 ? fmtSkill(s!.skillBps) : "—"}
-          sub={scored > 0 ? `${rank ? `#${rank} · ` : ""}${scored} scored call${scored === 1 ? "" : "s"}` : "scored once a traded call settles"}
+          sub={scored > 0 ? `${rank ? `#${rank} all time · ` : ""}${scored} scored call${scored === 1 ? "" : "s"}` : "scored once a call seeded at the scoring size settles"}
         />
         <Tile label="Calls posted" value={String(s?.posted ?? 0)} />
         <Tile label="Hit / missed" value={`${s?.hits ?? 0} / ${s?.misses ?? 0}`} sub={avgOpen !== null ? `avg opening odds ${pct(avgOpen, 0)}` : undefined} />

@@ -50,10 +50,48 @@ globalThis.fetch = async (url, init = {}) => {
 
 const { handler, _internal } = await import("../netlify/functions/qie-pass.mjs");
 
+// ---- a fake Netlify Blobs store (ETags, onlyIfNew / onlyIfMatch) -------------
+function fakeStore() {
+  const m = new Map();
+  let v = 0;
+  const delay = () => new Promise((r) => setTimeout(r, Math.random() * 3));
+  return {
+    m,
+    async get(k) {
+      await delay();
+      return m.has(k) ? m.get(k).data : null;
+    },
+    async getWithMetadata(k) {
+      await delay();
+      return m.has(k) ? { ...m.get(k) } : null;
+    },
+    async set(k, data, o = {}) {
+      await delay();
+      const cur = m.get(k);
+      if (o.onlyIfNew && cur) return { modified: false };
+      if (o.onlyIfMatch && (!cur || cur.etag !== o.onlyIfMatch)) return { modified: false };
+      const etag = `e${++v}`;
+      m.set(k, { data, etag });
+      return { modified: true, etag };
+    },
+  };
+}
+
+/** Solves a start proof-of-work like the browser does. */
+function solve(challenge, bits) {
+  for (let n = 0; n < 1 << (bits + 6); n++) if (_internal.zeroBits(_internal.sha256hex(`${challenge}:${n}`)) >= bits) return String(n);
+  throw new Error("no proof-of-work found");
+}
+
 // ---- a browser ----------------------------------------------------------------
 function browser(ip = "203.0.113." + Math.floor(Math.random() * 250)) {
   const jar = {};
-  const call = async (action, { method = "GET", body, headers = {} } = {}) => {
+  const call = async (action, { method = "GET", body, headers = {}, pow = true } = {}) => {
+    if (action === "start" && pow && body && !body.pow) {
+      const ch = (await call("challenge")).body;
+      // (No challenge, e.g. the function isn't configured: send the start without one.)
+      if (typeof ch.challenge === "string" && Number.isInteger(ch.bits)) body = { ...body, pow: { challenge: ch.challenge, nonce: solve(ch.challenge, ch.bits) } };
+    }
     const cookie = Object.entries(jar).map(([k, v]) => `${k}=${v}`).join("; ");
     const base = { "x-nf-client-connection-ip": ip, cookie };
     if (method === "POST") Object.assign(base, { "content-type": "application/json", origin: SITE, "sec-fetch-site": "same-origin" });
@@ -115,12 +153,12 @@ test("audit H7: cross-site, non-JSON or origin-less POSTs are refused", async ()
     assert.equal(res.status, 403, JSON.stringify(headers));
     assert.equal(fake.starts, before, "nothing reached QIE");
   }
-  // Deploy previews of this site are allowed.
-  const ok = await b.call("start", { method: "POST", body: { qieId: "nobody" }, headers: { origin: "https://deploy-preview-7--thesis-qie.netlify.app" } });
-  assert.equal(ok.status, 404);
+  // Deploy previews and old deploy permalinks are not this site (they may run old code).
+  const preview = await b.call("start", { method: "POST", body: { qieId: "nobody" }, headers: { origin: "https://deploy-preview-7--thesis-qie.netlify.app" } });
+  assert.equal(preview.status, 403);
 });
 
-test("audit H7: start is rate limited per IP and per QIE ID", async () => {
+test("audit H7: start is rate limited per IP and per IP + QIE ID (never per QIE ID alone)", async () => {
   _internal.resetLimits();
   const b = browser("198.51.100.7");
   const codes = [];
@@ -133,11 +171,12 @@ test("audit H7: start is rate limited per IP and per QIE ID", async () => {
   const same = [];
   for (let i = 0; i < 4; i++) same.push((await one.call("start", { method: "POST", body: { qieId: "target-person" } })).status);
   assert.deepEqual(same, [404, 404, 404, 429]);
-  // All IPs together on one QIE ID: 10 per 10 min (caps prompts sent to one person).
+  // Many IPs on one QIE ID: no global cap, so strangers can't lock the owner out
+  // (each prompt costs them a proof-of-work and their own per-IP allowance).
   _internal.resetLimits();
   const id = [];
-  for (let i = 0; i < 12; i++) id.push((await browser().call("start", { method: "POST", body: { qieId: "target-person" } })).status);
-  assert.deepEqual(id.slice(9), [404, 429, 429]);
+  for (let i = 0; i < 12; i++) id.push((await browser(`203.0.113.${100 + i}`).call("start", { method: "POST", body: { qieId: "target-person" } })).status);
+  assert.deepEqual(id, Array(12).fill(404));
   // An IP already over its own limit doesn't use up the victim's ID allowance.
   _internal.resetLimits();
   const spammer = browser("198.51.100.66");
@@ -209,7 +248,7 @@ test("re-audit N5: extra hosts (a custom domain) come from ALLOWED_HOSTS", async
   }
 });
 
-test("leaderboard badges: QIE Pass verification for many addresses, validated and capped", async () => {
+test("leaderboard badges: QIE Pass verification for up to 10 addresses, validated and capped", async () => {
   _internal.resetLimits();
   const b = browser();
   const a1 = user.address, a2 = "0x000000000000000000000000000000000000dEaD";
@@ -218,7 +257,7 @@ test("leaderboard badges: QIE Pass verification for many addresses, validated an
   const res = await handler({ httpMethod: "GET", queryStringParameters: { action: "verified", addresses: `${a1},${a2}` }, headers: { "x-nf-client-connection-ip": "203.0.113.200" } });
   assert.equal(res.statusCode, 200);
   assert.deepEqual(JSON.parse(res.body), { [a1]: true, [a2]: true });
-  const tooMany = await handler({ httpMethod: "GET", queryStringParameters: { action: "verified", addresses: Array(51).fill(a1).join(",") }, headers: {} });
+  const tooMany = await handler({ httpMethod: "GET", queryStringParameters: { action: "verified", addresses: Array(11).fill(a1).join(",") }, headers: {} });
   assert.equal(tooMany.statusCode, 400);
   const bad = await handler({ httpMethod: "GET", queryStringParameters: { action: "verified", addresses: "0xnope" }, headers: {} });
   assert.equal(bad.statusCode, 400);
@@ -233,4 +272,76 @@ test("audit L1: bad dates, other sites and other chains are refused", async () =
   assert.equal((await b.call("verify-wallet", { method: "POST", body: await siwe(b, { domain: "evil.example", uri: "https://evil.example" }) })).body.code, "WRONG_SITE");
   assert.equal((await b.call("verify-wallet", { method: "POST", body: await siwe(b, { chainId: 1 }) })).body.code, "WRONG_CHAIN");
   assert.equal((await b.call("verify-wallet", { method: "POST", body: await siwe(b, { expirationTime: new Date(Date.now() - 1000) }) })).body.code, "STALE");
+});
+
+test("audit M4: starting a sign-in needs a fresh, valid proof-of-work (nothing reaches QIE otherwise)", async () => {
+  _internal.resetLimits();
+  const b = browser();
+  const before = fake.starts;
+  assert.equal((await b.call("start", { method: "POST", body: { qieId: "alice" }, pow: false })).body.code, "BAD_PROOF");
+  const ch = (await b.call("challenge")).body;
+  assert.equal(ch.bits, _internal.POW_BITS);
+  assert.equal((await b.call("start", { method: "POST", body: { qieId: "alice", pow: { challenge: ch.challenge, nonce: "0" } }, pow: false })).body.code, "BAD_PROOF");
+  const forged = _internal.seal("tq_login", { r: "x", exp: Date.now() + 60e3 }); // a sealed value of another type
+  assert.equal((await b.call("start", { method: "POST", body: { qieId: "alice", pow: { challenge: forged, nonce: solve(forged, ch.bits) } }, pow: false })).body.code, "BAD_PROOF");
+  assert.equal(fake.starts, before);
+  const good = { challenge: ch.challenge, nonce: solve(ch.challenge, ch.bits) };
+  assert.equal((await b.call("start", { method: "POST", body: { qieId: "alice", pow: good }, pow: false })).status, 202);
+  assert.equal((await b.call("start", { method: "POST", body: { qieId: "alice", pow: good }, pow: false })).body.code, "BAD_PROOF", "a proof works once");
+});
+
+test("audit M3: IPv6 is limited per /64, not per address", async () => {
+  _internal.resetLimits();
+  assert.equal(_internal.ipBucket("2001:db8:aa:bb:1::2"), _internal.ipBucket("2001:0db8:00aa:00bb:ffff:1:2:3"));
+  assert.notEqual(_internal.ipBucket("2001:db8:aa:bb::1"), _internal.ipBucket("2001:db8:aa:bc::1"));
+  assert.equal(_internal.ipBucket("::ffff:198.51.100.4"), "198.51.100.4");
+  const codes = [];
+  for (let i = 0; i < 7; i++) codes.push((await browser(`2001:db8:aa:bb::${i + 1}`).call("start", { method: "POST", body: { qieId: `v6-${i}` } })).status);
+  assert.deepEqual(codes, [404, 404, 404, 404, 404, 404, 429]);
+});
+
+test("audit M3: counters are atomic under parallel requests (compare-and-swap)", async () => {
+  const store = fakeStore();
+  const got = await Promise.all(Array.from({ length: 40 }, () => _internal.bump(store, "k", 1)));
+  assert.equal(Number(store.m.get("k").data), got.filter((n) => Number.isFinite(n)).length);
+  assert.equal(got.filter((n) => Number.isFinite(n)).length, 40, "every write lands, one at a time");
+  assert.equal(new Set(got.filter((n) => Number.isFinite(n))).size, got.filter((n) => Number.isFinite(n)).length, "no two requests saw the same count");
+});
+
+test("audit L1/L2: a nonce is single use server-side; logout revokes a copied session cookie", async () => {
+  const store = fakeStore();
+  _internal.useStore(store);
+  try {
+    _internal.resetLimits();
+    const b = browser();
+    const body = await siwe(b);
+    const keep = b.jar.tq_nonce;
+    assert.equal((await b.call("verify-wallet", { method: "POST", body })).status, 200);
+    b.jar.tq_nonce = keep; // a client that kept the cookie
+    assert.equal((await b.call("verify-wallet", { method: "POST", body })).body.code, "NONCE_USED");
+    // Session revocation.
+    const u = browser();
+    await u.call("start", { method: "POST", body: { qieId: "alice" } });
+    for (const r of fake.requests.values()) if (!r.collected) r.status = "approved";
+    assert.equal((await u.call("status")).body.status, "completed");
+    const copied = u.jar.tq_session;
+    await u.call("logout", { method: "POST", body: {} });
+    const thief = browser();
+    thief.jar.tq_session = copied;
+    assert.equal((await thief.call("me")).status, 401);
+  } finally {
+    _internal.useStore(null);
+  }
+});
+
+test("responses carry nosniff; weak secrets and unknown upstream codes don't get through", async () => {
+  const r = await browser().call("me");
+  assert.equal(r.headers["x-content-type-options"], "nosniff");
+  const saved = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = "a".repeat(40);
+  try {
+    assert.equal((await browser().call("challenge")).body.code, "NOT_CONFIGURED");
+  } finally {
+    process.env.SESSION_SECRET = saved;
+  }
 });

@@ -46,7 +46,15 @@ export interface Call {
   /** Latest oracle round when posted (a touch in the next one voids the call). */
   openRound: bigint;
   voidAfter: number;
-  minScored: bigint;
+  /** Counts toward the creator's skill (decided at posting by the seed size). */
+  scored: boolean;
+  /** Bets placed while `refundRound` was the latest print are refunded in full (fee included). */
+  hasRefund: boolean;
+  refundRound: bigint;
+  /** No bets while the latest print is this close to the target (fixed at posting). */
+  betCutoffBps: number;
+  /** No bets while the latest print is older than this (fixed at posting). */
+  maxOracleAge: number;
   /** Smallest bet on this call, fixed at posting. */
   minStake: bigint;
   checkedRound: bigint;
@@ -78,7 +86,7 @@ export interface Stats {
   posted: number;
   hits: number;
   misses: number;
-  /** Sum over scored calls (those with outside volume) of (hit ? 1 : 0) - opening odds. */
+  /** Sum over scored calls (seeded at the scoring size) of (hit ? 1 : 0) - opening odds. */
   skillBps: number;
   scored: number;
 }
@@ -138,8 +146,8 @@ export async function readStakeTokens(): Promise<StakeToken[]> {
               return m;
             })),
       ]);
-      const [enabled, minSeed, maxSeed, minStake, minScoredVolume] = cfg;
-      return { address, ...meta, native: isNative(address), enabled, minSeed, maxSeed, minStake, minScoredVolume };
+      const [enabled, minSeed, maxSeed, minStake, minScoredSeed] = cfg;
+      return { address, ...meta, native: isNative(address), enabled, minSeed, maxSeed, minStake, minScoredSeed };
     }),
   );
   return out.sort((a, b) => Number(b.native) - Number(a.native));
@@ -200,7 +208,11 @@ function toCall(id: number, c: RawCall, text: string): Call {
     touchAt: Number(c.touchAt),
     openRound: c.openRound,
     voidAfter: Number(c.voidAfter),
-    minScored: c.minScored,
+    scored: c.scored,
+    hasRefund: c.hasRefund,
+    refundRound: c.refundRound,
+    betCutoffBps: c.betCutoffBps,
+    maxOracleAge: Number(c.maxOracleAge),
     minStake: c.minStake,
     checkedRound: c.checkedRound,
     scanDone: c.scanDone,
@@ -218,10 +230,12 @@ function toCall(id: number, c: RawCall, text: string): Call {
  * Every call. Given the previous read, only new calls and calls not yet
  * settled are fetched again (a settled call, and every call's text, never change).
  */
-export async function readCalls(prev: Call[] = []): Promise<Call[]> {
+export async function readCalls(prev: Call[] = [], full = true, now = Math.floor(Date.now() / 1000)): Promise<Call[]> {
   const n = Number(await publicClient.readContract({ ...calls, functionName: "callCount" }));
   const out: Call[] = prev.slice(0, n);
-  const open = out.filter((c) => !c.settled).map((c) => c.id);
+  // Unsettled calls change; but a call long past its void deadline only
+  // changes when someone settles it, so it's re-read on full refreshes only.
+  const open = out.filter((c) => !c.settled && (full || now <= c.end + c.voidAfter)).map((c) => c.id);
   const fresh = await Promise.all(open.map((id) => readRawCall(id)));
   open.forEach((id, k) => (out[id] = toCall(id, fresh[k], out[id].text)));
   for (let from = out.length; from < n; from += 50) {

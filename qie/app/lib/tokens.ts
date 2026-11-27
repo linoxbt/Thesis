@@ -14,8 +14,8 @@ export interface StakeToken {
   maxSeed: bigint;
   /** Smallest bet. */
   minStake: bigint;
-  /** Outside bets a call needs to count toward skill. */
-  minScoredVolume: bigint;
+  /** A call counts toward skill if its creator seeded at least this (fixed at posting). */
+  minScoredSeed: bigint;
 }
 
 export const isNative = (a: string) => a.toLowerCase() === NATIVE;
@@ -31,7 +31,7 @@ export const unknownToken = (address: Address): StakeToken => ({
   minSeed: 0n,
   maxSeed: 0n,
   minStake: 0n,
-  minScoredVolume: 0n,
+  minScoredSeed: 0n,
 });
 
 /** A token amount as number text: "12.34"; amounts under 1 keep up to 4 decimals ("0.005"). */
@@ -65,12 +65,3 @@ export function parseTokenAmount(s: string, decimals: number): bigint | null {
   return v > 0n ? v : null;
 }
 
-/**
- * An amount in "minimum bets" of its token, to compare activity across calls
- * staked in different tokens (each token's minimum bet is set to about the
- * same dollar value).
- */
-export function inMinBets(v: bigint, t: Pick<StakeToken, "minStake" | "decimals">): number {
-  const unit = t.minStake > 0n ? t.minStake : 10n ** BigInt(t.decimals);
-  return Number((v * 1000n) / unit) / 1000;
-}

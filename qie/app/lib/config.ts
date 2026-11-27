@@ -17,7 +17,9 @@ const NETS = {
     explorer: "https://mainnet.qie.digital",
   },
   testnet: { id: 1983, name: "QIE Testnet", rpcs: ["https://rpc4testnet.qie.digital", "https://rpc1testnet.qie.digital"], explorer: "https://testnet.qie.digital" },
-  local: { id: 31337, name: "Local (Hardhat)", rpcs: ["http://127.0.0.1:8545"], explorer: "" },
+  // Only a local build knows the local chain's address (the build check for
+  // production refuses any bundle that mentions it).
+  local: { id: 31337, name: "Local (Hardhat)", rpcs: process.env.NEXT_PUBLIC_QIE_NETWORK === "local" ? ["http://127.0.0.1:8545"] : [], explorer: "" },
 } as const;
 
 const net = NETS[NETWORK];

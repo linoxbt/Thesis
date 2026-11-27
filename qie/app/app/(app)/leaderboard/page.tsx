@@ -38,8 +38,9 @@ function useVerified(addresses: string[]): Record<string, boolean> | null {
     }
     if (!todo.length) return setMap(known);
     (async () => {
-      for (let i = 0; i < todo.length; i += 50) {
-        const r = await fetch(`${QIE_PASS_URL}?action=verified&addresses=${todo.slice(i, i + 50).join(",")}`);
+      for (let i = 0; i < todo.length; i += 10) {
+        // The function takes 10 addresses per request.
+        const r = await fetch(`${QIE_PASS_URL}?action=verified&addresses=${todo.slice(i, i + 10).join(",")}`);
         if (!r.ok) throw new Error(String(r.status));
         const got = (await r.json()) as Record<string, boolean>;
         for (const [a, v] of Object.entries(got)) {
@@ -61,7 +62,7 @@ function useVerified(addresses: string[]): Record<string, boolean> | null {
 
 interface Row {
   creator: Address;
-  /** Scored calls: settled with enough outside volume to count. */
+  /** Scored calls: settled calls seeded at least the scoring size (decided at posting). */
   calls: number;
   hits: number;
   score_bps: number;
@@ -87,7 +88,7 @@ const byRank = (a: Row, b: Row) => {
  */
 export default function LeaderboardPage() {
   const [period, setPeriod] = useState<"week" | "all">("week");
-  const { ready, historyReady, creators, calls, events, stakeTokens } = useData();
+  const { ready, historyReady, historyError, creators, calls, events, stakeTokens } = useData();
   const now = useNow(60_000);
 
   const rows = useMemo<Row[]>(() => {
@@ -140,8 +141,8 @@ export default function LeaderboardPage() {
             Every call is scored against the odds the contract gave it when it was posted: a 20% call that hits earns
             <span className="num text-yes"> +0.80</span>, a 90% call that misses costs
             <span className="num text-bad"> −0.90</span>. Safe calls earn almost nothing; only real edge climbs. Ranked by skill per
-            call once a creator has {MIN_CALLS} scored calls; a call is scored once others have bet{" "}
-            {stakeTokens.length ? stakeTokens.map((t) => amtSym(t.minScoredVolume, t, 0)).join(" or ") : "enough"} on it (whichever it&apos;s staked in).
+            call once a creator has {MIN_CALLS} scored calls. A call counts if its creator seeded at least{" "}
+            {stakeTokens.length ? stakeTokens.map((t) => amtSym(t.minScoredSeed, t, 0)).join(" or ") : "the scoring size"}, decided when it&apos;s posted.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -155,12 +156,11 @@ export default function LeaderboardPage() {
             <ShieldCheck size={14} /> Verified only
           </button>
         )}
-        <div className="grid grid-cols-2 gap-1 rounded-full border border-line bg-bg p-1 text-sm" role="tablist" aria-label="Period">
+        <div className="grid grid-cols-2 gap-1 rounded-full border border-line bg-bg p-1 text-sm" role="group" aria-label="Period">
           {(["week", "all"] as const).map((p) => (
             <button
               key={p}
-              role="tab"
-              aria-selected={period === p}
+              aria-pressed={period === p}
               onClick={() => setPeriod(p)}
               className={"rounded-full px-4 py-1.5 " + (period === p ? "bg-ink text-bg" : "text-muted hover:text-ink")}
               data-testid={`leaderboard-${p}`}
@@ -173,7 +173,7 @@ export default function LeaderboardPage() {
       </div>
 
       {!loaded ? (
-        <p className="text-sm text-muted">Reading from QIE…</p>
+        <p className="text-sm text-muted">{historyError ?? "Reading from QIE…"}</p>
       ) : (
         <section className="panel overflow-x-auto p-0" data-testid="leaderboard">
           {shown.length === 0 ? (

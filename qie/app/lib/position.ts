@@ -31,11 +31,4 @@ export function markMove(p: Position, mark: number): number {
   return (sign * (mark - p.entry) * 100) / p.entry;
 }
 
-/** How far from entry to take profit the mark has got, 0..1 (clamped). */
-export function progressToTp(p: Position, mark: number): number {
-  const span = p.tp - p.entry;
-  if (span === 0) return 1;
-  return Math.min(1, Math.max(0, (mark - p.entry) / span));
-}
-
 export const fmtPct = (v: number, digits = 1) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(digits) + "%";

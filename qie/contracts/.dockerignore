@@ -1,0 +1,9 @@
+# The keeper image copies only what it lists; keep secrets and build output
+# out of the build context too (e.g. a local `railway up`).
+.env
+.env.*
+node_modules
+artifacts
+cache
+test
+deployments

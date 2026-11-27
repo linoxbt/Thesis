@@ -21,7 +21,7 @@ const NAV: { href: string; label: string; short?: string; icon: typeof User; mob
   { href: "/new/", label: "Post a trade", short: "Post", icon: PenLine },
   { href: "/stats/", label: "Stats", icon: BarChart3 },
   { href: "/profile/", label: "Profile", icon: User },
-  { href: "/docs/", label: "Docs", icon: BookOpen, mobile: false },
+  { href: "/docs/", label: "Docs", icon: BookOpen },
 ];
 
 /** Latest QIE Oracle prints: SOL always, BTC and ETH on wider screens. */
@@ -58,7 +58,7 @@ export function WalletButton() {
     let live = true;
     const load = () => readBalances(stakeToken, w.account!).then((b) => live && setBal(b)).catch(() => {});
     void load();
-    const t = setInterval(load, 15_000);
+    const t = setInterval(() => document.visibilityState === "visible" && load(), 15_000);
     return () => {
       live = false;
       clearInterval(t);

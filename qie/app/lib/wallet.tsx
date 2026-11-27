@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { BaseError, ContractFunctionRevertedError, createWalletClient, custom, getAddress, type Abi, type Address, type EIP1193Provider } from "viem";
+import { BaseError, ContractFunctionRevertedError, createWalletClient, custom, getAddress, WaitForTransactionReceiptTimeoutError, type Abi, type Address, type EIP1193Provider } from "viem";
 import { createSiweMessage } from "viem/siwe";
 import { publicClient } from "./chain";
 import { EXPLORER, qie, REOWN_PROJECT_ID, RPC_URL } from "./config";
@@ -133,7 +133,8 @@ interface WalletState {
   /** Opens the sign-in dialog; resolves once signed in (rejects silently if closed). */
   connect(): Promise<void>;
   /** Connects through `via`, signs the sign-in message and asks QIE Pass whether the wallet is verified. */
-  signIn(via: "injected" | "reown"): Promise<void>;
+  /** `cancelled()` true once the user pressed Cancel: a signature that arrives later signs no one in. */
+  signIn(via: "injected" | "reown", cancelled?: () => boolean): Promise<void>;
   /** Opens the session from a completed Sign in with QIE ID (the server has already checked it). */
   adoptQieIdLogin(login: QieIdLogin): void;
   disconnect(): void;
@@ -213,10 +214,15 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       picked.provider
         .request({ method: "eth_accounts" })
         .then((a) => {
-          if ((a as string[]).some((x) => x.toLowerCase() === s.address.toLowerCase())) {
+          // Only if it's the wallet's *selected* account: otherwise transactions
+          // would go out from an account the user isn't looking at.
+          const selected = (a as string[])[0];
+          if (selected && selected.toLowerCase() === s.address.toLowerCase()) {
             setVia("injected");
             setAccount(s.address);
             setSession(s);
+          } else {
+            localStorage.removeItem(SESSION_KEY);
           }
         })
         .catch(() => {});
@@ -325,7 +331,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = useCallback<WalletState["signIn"]>(
-    async (route) => {
+    async (route, cancelled = () => false) => {
+      const bail = () => {
+        if (!cancelled()) return false;
+        if (route === "reown") void disconnectWallet();
+        return true;
+      };
       // 2. Connect.
       let p: EIP1193Provider;
       if (route === "reown") {
@@ -367,6 +378,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       });
       const wallet = createWalletClient({ chain: qie, transport: custom(p), account: address });
       const signature = await wallet.signMessage({ account: address, message });
+      if (bail()) throw new Error("Sign-in cancelled.");
       const ok = await publicClient.verifyMessage({ address, message, signature }).catch(() => false);
       if (!ok) throw new Error("That signature doesn't match the wallet's address.");
       // 4. QIE Pass: the server checks the signature and asks QIE whether this
@@ -386,6 +398,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           /* badge unavailable */
         }
       }
+      if (bail()) throw new Error("Sign-in cancelled.");
       const s: Session = { address, name, qiePass, via: route, issuedAt: issued.getTime(), expiresAt: expires.getTime() };
       localStorage.setItem(SESSION_KEY, JSON.stringify(s));
       setVia(route);
@@ -437,6 +450,15 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [via, wc]);
   endSessionRef.current = disconnect;
 
+  // A session that expires while the page is open ends then, not on the next load.
+  useEffect(() => {
+    if (!session) return;
+    const left = session.expiresAt - Date.now();
+    if (left <= 0) return void disconnect();
+    const t = setTimeout(() => disconnect(), Math.min(left, 2 ** 31 - 1));
+    return () => clearTimeout(t);
+  }, [session, disconnect]);
+
   /**
    * Signed in with QIE ID: sign-in proves the account, but transactions still
    * need that wallet. Link it the first time one is sent, through Reown's
@@ -475,20 +497,40 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       const id = Date.now() + Math.random();
       const set = (patch: Partial<Toast>) => setToasts((t) => t.map((x) => (x.id === id ? { ...x, ...patch } : x)));
       setToasts((t) => [...t.slice(-3), { id, label, status: "pending" }]);
+      let sent = false;
       try {
         await ensureChain(p);
         // Simulate first: a revert shows its reason instead of a failed transaction.
         const { request } = await publicClient.simulateContract({ ...call, account } as never);
         const wallet = createWalletClient({ chain: qie, transport: custom(p), account });
         const hash = await wallet.writeContract(request as never);
+        sent = true;
         set({ hash });
-        const receipt = await publicClient.waitForTransactionReceipt({ hash });
+        let receipt;
+        try {
+          receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 180_000 });
+        } catch (e) {
+          if (e instanceof WaitForTransactionReceiptTimeoutError) {
+            // Not failed: it may still be mined. Say so, so nobody sends it twice.
+            set({ status: "pending", error: "Still pending after 3 minutes. Check the explorer before sending it again." });
+            throw new Error("Your transaction is still pending: check the explorer before sending another.");
+          }
+          throw e;
+        }
         if (receipt.status !== "success") throw new Error("The transaction reverted.");
         set({ status: "confirmed" });
         setTimeout(() => dismiss(id), 8000);
         return hash;
       } catch (e) {
+        // A simulation that asks for a sync first is handled by the caller (it
+        // syncs and retries): no "failed" toast for it.
+        if (!sent && errorName(e) === "SyncRequired") {
+          dismiss(id);
+          throw e;
+        }
+        if ((e as Error)?.message?.startsWith("Your transaction is still pending")) throw e;
         set({ status: "failed", error: explain(e) });
+        setTimeout(() => dismiss(id), 15_000);
         throw e;
       }
     },

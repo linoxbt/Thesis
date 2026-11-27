@@ -1,7 +1,9 @@
 // QIE Pass for Thesis, server side. The partner secret never leaves here.
 //
 // Sign in with QIE ID (QIE Pass "qie-login" API):
-//   POST ?action=start   { qieId }  → { qieId, code, expiresAt }   starts a sign-in; QIE Wallet gets a prompt
+//   GET  ?action=challenge          → { challenge, bits } a small proof-of-work, single use, 2 min
+//   POST ?action=start   { qieId, pow: { challenge, nonce } } → { qieId, code, expiresAt }
+//                                     starts a sign-in; QIE Wallet gets a prompt
 //   GET  ?action=status             → { status, expiresAt } | { status: "completed", address, qieId, verified }
 //                                     polls QIE; on approval collects the result once, checks the user's
 //                                     approval signature, and opens a session
@@ -14,7 +16,7 @@
 //                                     signed that message
 // Leaderboard badges:
 //   GET  ?action=verified&addresses=0x…,0x… → { "0x…": true|false } QIE Pass (identity) verification,
-//                                     at most 50 addresses, cached 10 min
+//                                     at most 10 addresses, cached 10 min
 //
 // The sign-in request ID, the nonce and the session live in sealed cookies
 // (AES-256-GCM, HttpOnly, SameSite=Strict): the browser can't read or choose
@@ -24,9 +26,14 @@
 // Nothing onchain trusts it: every transaction is signed by the user's own
 // wallet. Don't use it to authorise anything without re-checking here.
 //
-// Abuse limits: every POST must be JSON from this site (Origin / Sec-Fetch-Site),
-// and start / verify-wallet are rate limited per IP and per QIE ID (Netlify
-// Blobs; per-instance memory as a fallback).
+// Abuse limits: every POST must be JSON from this site (Origin / Sec-Fetch-Site);
+// starting a sign-in (which prompts a wallet) costs a proof-of-work and is
+// limited per IP (IPv6 per /64) and per IP + QIE ID, never per QIE ID alone, so
+// nobody can lock an owner out of their own sign-in; status polls, wallet checks
+// and badge lookups are limited per IP. Counters are atomic (Netlify Blobs
+// conditional writes); if Blobs is down they fall back to per-instance memory
+// and log an ALERT. Nonces, proofs-of-work and logged-out sessions are
+// remembered server-side, so none can be replayed.
 //
 // Env (Netlify): QIE_PASS_API_URL, QIE_PASS_PUBLIC_KEY, QIE_PASS_SECRET_KEY,
 //                SESSION_SECRET (≥ 32 random bytes; cookies; fails closed if missing),
@@ -39,21 +46,25 @@ import { parseSiweMessage } from "viem/siwe";
 const API = () => (process.env.QIE_PASS_API_URL || "https://pass-api.qie.digital") + "/api/v1/partners";
 const CHAIN_ID = 1990;
 const RPC = "https://rpc1mainnet.qie.digital";
-/** This site, its deploy previews (<id>--thesis-qie.netlify.app), and a local dev server. */
-const SITE_HOST = /^(?:[a-z0-9-]+--)?thesis-qie\.netlify\.app$/;
+/** This site (not deploy previews or old deploy permalinks), and a local dev server. */
+const SITE_HOST = /^thesis-qie\.netlify\.app$/;
 const DEV_HOST = /^(?:localhost|127\.0\.0\.1)(?::\d+)?$/;
 const SESSION_DAYS = 7;
 const LOGIN_COOKIE = "tq_login";
 const SESSION_COOKIE = "tq_session";
 const NONCE_COOKIE = "tq_nonce";
 const QIE_TIMEOUT_MS = 8_000;
+/** Leading zero bits the start proof-of-work needs (~260k hashes: well under a second in a browser). */
+const POW_BITS = 18;
+const POW_TTL_MS = 120_000;
+const MAX_BADGES = 10;
 const LIMITS = {
   // [max, window seconds]
-  "start:ip": [6, 600], // one browser/IP trying IDs
+  "start:ip": [6, 600], // one browser/IP (/64 for IPv6) trying IDs
   "start:id-ip": [3, 600], // one IP retrying one QIE ID
-  "start:id": [10, 600], // all IPs together on one QIE ID: caps prompt spam to a victim
+  "status:ip": [300, 600], // sign-in polling (every 2–3 s while a prompt is open)
   "verify:ip": [20, 600],
-  "verified:ip": [30, 600],
+  "verified:ip": [60, 600], // badge lookups: counted per address looked up at QIE
 };
 const extraHosts = () =>
   String(process.env.ALLOWED_HOSTS || "")
@@ -92,7 +103,8 @@ async function qie(method, path, body) {
 
 function sealKey() {
   const secret = process.env.SESSION_SECRET;
-  if (!secret || secret.length < 32) throw Object.assign(new Error("SESSION_SECRET is not configured"), { status: 500, code: "NOT_CONFIGURED" });
+  // At least 32 characters, and not a trivially repetitive one.
+  if (!secret || secret.length < 32 || new Set(secret).size < 16) throw Object.assign(new Error("SESSION_SECRET is not configured"), { status: 500, code: "NOT_CONFIGURED" });
   return Buffer.from(crypto.hkdfSync("sha256", secret, "thesis-qie", "cookie-seal-v2", 32));
 }
 /** Encrypts `obj` as a cookie of type `typ` (a login cookie can't pass as a session). */
@@ -127,7 +139,7 @@ const clear = (name) => cookie(name, "", 0);
 function reply(statusCode, body, cookies = [], headers = {}) {
   return {
     statusCode,
-    headers: { "content-type": "application/json", "cache-control": "no-store", ...headers },
+    headers: { "content-type": "application/json", "cache-control": "no-store", "x-content-type-options": "nosniff", ...headers },
     multiValueHeaders: cookies.length ? { "set-cookie": cookies } : undefined,
     body: JSON.stringify(body),
   };
@@ -175,45 +187,134 @@ function clientIp(event) {
   return /^[0-9a-fA-F:.]{3,45}$/.test(ip) ? ip : undefined;
 }
 
+/**
+ * The bucket an IP is limited in: IPv4 as is, IPv6 by its /64 (one user
+ * typically holds a whole /64, so per-address limits would mean no limit).
+ */
+function ipBucket(ip) {
+  if (!ip || !ip.includes(":")) return ip ?? "unknown";
+  if (ip.includes(".")) return ip.slice(ip.lastIndexOf(":") + 1); // IPv4-mapped
+  const [head, tail = ""] = ip.toLowerCase().split("::");
+  const h = head ? head.split(":") : [];
+  const t = tail ? tail.split(":") : [];
+  const full = [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill("0"), ...t];
+  return full.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, "")).join(":") + "::/64";
+}
+
 // ---- Rate limits ------------------------------------------------------------
 
 const memory = new Map();
-let warned = false;
+let alertedAt = 0;
+/** Rate limits and replay guards are degraded: say so loudly (at most once a minute per instance). */
+function alert(what, e) {
+  if (Date.now() - alertedAt < 60_000) return;
+  alertedAt = Date.now();
+  console.error(`[qie-pass] ALERT: ${what}; using per-instance memory`, e?.name || "");
+}
+let testStore = null; // tests inject a store with Blobs' semantics
 /** This request's Blobs store (its credentials come with each event), or null. */
 function limiter(event) {
+  if (testStore) return testStore;
   try {
     connectLambda(event);
     return getStore({ name: "qie-pass-limits", consistency: "strong" });
   } catch (e) {
-    if (!warned) log("rate limits: Netlify Blobs unavailable, using per-instance memory", e?.name || "");
-    warned = true;
+    alert("Netlify Blobs unavailable", e);
     return null;
   }
 }
+const memAdd = (key, inc) => {
+  const n = (memory.get(key) ?? 0) + inc;
+  memory.set(key, n);
+  if (memory.size > 5000) for (const k of [...memory.keys()].slice(0, 2500)) memory.delete(k);
+  return n;
+};
 
-/** Counts a hit on `key`; returns seconds to wait if over the limit, else 0. */
-async function overLimit(event, kind, id) {
+/**
+ * Adds `inc` to a counter atomically (compare-and-swap on the entry's ETag, so
+ * parallel requests can't all read the same count). Gives up, and counts as
+ * over the limit, if it keeps losing the race.
+ */
+async function bump(s, key, inc) {
+  for (let i = 0; i < 12; i++) {
+    const cur = await s.getWithMetadata(key, { type: "text" });
+    const n = (cur ? Number(cur.data) || 0 : 0) + inc;
+    const w = cur ? await s.set(key, String(n), { onlyIfMatch: cur.etag }) : await s.set(key, String(n), { onlyIfNew: true });
+    if (w?.modified) return n;
+    await new Promise((r) => setTimeout(r, Math.random() * 15 * (i + 1))); // lost the race: back off, retry
+  }
+  return Infinity;
+}
+
+/** Counts `inc` hits on `kind`/`id`; returns seconds to wait if over the limit, else 0. */
+async function overLimit(event, kind, id, inc = 1) {
   const [max, win] = LIMITS[kind];
   const slot = Math.floor(Date.now() / 1000 / win);
   const key = `${kind}:${crypto.createHash("sha256").update(String(id)).digest("hex").slice(0, 32)}:${slot}`;
   const wait = (slot + 1) * win - Math.floor(Date.now() / 1000);
   const s = limiter(event);
-  let n = 0;
+  let n;
   try {
-    if (s) {
-      n = Number((await s.get(key)) ?? 0) + 1;
-      await s.set(key, String(n));
-    } else throw new Error("memory");
+    if (!s) throw new Error("no store");
+    n = await bump(s, key, inc);
   } catch (e) {
-    if (s && !warned) {
-      log("rate limits: Blobs read/write failed, using per-instance memory", e?.name || "");
-      warned = true;
-    }
-    n = (memory.get(key) ?? 0) + 1;
-    memory.set(key, n);
-    if (memory.size > 5000) for (const k of [...memory.keys()].slice(0, 2500)) memory.delete(k);
+    if (s) alert("Blobs read/write failed", e);
+    n = memAdd(key, inc);
   }
   return n > max ? wait : 0;
+}
+
+/** True the first time `key` is seen (nonces, proofs-of-work); false on a replay. */
+async function firstUse(event, key) {
+  const s = limiter(event);
+  try {
+    if (!s) throw new Error("no store");
+    const w = await s.set(`once:${key}`, "1", { onlyIfNew: true });
+    return Boolean(w?.modified);
+  } catch (e) {
+    if (s) alert("Blobs write failed (replay guard)", e);
+    return memAdd(`once:${key}`, 1) === 1;
+  }
+}
+
+const sha256hex = (s) => crypto.createHash("sha256").update(s).digest("hex");
+/** Leading zero bits of a hex digest. */
+function zeroBits(hex) {
+  let bits = 0;
+  for (const ch of hex) {
+    const v = parseInt(ch, 16);
+    if (v === 0) {
+      bits += 4;
+      continue;
+    }
+    return bits + Math.clz32(v) - 28;
+  }
+  return bits;
+}
+
+/** A proof-of-work challenge for starting a sign-in (sealed: the browser can't forge one). */
+function challenge() {
+  const c = seal("tq_pow", { r: crypto.randomBytes(12).toString("hex"), exp: Date.now() + POW_TTL_MS });
+  return reply(200, { challenge: c, bits: POW_BITS });
+}
+/** The proof is valid, fresh, and used for the first time. */
+async function proofOk(event, pow) {
+  if (!pow || typeof pow.challenge !== "string" || typeof pow.nonce !== "string" || pow.challenge.length > 400 || pow.nonce.length > 40) return false;
+  if (!unseal("tq_pow", pow.challenge)) return false;
+  if (zeroBits(sha256hex(`${pow.challenge}:${pow.nonce}`)) < POW_BITS) return false;
+  return firstUse(event, `pow:${sha256hex(pow.challenge)}`);
+}
+
+/** Whether a session was ended by logging out (best effort: Blobs down means not revoked). */
+async function revoked(event, sid) {
+  const s = limiter(event);
+  if (!s || !sid) return false;
+  try {
+    return (await s.get(`revoked:${sid}`)) !== null;
+  } catch (e) {
+    alert("Blobs read failed (session revocation)", e);
+    return false;
+  }
 }
 
 const tooMany = (wait) => fail(429, "RATE_LIMITED", "Too many attempts. Try again in a few minutes.", { retryAfterSeconds: wait });
@@ -237,21 +338,29 @@ async function start(event) {
   } catch {
     return fail(400, "BAD_REQUEST", "Invalid JSON");
   }
+  sealKey(); // fails closed (503) before anything else if sessions can't be sealed
   const qieId = normalizeQieId(body.qieId);
   if (!qieId) return fail(400, "BAD_QIE_ID", "A QIE ID looks like yourname.qie.");
+  // Each wallet prompt costs a fresh proof-of-work (checked first: a bad one
+  // doesn't use up anyone's allowance).
+  if (!(await proofOk(event, body.pow))) return fail(400, "BAD_PROOF", "Sign-in check failed. Try again.");
   const ip = clientIp(event) ?? "unknown";
+  const bucket = ipBucket(ip);
   // The IP's own limit first: an IP already over it doesn't count against the ID.
-  let wait = await overLimit(event, "start:ip", ip);
-  if (!wait) wait = await overLimit(event, "start:id-ip", `${qieId}|${ip}`);
-  if (!wait) wait = await overLimit(event, "start:id", qieId);
+  // (No limit on a QIE ID alone: strangers mustn't be able to lock its owner out.)
+  let wait = await overLimit(event, "start:ip", bucket);
+  if (!wait) wait = await overLimit(event, "start:id-ip", `${qieId}|${bucket}`);
   if (wait) return tooMany(wait);
   const ua = String(header(event, "user-agent") || "").slice(0, 512);
   const client = { ...(ip !== "unknown" ? { ip } : {}), ...(ua ? { userAgent: ua } : {}) };
   const r = await qie("POST", "/qie-login/requests", { qieId, ...(Object.keys(client).length ? { client } : {}) });
   if (!r.ok) {
-    const [status, message] = START_ERRORS[r.json.code] || [r.status >= 500 ? 502 : r.status, "QIE couldn't start the sign-in. Try again."];
+    const known = START_ERRORS[r.json.code];
+    const [status, message] = known || [r.status >= 500 ? 502 : 400, "QIE couldn't start the sign-in. Try again."];
     const retryAfterSeconds = Number(r.json.retryAfterSeconds ?? r.retryAfter) || undefined;
-    return fail(status, r.json.code || "START_FAILED", message, retryAfterSeconds ? { retryAfterSeconds } : {});
+    if (!known) log("start: QIE answered", r.status, String(r.json.code || "").slice(0, 40));
+    // Only our own codes go to the browser.
+    return fail(status, known ? r.json.code : "START_FAILED", message, retryAfterSeconds ? { retryAfterSeconds } : {});
   }
   const d = r.json.data || {};
   const expiresAt = Date.parse(d.expiresAt);
@@ -262,12 +371,14 @@ async function start(event) {
 }
 
 async function status(event) {
+  const wait = await overLimit(event, "status:ip", ipBucket(clientIp(event)));
+  if (wait) return tooMany(wait);
   const pending = readCookie(event, LOGIN_COOKIE);
   if (!pending) return fail(404, "NO_SIGNIN", "No sign-in in progress. Start again.");
   const r = await qie("GET", `/qie-login/requests/${encodeURIComponent(pending.rid)}`);
   if (!r.ok) {
     if (r.json.code === "REQUEST_NOT_FOUND") return fail(404, "REQUEST_NOT_FOUND", "That sign-in has ended. Start again.", {}, [clear(LOGIN_COOKIE)]);
-    return fail(502, r.json.code || "STATUS_FAILED", "Couldn't reach QIE. Retrying…");
+    return fail(502, "STATUS_FAILED", "Couldn't reach QIE. Retrying…");
   }
   const d = r.json.data || {};
   if (d.status === "pending") return reply(200, { status: "pending", expiresAt: d.expiresAt });
@@ -281,7 +392,8 @@ async function status(event) {
   if (!c.ok) {
     const code = c.json.code || "COLLECT_FAILED";
     if (code === "NOT_APPROVED" || code === "QIE_TIMEOUT") return reply(200, { status: "pending", expiresAt: d.expiresAt });
-    return fail(c.status === 410 ? 410 : 409, code, code === "EXPIRED" ? "The sign-in timed out. Start again." : "This sign-in can't be completed. Start again.", {}, [clear(LOGIN_COOKIE)]);
+    const expired = code === "EXPIRED";
+    return fail(c.status === 410 ? 410 : 409, expired ? "EXPIRED" : "COLLECT_FAILED", expired ? "The sign-in timed out. Start again." : "This sign-in can't be completed. Start again.", {}, [clear(LOGIN_COOKIE)]);
   }
   const res = c.json.data || {};
   if (!isAddress(res.walletAddress || "")) return fail(502, "BAD_RESULT", "QIE returned no wallet. Start again.", {}, [clear(LOGIN_COOKIE)]);
@@ -295,16 +407,31 @@ async function status(event) {
     log("approval mismatch");
     return fail(401, "APPROVAL_MISMATCH", "The approval didn't check out. Start again.", {}, [clear(LOGIN_COOKIE)]);
   }
-  const session = { address, qieId: res.qieId || pending.qieId, verified: res.isVerifiedUser === true, exp: Date.now() + SESSION_DAYS * 86_400_000 };
+  const session = { sid: crypto.randomBytes(12).toString("hex"), address, qieId: res.qieId || pending.qieId, verified: res.isVerifiedUser === true, exp: Date.now() + SESSION_DAYS * 86_400_000 };
   return reply(200, { status: "completed", address: session.address, qieId: session.qieId, verified: session.verified, expiresAt: session.exp }, [
     clear(LOGIN_COOKIE),
     cookie(SESSION_COOKIE, seal(SESSION_COOKIE, session), SESSION_DAYS * 86_400),
   ]);
 }
 
-function me(event) {
+async function me(event) {
   const s = readCookie(event, SESSION_COOKIE);
-  return s ? reply(200, { address: s.address, qieId: s.qieId, verified: s.verified, expiresAt: s.exp }) : fail(401, "NO_SESSION", "Not signed in");
+  if (!s || (await revoked(event, s.sid))) return fail(401, "NO_SESSION", "Not signed in", {}, s ? [clear(SESSION_COOKIE)] : []);
+  return reply(200, { address: s.address, qieId: s.qieId, verified: s.verified, expiresAt: s.exp });
+}
+
+/** Ends the session here and server-side: a copied cookie stops working too. */
+async function logout(event) {
+  const s = readCookie(event, SESSION_COOKIE);
+  const store = s?.sid ? limiter(event) : null;
+  if (store) {
+    try {
+      await store.set(`revoked:${s.sid}`, String(s.exp));
+    } catch (e) {
+      alert("Blobs write failed (logout)", e);
+    }
+  }
+  return reply(200, { ok: true }, [clear(SESSION_COOKIE), clear(LOGIN_COOKIE), clear(NONCE_COOKIE)]);
 }
 
 /** A single-use nonce for the wallet's Sign-In with Ethereum message (10 min). */
@@ -318,7 +445,7 @@ const chain = createPublicClient({ transport: http(RPC, { timeout: 8_000 }) });
 const verifiedCache = new Map(); // address -> { verified, at }
 
 async function verifyWallet(event) {
-  const wait = await overLimit(event, "verify:ip", clientIp(event) ?? "unknown");
+  const wait = await overLimit(event, "verify:ip", ipBucket(clientIp(event)));
   if (wait) return tooMany(wait);
   let message, signature;
   try {
@@ -354,6 +481,8 @@ async function verifyWallet(event) {
   const address = getAddress(m.address);
   const ok = await chain.verifyMessage({ address, message, signature }).catch(() => false);
   if (!ok) return fail(401, "BAD_SIGNATURE", "Signature doesn't match the wallet", {}, used);
+  // Single use server-side too: a kept copy of the cookie can't replay this nonce.
+  if (!(await firstUse(event, `nonce:${issued.n}`))) return fail(401, "NONCE_USED", "Sign-in expired. Try again.", {}, used);
   const hit = verifiedCache.get(address);
   if (hit && now - hit.at < 10 * 60_000) return reply(200, { address, verified: hit.verified }, used);
   const r = await qie("GET", `/verification-requests/is-verified?identifier=${encodeURIComponent(address)}`);
@@ -370,12 +499,13 @@ async function verifiedMany(event) {
     .split(",")
     .map((a) => a.trim())
     .filter(Boolean);
-  if (!list.length || list.length > 50 || !list.every((a) => isAddress(a))) return fail(400, "BAD_REQUEST", "1 to 50 addresses, comma-separated");
+  if (!list.length || list.length > MAX_BADGES || !list.every((a) => isAddress(a))) return fail(400, "BAD_REQUEST", `1 to ${MAX_BADGES} addresses, comma-separated`);
   const addrs = [...new Set(list.map((a) => getAddress(a)))];
   const now = Date.now();
   const todo = addrs.filter((a) => !(verifiedCache.get(a) && now - verifiedCache.get(a).at < 10 * 60_000));
   if (todo.length) {
-    const wait = await overLimit(event, "verified:ip", clientIp(event) ?? "unknown");
+    // Each address looked up at QIE counts (cached ones are free).
+    const wait = await overLimit(event, "verified:ip", ipBucket(clientIp(event)), todo.length);
     if (wait) return tooMany(wait);
     for (let i = 0; i < todo.length; i += 5) {
       await Promise.all(
@@ -400,8 +530,9 @@ export const handler = async (event) => {
     if (action === "start" && method === "POST") return await start(event);
     if (action === "status" && method === "GET") return await status(event);
     if (action === "cancel" && method === "POST") return reply(200, { ok: true }, [clear(LOGIN_COOKIE)]);
-    if (action === "me" && method === "GET") return me(event);
-    if (action === "logout" && method === "POST") return reply(200, { ok: true }, [clear(SESSION_COOKIE), clear(LOGIN_COOKIE), clear(NONCE_COOKIE)]);
+    if (action === "challenge" && method === "GET") return challenge();
+    if (action === "me" && method === "GET") return await me(event);
+    if (action === "logout" && method === "POST") return await logout(event);
     if (action === "nonce" && method === "GET") return nonce();
     if (action === "verify-wallet" && method === "POST") return await verifyWallet(event);
     if (action === "verified" && method === "GET") return await verifiedMany(event);
@@ -414,4 +545,18 @@ export const handler = async (event) => {
 };
 
 // For tests.
-export const _internal = { normalizeQieId, sameSite, seal, unseal, LIMITS, resetLimits: () => memory.clear() };
+export const _internal = {
+  normalizeQieId,
+  sameSite,
+  seal,
+  unseal,
+  ipBucket,
+  zeroBits,
+  sha256hex,
+  bump,
+  POW_BITS,
+  LIMITS,
+  MAX_BADGES,
+  resetLimits: () => memory.clear(),
+  useStore: (s) => (testStore = s),
+};

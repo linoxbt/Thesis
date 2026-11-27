@@ -9,15 +9,15 @@
   "feeds": {
     "BTC": {
       "address": "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
-      "price": "6185489943861"
+      "price": "6153746736591"
     },
     "ETH": {
       "address": "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853",
-      "price": "174220405096"
+      "price": "172174709337"
     },
     "SOL": {
       "address": "0x610178dA211FEF7D417bC0e6FeD39F05609AD788",
-      "price": "7314883627"
+      "price": "7303856720"
     }
   },
   "keeper": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"

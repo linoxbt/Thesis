@@ -1,6 +1,7 @@
 # The QIE edition (qie/): contract + keeper tests, the app's typecheck, the
-# QIE Pass function tests, the static build, and the browser suite against a
-# local chain, on every push and pull request that touches qie/.
+# function tests (on the bundles exactly as they ship), the production build,
+# and the browser suite against a local chain, on every push and pull request
+# that touches qie/. Actions are pinned to commits; the token can only read.
 name: QIE
 
 on:
@@ -8,6 +9,9 @@ on:
     paths: ["qie/**", ".github/workflows/qie.yml"]
   pull_request:
     paths: ["qie/**", ".github/workflows/qie.yml"]
+
+permissions:
+  contents: read
 
 concurrency:
   group: qie-${{ github.ref }}
@@ -21,8 +25,10 @@ jobs:
       run:
         working-directory: qie/contracts
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -35,13 +41,15 @@ jobs:
         run: npx hardhat test test/ThesisCalls.test.js test/keeper.test.js
 
   app:
-    name: App (typecheck, function tests, build, browser suite)
+    name: App (typecheck, function tests, builds, browser suite)
     runs-on: ubuntu-latest
     needs: contracts
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
@@ -55,6 +63,19 @@ jobs:
       - name: QIE Pass function tests
         run: node --test e2e/qie-pass.test.mjs
         working-directory: qie/app
+      - name: Function bundles as they ship (share links, canonical URLs, headers)
+        run: node --test e2e/functions.test.mjs
+        working-directory: qie/app
+      - name: Production build (mainnet settings from .env.production)
+        working-directory: qie/app
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: |
+          pnpm run build
+          address=$(sed -n 's/^NEXT_PUBLIC_CALLS_ADDRESS=//p' .env.production)
+          grep -rqF "$address" out/_next || { echo "the build doesn't use $address"; exit 1; }
+          # Our local-chain RPC and the demo chain's contract address must never ship.
+          ! grep -rqiE '127\.0\.0\.1:8545|0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512' out/_next || { echo "the build points at a local chain"; exit 1; }
       - name: Local chain with demo calls
         working-directory: qie/contracts
         run: |
@@ -69,15 +90,15 @@ jobs:
           NEXT_PUBLIC_REOWN_PROJECT_ID: d1bf7b7232b7d0fb7f0469d0adb29f5b
         run: |
           pnpm run build
-          npx -y serve out -l 3200 > /tmp/serve.log 2>&1 &
+          npx -y serve@14.2.4 out -l 3200 > /tmp/serve.log 2>&1 &
           sleep 3
       - name: Browser suite
         working-directory: qie/app
         run: |
-          npm i --no-save --prefix /tmp/pw playwright@1
+          npm i --no-save --prefix /tmp/pw playwright@1.63.0
           /tmp/pw/node_modules/.bin/playwright install --with-deps chromium
           NODE_PATH=/tmp/pw/node_modules OUT_DIR=/tmp/qie-e2e node e2e/ui.e2e.cjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: e2e-screenshots

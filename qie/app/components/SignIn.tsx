@@ -2,6 +2,7 @@
 
 import { ArrowLeft, ArrowRight, Loader2, ShieldCheck, Wallet, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { solvePow } from "@/lib/pow";
 import { createPortal } from "react-dom";
 import { onModalChange } from "@/lib/appkit";
 import { openQieIdWidget } from "@/lib/qieidWidget";
@@ -37,6 +38,8 @@ export function SignInDialog() {
   const opener = useRef<Element | null>(null);
 
   /** Ends a sign-in in progress (stops polling; the server forgets it) and closes. */
+  // Bumped by Cancel on a wallet sign-in: a signature approved after it signs no one in.
+  const walletGen = useRef(0);
   // Bumped whenever a sign-in is started, cancelled or closed: a response that
   // arrives for an older one is ignored (it can't sign anyone in after Cancel).
   const gen = useRef(0);
@@ -132,7 +135,12 @@ export function SignInDialog() {
     setErr(null);
     setFlow({ step: "starting" });
     try {
-      const r = await post("start", { qieId });
+      // A small proof-of-work per wallet prompt (it keeps strangers from spamming someone's wallet).
+      const ch = (await fetch(`${QIE_PASS_URL}?action=challenge`, { credentials: "same-origin" }).then((x) => (x.ok ? x.json() : null))) as { challenge?: string; bits?: number } | null;
+      if (!ch?.challenge || !ch.bits) throw new Error("Sign-in is unavailable right now. Try again shortly.");
+      const nonce = await solvePow(ch.challenge, ch.bits, { cancelled: () => mine !== gen.current });
+      if (mine !== gen.current) return;
+      const r = await post("start", { qieId, pow: { challenge: ch.challenge, nonce } });
       const b = (await r.json().catch(() => ({}))) as { code?: string; qieId?: string; expiresAt?: string; message?: string; retryAfterSeconds?: number };
       if (mine !== gen.current) {
         // Closed or cancelled while starting: forget it on the server too.
@@ -171,8 +179,9 @@ export function SignInDialog() {
   const connect = async (via: "injected" | "reown") => {
     setErr(null);
     setBusy(via);
+    const mine = ++walletGen.current;
     try {
-      await w.signIn(via);
+      await w.signIn(via, () => mine !== walletGen.current);
     } catch (e) {
       const m = explain(e);
       setErr(/reset|closed|cancel/i.test(m) ? null : m);
@@ -222,7 +231,7 @@ export function SignInDialog() {
             <Loader2 size={20} className="mx-auto animate-spin text-muted" />
             <p className="mt-3 text-sm text-ink">Confirm the sign-in in your wallet</p>
             <p className="mt-1 text-xs text-muted">It&apos;s a free signature, not a transaction.</p>
-            <button onClick={() => setBusy(null)} className="mt-4 text-xs text-muted underline hover:text-ink">
+            <button onClick={() => (walletGen.current++, setBusy(null))} className="mt-4 text-xs text-muted underline hover:text-ink">
               Cancel
             </button>
           </div>

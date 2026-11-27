@@ -6,7 +6,7 @@ import { THESIS_CALLS_ABI } from "@/lib/abi";
 import { publicClient, readPosition, type Call, type Feed } from "@/lib/chain";
 import { CALLS_ADDRESS, explorerTx } from "@/lib/config";
 import { impliedYesBps, oddsHistory, useData, useNow } from "@/lib/data";
-import { pct, price, timeLeft, when } from "@/lib/format";
+import { durationText, pct, price, timeLeft, when } from "@/lib/format";
 import { amt } from "@/lib/tokens";
 import { errorName, explain, useWallet } from "@/lib/wallet";
 import { LineChart } from "./LineChart";
@@ -199,8 +199,8 @@ export function MarketPanel({ c, feed }: { c: Call; feed: Feed | undefined }) {
                     <div className="mt-1 text-xs text-faint">
                       {c.touched
                         ? "The oracle touched the target in its first round after the call was posted, so it can't count."
-                        : "The oracle printed no price after the deadline for 3 days (or its feed broke), so there was no fair way to settle it."}{" "}
-                      Fees already paid are not refunded.
+                        : `The oracle printed no price after the deadline for ${durationText(c.voidAfter)} (or its feed broke), so there was no fair way to settle it.`}{" "}
+                      Bets still waiting on their next oracle round get their fee back too; fees already earned stay with the creator and treasury.
                     </div>
                   </>
                 ) : (
@@ -209,8 +209,8 @@ export function MarketPanel({ c, feed }: { c: Call; feed: Feed | undefined }) {
                   </>
                 )}
               </div>
-              {c.yesWon && c.voidYes + c.voidNo > 0n && (
-                <div className="num mt-1 text-xs text-faint">{amt(c.voidYes + c.voidNo, tok)} {tok.symbol} bet in the oracle round before the touch was refunded in full, not paid.</div>
+              {c.yesWon && !c.voided && c.hasRefund && (
+                <div className="num mt-1 text-xs text-faint">{amt(c.voidYes + c.voidNo, tok)} {tok.symbol} bet in the oracle round before the touch was refunded in full (fee included), not paid.</div>
               )}
               {c.touched && (
                 <div className="num mt-1 text-xs text-muted">
@@ -250,7 +250,7 @@ export function MarketPanel({ c, feed }: { c: Call; feed: Feed | undefined }) {
               <div className="rounded-2xl border border-line bg-panel-2 p-4 text-muted" data-testid="resolution">
                 Window and grace period over with no touch found yet. It settles NO once the contract has checked every round up to
                 the deadline and the oracle has printed a price after it
-                {now > voidAt ? ". It's been 3 days: settling now decides it if the oracle can, and otherwise voids it with every stake refunded." : "."}
+                {now > voidAt ? `. It's been ${durationText(c.voidAfter)}: settling now decides it if the oracle can, and otherwise voids it with every stake refunded.` : "."}
                 <button onClick={() => void (now > voidAt ? settleOrVoid() : settle())} disabled={!w.account || !!acting} className="btn btn-ghost mt-3 w-full text-xs disabled:opacity-40" data-testid="settle">
                   {acting === "settle" ? "Settling…" : now > voidAt ? "Settle or void (anyone can)" : "Settle now (anyone can)"}
                 </button>

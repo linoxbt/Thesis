@@ -65,7 +65,7 @@ function TradeView() {
       .readContract({ address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI, functionName: "creatorFeesOwed", args: [w.account, c!.token] })
       .then(setOwed)
       .catch(() => {});
-  }, [isCreator, w.account, c?.volume, c?.token]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isCreator, w.account, c?.token, calls]); // eslint-disable-line react-hooks/exhaustive-deps -- fees are credited a round after a bet: re-read every refresh
 
   // Ids past the last call may be one just posted; anything else is invalid.
   if (!c) return <LoadState ready={ready} what="call" invalid={id < 0} pending={id >= calls.length && id < calls.length + 5} />;
@@ -94,7 +94,7 @@ function TradeView() {
     if (claiming) return;
     setClaiming(true);
     setErr(null);
-    w.write(`Claim ${amtSym(owed, tok)} creator fees`, { address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI as Abi, functionName: "claimCreatorFees", args: [c.token] })
+    w.write(`Claim ${amtSym(owed, tok)} creator fees (all your ${tok.symbol} calls)`, { address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI as Abi, functionName: "claimCreatorFees", args: [c.token] })
       .then(() => (setOwed(0n), refresh()))
       .catch((e) => setErr(explain(e)))
       .finally(() => setClaiming(false));
@@ -116,7 +116,7 @@ function TradeView() {
                   {scored > 0 && (
                     <span className={s.skillBps >= 0 ? "text-yes" : "text-bad"} data-testid="creator-skill">
                       {" "}· skill {fmtSkill(s.skillBps)}
-                      {rank ? ` (#${rank})` : ""}
+                      {rank ? ` (#${rank} all time)` : ""}
                     </span>
                   )}
                 </span>
@@ -169,7 +169,7 @@ function TradeView() {
           />
           {isCreator && owed > 0n && (
             <button onClick={() => void claimFees()} disabled={claiming} className="btn btn-primary px-3 py-1.5 text-xs disabled:opacity-40" data-testid="claim-fees">
-              {claiming ? "Claiming…" : `Claim ${amtSym(owed, tok)} creator fees`}
+              {claiming ? "Claiming…" : `Claim ${amtSym(owed, tok)} creator fees (all your ${tok.symbol} calls)`}
             </button>
           )}
         </div>

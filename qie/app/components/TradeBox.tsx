@@ -48,7 +48,7 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
     let on = true;
     const load = () => readBetStatus(id).then((g) => on && setGate(g)).catch(() => {});
     void load();
-    const t = setInterval(load, 20_000);
+    const t = setInterval(() => document.visibilityState === "visible" && load(), 20_000);
     return () => {
       on = false;
       clearInterval(t);
@@ -183,13 +183,16 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
           className="num w-full bg-transparent text-base outline-none"
           aria-label={`Amount in ${tok.symbol}`}
           aria-invalid={micro === null}
+          aria-describedby={`bet-err-${id}`}
           data-testid="bet-amount"
         />
         <span className="num flex items-center gap-1.5 rounded-full bg-panel-3 px-2 py-1 text-xs text-ink">
           <span className={"h-3 w-3 rounded-full " + (tok.native ? "bg-brand" : "bg-[#2775ca]")} /> {tok.symbol}
         </span>
       </label>
-      {amount !== "" && micro === null && <p className="mt-1 px-1 text-[11px] text-bad">Enter an amount, up to 6 decimals.</p>}
+      <p id={`bet-err-${id}`} className="mt-1 px-1 text-[11px] text-bad empty:hidden" role="status">
+        {amount !== "" && micro === null ? "Enter an amount, up to 6 decimals." : ""}
+      </p>
       <div className="relative z-10 -my-1.5 flex justify-center">
         <span className="grid h-6 w-6 place-items-center rounded-full border border-line bg-panel-2 text-xs text-muted">↓</span>
       </div>

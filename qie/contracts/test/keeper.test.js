@@ -151,4 +151,50 @@ describe("keeper", function () {
       await network.provider.send("evm_setAutomine", [true]);
     }
   });
+
+  it("audit H3: leaves tiny calls nobody else bet on alone (spam can't drain it)", async () => {
+    const f = await setup();
+    const end = (await time.latest()) + 2 * DAY;
+    // 20 spam calls at the minimum seed: unscored, no outside money.
+    for (let i = 0; i < 20; i++) await f.calls.connect(f.creator).createCall(await f.token.getAddress(), await f.feed.getAddress(), true, PX(104 + i / 10), end, 2n * USDC, "");
+    await time.increase(HOUR);
+    await print(f.feed, 106); // touches every one of them
+    const nonce0 = await ethers.provider.getTransactionCount(f.keeper.address);
+    await quiet(() => tick(f.ctx));
+    // Only the real call (scored, with outside money) got a transaction.
+    expect((await ethers.provider.getTransactionCount(f.keeper.address)) - nonce0).to.equal(1);
+    expect((await f.calls.getCall(0)).settled).to.equal(true);
+    expect((await f.calls.getCall(1)).settled).to.equal(false);
+  });
+
+  it("takes on a small call once others have put the scoring seed's worth into it", async () => {
+    const f = await setup();
+    const end = (await time.latest()) + 2 * DAY;
+    await f.calls.connect(f.creator).createCall(await f.token.getAddress(), await f.feed.getAddress(), true, PX(104), end, 2n * USDC, "");
+    await time.increase(300);
+    await print(f.feed, 100.2);
+    await f.calls.connect(f.alice).bet(1, false, 6n * USDC); // >= 5 QUSDC from someone else
+    await time.increase(300);
+    await print(f.feed, 100.3);
+    await time.increase(HOUR);
+    await print(f.feed, 104.5);
+    await quiet(() => tick(f.ctx));
+    expect((await f.calls.getCall(1)).settled).to.equal(true);
+  });
+
+  it("stops at its per-tick transaction budget and carries on next tick", async () => {
+    const f = await setup();
+    const end = (await time.latest()) + 2 * DAY;
+    // 14 scored calls (seed >= 5 QUSDC), all touched at once: more than one tick's budget (12).
+    for (let i = 0; i < 14; i++) await f.calls.connect(f.creator).createCall(await f.token.getAddress(), await f.feed.getAddress(), true, PX(104 + i / 10), end, 10n * USDC, "");
+    await time.increase(300);
+    await print(f.feed, 100.2);
+    await time.increase(HOUR);
+    await print(f.feed, 106);
+    await quiet(() => tick(f.ctx));
+    const settledAfter = async () => (await Promise.all(Array.from({ length: 15 }, (_, i) => f.calls.getCall(i)))).filter((c) => c.settled).length;
+    expect(await settledAfter()).to.equal(12);
+    await quiet(() => tick(f.ctx));
+    expect(await settledAfter()).to.equal(15);
+  });
 });
