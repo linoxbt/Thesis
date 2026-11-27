@@ -7,7 +7,6 @@ import type { Address } from "viem";
 import { Avatar } from "@/components/ThesisCard";
 import { Who } from "@/components/Who";
 import { MIN_SCORED, perCallBps, rankScore } from "@/lib/rank";
-import { amtSym } from "@/lib/tokens";
 import { useData, useNow } from "@/lib/data";
 import { fmtSkill, pct } from "@/lib/format";
 import { QIE_PASS_URL } from "@/lib/wallet";
@@ -89,7 +88,7 @@ const byRank = (a: Row, b: Row) => {
  */
 export default function LeaderboardPage() {
   const [period, setPeriod] = useState<"week" | "all">("week");
-  const { ready, historyReady, historyError, creators, calls, events, stakeTokens } = useData();
+  const { ready, historyReady, historyError, creators, calls, events } = useData();
   const now = useNow(60_000);
 
   const rows = useMemo<Row[]>(() => {
@@ -139,12 +138,10 @@ export default function LeaderboardPage() {
           <span className="label">Proof of skill</span>
           <h1 className="display mt-2 text-4xl">Leaderboard</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted">
-            Every call is scored against the odds the contract gave it when it was posted: a 20% call that hits earns
-            <span className="num text-yes"> +0.80</span>, a 90% call that misses costs
-            <span className="num text-bad"> −0.90</span>. Safe calls earn almost nothing; only real edge climbs. Ranked by skill per
-            call once a creator has {MIN_CALLS} scored calls, weighted toward zero for short records so a few lucky long shots
-            can&apos;t top the board. A call counts if its creator seeded at least{" "}
-            {stakeTokens.length ? stakeTokens.map((t) => amtSym(t.minScoredSeed, t, 0)).join(" or ") : "the scoring size"}, decided when it&apos;s posted.
+            Skill = hits beyond the odds each call opened at. Ranked after {MIN_CALLS} scored calls.{" "}
+            <Link href="/docs/#skill" className="underline">
+              How it works
+            </Link>
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -183,7 +180,7 @@ export default function LeaderboardPage() {
               <p>
                 {verifiedOnly && rows.length > 0
                   ? "No QIE Pass verified creators here yet."
-                  : `No settled calls ${period === "week" ? "this week" : "yet"}. Calls are scored when they settle.`}
+                  : `No settled calls ${period === "week" ? "this week" : "yet"}.`}
               </p>
               <Link href="/new/" className="btn btn-primary mt-4 inline-flex text-sm">
                 Post a call
@@ -204,7 +201,7 @@ export default function LeaderboardPage() {
               <tbody>
                 {shown.map((r, i) => (
                   <tr key={r.creator} className={"border-b border-line last:border-0" + (r.calls < MIN_CALLS ? " opacity-60" : "")} data-testid="leaderboard-row">
-                    <td className="px-5 py-3 text-muted">{r.calls >= MIN_CALLS ? i + 1 : "–"}</td>
+                    <td className="px-5 py-3 text-muted" title={r.calls >= MIN_CALLS ? undefined : `Fewer than ${MIN_CALLS} scored calls`}>{r.calls >= MIN_CALLS ? i + 1 : "–"}</td>
                     <td className="py-3">
                       <Link href={`/u/?a=${r.creator}`} className="flex items-center gap-2 hover:text-ink">
                         <Avatar addr={r.creator} size={26} />
@@ -228,16 +225,6 @@ export default function LeaderboardPage() {
           )}
         </section>
       )}
-      <p className="text-[11px] leading-relaxed text-faint">
-        A call can&apos;t open with its target inside the move the oracle may not have printed yet (the older the latest oracle
-        price, the further away the target must be), and a call that touches in the first oracle round after it's posted is voided. Scores are stored
-        onchain by the contract. Rows marked – have fewer than {MIN_CALLS} scored calls. The shield marks creators whose identity is
-        verified with QIE Pass: throwaway wallets can&apos;t be, so &quot;Verified only&quot; can&apos;t be gamed with them. Raw numbers:{" "}
-        <Link href="/stats/" className="underline">
-          Stats
-        </Link>
-        .
-      </p>
     </div>
   );
 }
