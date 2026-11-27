@@ -1,0 +1,87 @@
+{
+  "network": "qieMainnet",
+  "deployBlock": 12213381,
+  "owner": "0xA47CD56Bbd97203b76757B180f9736d259Da24fe",
+  "chainId": 1990,
+  "ThesisCalls": "0xf083a2ACD7a170B453EB9Be891dcbA80fa378b1C",
+  "stakeTokens": {
+    "QUSDC": "0x3F43DA82eC9A4f5285F10FaF1F26EcA7319E5DA5",
+    "QIE": "0x0000000000000000000000000000000000000000"
+  },
+  "treasury": "0x747DF176962e1495355562Fe30b65F276f0B8404",
+  "keeper": "0x005547707C493F3116F7a54856bE67caCf5a52D4",
+  "params": {
+    "feeBps": "200",
+    "minWindow": "1800",
+    "maxWindow": "691200",
+    "grace": "300",
+    "maxOracleAge": "10800",
+    "maxVolAge": "1209600",
+    "minDistanceBps": "100",
+    "maxDistanceBps": "5000",
+    "minOpenBps": "100",
+    "maxOpenBps": "9900",
+    "betCutoffBps": "25",
+    "staleZTenths": "30",
+    "closeBps": "1000",
+    "voidAfter": "259200"
+  },
+  "stakeLimits": {
+    "0x3F43DA82eC9A4f5285F10FaF1F26EcA7319E5DA5": {
+      "enabled": true,
+      "minSeed": "2000000",
+      "maxSeed": "250000000",
+      "minStake": "500000",
+      "minScoredSeed": "5000000"
+    },
+    "QIE": {
+      "enabled": true,
+      "minSeed": "5000000000000000",
+      "maxSeed": "1500000000000000000000",
+      "minStake": "1000000000000000",
+      "minScoredSeed": "30000000000000000000"
+    }
+  },
+  "feeds": {
+    "BTC": {
+      "address": "0x9E596d809a20A272c788726f592c0d1629755440",
+      "volBps": 7100,
+      "monitorSecs": 177
+    },
+    "ETH": {
+      "address": "0x4bb7012Fbc79fE4Ae9B664228977b442b385500d",
+      "volBps": 8140,
+      "monitorSecs": 122
+    },
+    "SOL": {
+      "address": "0xe86999c8e6C8eeF71bebd35286bCa674E0AD7b21",
+      "volBps": 6800,
+      "monitorSecs": 239
+    }
+  },
+  "deployedAt": "2026-11-27T15:54:45.631Z",
+  "pendingOwner": "0x747DF176962e1495355562Fe30b65F276f0B8404",
+  "paused": false,
+  "creatorShareBps": 5000,
+  "feedsOnChain": {
+    "0x9E596d809a20A272c788726f592c0d1629755440": {
+      "enabled": true,
+      "volBps": "7100",
+      "monitorSecs": "177",
+      "volUpdatedAt": "1795794873"
+    },
+    "0x4bb7012Fbc79fE4Ae9B664228977b442b385500d": {
+      "enabled": true,
+      "volBps": "8140",
+      "monitorSecs": "122",
+      "volUpdatedAt": "1795794876"
+    },
+    "0xe86999c8e6C8eeF71bebd35286bCa674E0AD7b21": {
+      "enabled": true,
+      "volBps": "6800",
+      "monitorSecs": "239",
+      "volUpdatedAt": "1795794880"
+    }
+  },
+  "syncedAt": "2026-11-27T16:08:01.392Z"
+}

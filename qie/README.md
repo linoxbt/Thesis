@@ -74,11 +74,11 @@ Anyone can call `proveTouch`, `sync`, `settle` or `voidCall`; the keeper
 | `app/` | the web app: static Next.js + viem, reads everything from chain |
 | `app/netlify/functions/qie-pass.mjs` | QIE Pass sign-in (Sign in with QIE ID) and the wallet badge, server side |
 
-**Contract versions.** Mainnet runs v4 at `0xf083a2ACD7a170B453EB9Be891dcbA80fa378b1C`; its verified source is on
-[mainnet.qie.digital](https://mainnet.qie.digital/address/0xf083a2ACD7a170B453EB9Be891dcbA80fa378b1C#code) and in commit `097e7bb`.
-`contracts/` here is v5, tested and ready to deploy: only YES bets are refunded when a call touches right after them,
-hits and misses count scored calls only, the owner can void a call stuck 30 days past its end, and the keeper can move
-volatility at most 2x an hour. The app and keeper work with both.
+**Contract.** Mainnet runs v5 at [`0xd9047bd3613ee9202659711bC4Cd26866660Ff84`](https://mainnet.qie.digital/address/0xd9047bd3613ee9202659711bC4Cd26866660Ff84#code)
+(verified, with its odds library at [`0x72EAFF835a90DD230D2A4E962819778bC109b265`](https://mainnet.qie.digital/address/0x72EAFF835a90DD230D2A4E962819778bC109b265#code)),
+the source in `contracts/`. Over v4 (`0xf083…8b1C`, now retired): only YES bets are refunded when a call touches right
+after them, hits and misses count scored calls only, the owner can void a call stuck 30 days past its end, and the
+keeper can move volatility at most 2x an hour.
 
 ## Run it
 

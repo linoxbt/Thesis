@@ -1,9 +1,10 @@
 {
   "network": "qieMainnet",
-  "deployBlock": 12213381,
+  "deployBlock": 12215743,
   "owner": "0xA47CD56Bbd97203b76757B180f9736d259Da24fe",
   "chainId": 1990,
-  "ThesisCalls": "0xf083a2ACD7a170B453EB9Be891dcbA80fa378b1C",
+  "ThesisCalls": "0xd9047bd3613ee9202659711bC4Cd26866660Ff84",
+  "TouchMathLib": "0x72EAFF835a90DD230D2A4E962819778bC109b265",
   "stakeTokens": {
     "QUSDC": "0x3F43DA82eC9A4f5285F10FaF1F26EcA7319E5DA5",
     "QIE": "0x0000000000000000000000000000000000000000"
@@ -59,7 +60,7 @@
       "monitorSecs": 239
     }
   },
-  "deployedAt": "2026-11-27T15:54:45.631Z",
+  "deployedAt": "2026-11-27T18:17:10.383Z",
   "pendingOwner": "0x747DF176962e1495355562Fe30b65F276f0B8404",
   "paused": false,
   "creatorShareBps": 5000,
@@ -68,20 +69,20 @@
       "enabled": true,
       "volBps": "7100",
       "monitorSecs": "177",
-      "volUpdatedAt": "1795794873"
+      "volUpdatedAt": "1795803418"
     },
     "0x4bb7012Fbc79fE4Ae9B664228977b442b385500d": {
       "enabled": true,
       "volBps": "8140",
       "monitorSecs": "122",
-      "volUpdatedAt": "1795794876"
+      "volUpdatedAt": "1795803421"
     },
     "0xe86999c8e6C8eeF71bebd35286bCa674E0AD7b21": {
       "enabled": true,
       "volBps": "6800",
       "monitorSecs": "239",
-      "volUpdatedAt": "1795794880"
+      "volUpdatedAt": "1795803425"
     }
   },
-  "syncedAt": "2026-11-27T16:08:01.392Z"
+  "syncedAt": "2026-11-27T18:47:46.789Z"
 }
