@@ -5,6 +5,8 @@
 //
 //   NETLIFY_AUTH_TOKEN=… node scripts/deploy-netlify.mjs
 //
+// Afterwards only the live deploy and the one before it are kept (older ones
+// would keep serving older functions at their permalinks).
 // Refuses to run if a local env file could override the production settings,
 // or if qie/ has uncommitted or unpushed changes (DEPLOY_ALLOW_DIRTY=1 skips
 // the git check). Uses Netlify's file-digest deploy, which uploads only files
@@ -132,6 +134,18 @@ try {
     process.exit(1);
   }
   console.log(`live and checked: ${SITE_URL}`);
+  // Older deploys stay reachable at <id>--site.netlify.app and run their own
+  // (older) functions with today's secrets: keep only this one and the one
+  // before it (for a rollback).
+  const keep = new Set([deploy.id, previous].filter(Boolean));
+  const old = [];
+  for (let page = 1; page < 10; page++) {
+    const d = await api("GET", `/sites/${SITE_ID}/deploys?per_page=100&page=${page}`);
+    old.push(...d.filter((x) => !keep.has(x.id)));
+    if (d.length < 100) break;
+  }
+  for (const d of old) await api("DELETE", `/deploys/${d.id}`).catch((e) => console.warn(`couldn't delete deploy ${d.id}: ${e.message}`));
+  if (old.length) console.log(`deleted ${old.length} older deploy(s)`);
 } finally {
   fs.rmSync(fnDir, { recursive: true, force: true });
 }
