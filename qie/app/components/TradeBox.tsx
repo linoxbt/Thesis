@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { parseEventLogs, type Abi, type Hash } from "viem";
+import { TokenIcon } from "@/components/TokenIcon";
 import { ERC20_ABI, THESIS_CALLS_ABI } from "@/lib/abi";
 import { publicClient, readBalances, readBetStatus } from "@/lib/chain";
 import { CALLS_ADDRESS, QUSDC_URL } from "@/lib/config";
@@ -187,7 +188,7 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
           data-testid="bet-amount"
         />
         <span className="num flex items-center gap-1.5 rounded-full bg-panel-3 px-2 py-1 text-xs text-ink">
-          <span className={"h-3 w-3 rounded-full " + (tok.native ? "bg-brand" : "bg-[#2775ca]")} /> {tok.symbol}
+          <TokenIcon symbol={tok.symbol} size={16} /> {tok.symbol}
         </span>
       </label>
       <p id={`bet-err-${id}`} className="mt-1 px-1 text-[11px] text-bad empty:hidden" role="status">

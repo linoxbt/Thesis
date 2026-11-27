@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parseEventLogs, type Abi } from "viem";
 import { usdPx } from "@/components/Position";
+import { TokenIcon } from "@/components/TokenIcon";
 import { ERC20_ABI, THESIS_CALLS_ABI } from "@/lib/abi";
 import { publicClient, readBalances, readMinDistance } from "@/lib/chain";
 import { CALLS_ADDRESS, explorerTx, QUSDC_URL } from "@/lib/config";
@@ -205,10 +206,7 @@ export default function NewTrade() {
       <div>
         <span className="label">New trade</span>
         <h1 className="display mt-2 text-4xl">Post your trade</h1>
-        <p className="mt-2 text-sm text-muted">
-          Your call becomes a market: the crowd backs or challenges your take profit in QIE or QUSDC (you choose), priced by
-          the contract from the QIE Oracle the moment it lands. One confirm in QIE; one or two in QUSDC.
-        </p>
+        <p className="mt-2 text-sm text-muted">Others back or challenge it. The QIE Oracle sets the odds.</p>
       </div>
       <fieldset disabled={locked} className="contents">
         <section className={"space-y-3 panel p-5" + (locked ? " opacity-70" : "")}>
@@ -219,9 +217,10 @@ export default function NewTrade() {
                 role="radio"
                 aria-checked={feed?.address === f.address}
                 onClick={() => setFeedAddr(f.address)}
-                className={"num rounded-full px-3 py-1 text-xs " + (feed?.address === f.address ? "bg-ink text-bg" : "border border-line text-muted hover:text-ink")}
+                className={"num inline-flex items-center gap-1.5 rounded-full py-1 pl-1.5 pr-3 text-xs " + (feed?.address === f.address ? "bg-ink text-bg" : "border border-line text-muted hover:text-ink")}
                 data-testid={`asset-${f.asset}`}
               >
+                <TokenIcon symbol={f.asset} size={18} />
                 {f.asset}
               </button>
             ))}
@@ -296,14 +295,14 @@ export default function NewTrade() {
             )}
           </div>
           <label className="block text-sm">
-            <span className="text-muted">Why (optional, shown on the card)</span>
+            <span className="text-muted">Why (optional)</span>
             <textarea value={text} onChange={(e) => setText(e.target.value)} rows={2} className="field mt-1 w-full px-3 py-2.5 outline-none" aria-describedby="why-count" />
             <span id="why-count" className={"num block text-right text-xs " + (textBytes > 280 ? "text-bad" : "text-faint")}>
               {textBytes}/280
             </span>
           </label>
           <div className="text-sm">
-            <span className="text-muted">Stake in (every bet on your call uses it)</span>
+            <span className="text-muted">Stake in</span>
             <div className="mt-1 grid grid-cols-2 gap-2" role="radiogroup" aria-label="Stake token">
               {usable.map((t) => (
                 <button
@@ -317,18 +316,13 @@ export default function NewTrade() {
                   }
                   data-testid={`stake-${t.symbol}`}
                 >
-                  <span className={"h-3 w-3 rounded-full " + (t.native ? "bg-brand" : "bg-[#2775ca]")} /> {t.symbol}
+                  <TokenIcon symbol={t.symbol} size={20} /> {t.symbol}
                 </button>
               ))}
             </div>
-            {tok && (
-              <span className="num mt-1 block text-xs text-faint">
-                {tok.native ? "Sent with the post: no approval step. A QIE pot also moves with QIE's price." : "Approved once, then sent with the post."}
-              </span>
-            )}
           </div>
           <label className="block text-sm">
-            <span className="text-muted">Seed ({tok?.symbol ?? "…"}: opens both sides at the odds below, paid out with whichever side wins)</span>
+            <span className="text-muted">Seed ({tok?.symbol ?? "…"})</span>
             <input value={seed} onChange={(e) => setSeed(decimalInput(e.target.value))} inputMode="decimal" className="num field mt-1 w-full px-3 py-2.5 outline-none" data-testid="seed" />
           </label>
           <div className="num rounded-xl border border-line bg-panel-2 p-3 text-sm" data-testid="preview">
@@ -339,19 +333,17 @@ export default function NewTrade() {
                 Opening odds: <strong>{preview ? pct(preview.open, 2) : "…"}</strong>
                 <span className="text-muted">
                   {" "}
-                  that {feed?.asset} touches your take profit {strike ? usdPx(price(strike, dec)) : "…"} in time
+                  that {feed?.asset} hits {strike ? usdPx(price(strike, dec)) : "…"}
                 </span>
                 {preview && params && (
                   <div className="mt-1 text-xs text-faint">
                     {tok && seedMicro && seedMicro >= tok.minScoredSeed ? (
                       <>
-                        Counts toward your skill: hit it and it gains {((10_000 - preview.open) / 10_000).toFixed(2)}; miss and it loses{" "}
-                        {(preview.open / 10_000).toFixed(2)}.
+                        Scored: +{((10_000 - preview.open) / 10_000).toFixed(2)} skill if it hits, −{(preview.open / 10_000).toFixed(2)} if it misses.
                       </>
                     ) : (
                       <>
-                        Practice call: it trades and settles, but only calls seeded with {tok ? amtSym(tok.minScoredSeed, tok, 0) : "…"} or more count toward
-                        your skill (decided when you post).
+                        Practice call. Seed {tok ? amtSym(tok.minScoredSeed, tok, 0) : "…"}+ to count toward your skill.
                       </>
                     )}
                   </div>

@@ -65,8 +65,8 @@ Anyone can call `proveTouch`, `sync`, `settle` or `voidCall`; the keeper
 | Path | What |
 |---|---|
 | `contracts/contracts/ThesisCalls.sol` | the market contract |
-| `contracts/contracts/TouchMath.sol` | onchain opening odds |
-| `contracts/test/` | 53 contract tests (incl. both audits' attack cases, native-QIE payouts and re-entry, scoring fixed at posting, voids over a backlog, and an invariant fuzz across both stake tokens), 12 keeper tests (incl. spam calls and its per-tick budget), and a test on a QIE mainnet fork against the live oracle |
+| `contracts/contracts/TouchMath.sol`, `TouchMathLib.sol` | onchain opening odds (a linked library, so the contract fits the 24 KB limit) |
+| `contracts/test/` | 56 contract tests (incl. both audits' attack cases, native-QIE payouts and re-entry, scoring fixed at posting, voids over a backlog, and an invariant fuzz across both stake tokens), 14 keeper tests (incl. spam calls and its per-tick budget), and a test on a QIE mainnet fork against the live oracle |
 | `contracts/scripts/deploy.js` | mainnet deploy (stake tokens QIE + QUSDC, feeds) |
 | `contracts/scripts/keeper.js` | proves touches, keeps calls synced, settles or voids, posts 7-day volatility and round gaps |
 | `contracts/scripts/params.js` | launch parameters and measured feed settings |
@@ -74,17 +74,23 @@ Anyone can call `proveTouch`, `sync`, `settle` or `voidCall`; the keeper
 | `app/` | the web app: static Next.js + viem, reads everything from chain |
 | `app/netlify/functions/qie-pass.mjs` | QIE Pass sign-in (Sign in with QIE ID) and the wallet badge, server side |
 
+**Contract versions.** Mainnet runs v4 at `0xf083a2ACD7a170B453EB9Be891dcbA80fa378b1C`; its verified source is on
+[mainnet.qie.digital](https://mainnet.qie.digital/address/0xf083a2ACD7a170B453EB9Be891dcbA80fa378b1C#code) and in commit `097e7bb`.
+`contracts/` here is v5, tested and ready to deploy: only YES bets are refunded when a call touches right after them,
+hits and misses count scored calls only, the owner can void a call stuck 30 days past its end, and the keeper can move
+volatility at most 2x an hour. The app and keeper work with both.
+
 ## Run it
 
 ```bash
-cd qie/contracts && npm ci && npx hardhat test test/ThesisCalls.test.js test/keeper.test.js   # 45 tests
+cd qie/contracts && npm ci && npx hardhat test test/ThesisCalls.test.js test/keeper.test.js   # 70 tests
 FORK=1 npx hardhat test test/fork.test.js                # against the live QIE Oracle
 QIE_DEPLOYER_KEY=0x… npx hardhat run scripts/deploy.js --network qieMainnet
 KEEPER_KEY=0x… CALLS_ADDRESS=0x… node scripts/keeper.js
 
 cd qie/app && NEXT_PUBLIC_CALLS_ADDRESS=0x… NEXT_PUBLIC_DEPLOY_BLOCK=… npm run build   # static site in out/ (+ hashed CSP)
 npm test                                                     # QIE Pass function tests
-node e2e/ui.e2e.cjs                                          # 33 browser checks (local chain)
+node e2e/ui.e2e.cjs                                          # 41 browser checks (local chain)
 ```
 
 ## Trust and limits

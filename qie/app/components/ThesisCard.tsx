@@ -10,6 +10,7 @@ import { amtSym } from "@/lib/tokens";
 import { positionOf } from "@/lib/position";
 import { PositionLevels, SidePill } from "./Position";
 import { Sparkline } from "./Sparkline";
+import { TokenIcon } from "./TokenIcon";
 import { TradeBox } from "./TradeBox";
 import { Who } from "./Who";
 
@@ -99,7 +100,10 @@ export function ThesisCard({ c, feed }: { c: Call; feed: Feed | undefined }) {
       <Link href={`/t/?id=${c.id}`} className="mt-4 block" data-testid="card-link">
         <div className="flex items-center gap-2">
           <SidePill p={pos} />
-          <span className="num whitespace-nowrap text-sm text-ink">{pairOf(feed)}</span>
+          <span className="num inline-flex items-center gap-1.5 whitespace-nowrap text-sm text-ink">
+            {feed && <TokenIcon symbol={feed.asset} size={16} />}
+            {pairOf(feed)}
+          </span>
         </div>
         <div className="mt-3">
           <PositionLevels p={pos} mark={mark} dense third={{ k: "Deadline", v: now ? when(c.end).replace(/^\w+, /, "") : "…", sub: live && now ? `${timeLeft(c.end, now)} left` : undefined }} />
