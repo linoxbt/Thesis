@@ -2,6 +2,7 @@
 // correctly, and survive a stuck transaction.
 const { expect } = require("chai");
 const { ethers, network } = require("hardhat");
+const { deployThesisCalls } = require("../scripts/factory");
 const { time } = require("@nomicfoundation/hardhat-network-helpers");
 const { tick, makeCtx, send } = require("../scripts/keeper");
 const ABI = require("../scripts/keeper-abi.json");
@@ -16,7 +17,7 @@ async function setup() {
   const [owner, keeper, creator, alice] = await ethers.getSigners();
   const token = await (await ethers.getContractFactory("MockToken")).deploy();
   const feed = await (await ethers.getContractFactory("MockFeed")).deploy("SOL / USDT");
-  const calls = await (await ethers.getContractFactory("ThesisCalls")).deploy(owner.address, keeper.address, 5_000, LAUNCH_PARAMS);
+  const { calls } = await deployThesisCalls(ethers, [owner.address, keeper.address, 5_000, LAUNCH_PARAMS]);
   await calls.setStakeToken(await token.getAddress(), STAKE_LIMITS.QUSDC);
   await calls.setFeed(await feed.getAddress(), true, 6_800, 300);
   await print(feed, 100);

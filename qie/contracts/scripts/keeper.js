@@ -372,7 +372,10 @@ async function tick(ctx) {
         log(`volatility ${addr}: not enough oracle history (${s.rounds} rounds over ${(s.spanSecs / 3600).toFixed(1)}h); skipped`);
         continue;
       }
-      const bps = Math.max(1_000, Math.min(30_000, s.volBps));
+      // The contract lets the keeper move volatility by at most 2x per update
+      // (an hour apart at least): step toward the measured value within that.
+      const old = Number(f.volBps);
+      const bps = Math.max(1_000, Math.ceil(old / 2), Math.min(30_000, old * 2, s.volBps));
       const mon = Math.max(0, Math.min(86_400, s.monitorSecs));
       await send(ctx, calls, "setVolatility", [addr, bps, mon]);
       log(`${await feedOf(addr).description()}: volatility ${(bps / 100).toFixed(1)}%, rounds ~${mon}s apart`);

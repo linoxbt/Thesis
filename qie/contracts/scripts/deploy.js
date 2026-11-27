@@ -9,6 +9,7 @@ const { ethers, network } = require("hardhat");
 const fs = require("node:fs");
 
 const { LAUNCH_PARAMS: PARAMS, STAKE_LIMITS, NATIVE, FEEDS, QUSDC } = require("./params");
+const { deployThesisCalls } = require("./factory");
 
 async function main() {
   const [deployer] = await ethers.getSigners();
@@ -25,9 +26,9 @@ async function main() {
   }
   const treasury = process.env.TREASURY ?? deployer.address;
   const keeper = process.env.KEEPER ?? deployer.address;
-  const calls = await (await ethers.getContractFactory("ThesisCalls")).deploy(treasury, keeper, 5_000, PARAMS);
-  await calls.waitForDeployment();
+  const { calls, library } = await deployThesisCalls(ethers, [treasury, keeper, 5_000, PARAMS]);
   const address = await calls.getAddress();
+  console.log("TouchMathLib", library);
   console.log("ThesisCalls", address);
 
   // The QUSDC limits are in 6-decimal units: refuse any other token.
@@ -48,7 +49,7 @@ async function main() {
     console.log(`feed ${name} enabled (${f.volBps / 100}% vol, rounds ~${f.monitorSecs}s apart)`);
   }
   const block = (await calls.deploymentTransaction()?.wait())?.blockNumber ?? null;
-  const out = { network: network.name, deployBlock: block, owner: deployer.address, chainId: network.config.chainId, ThesisCalls: address, stakeTokens: { QUSDC: stake, QIE: NATIVE }, treasury, keeper, params: Object.fromEntries(Object.entries(PARAMS).map(([k, v]) => [k, String(v)])), stakeLimits: JSON.parse(JSON.stringify(STAKE_LIMITS, (k, v) => (typeof v === "bigint" ? String(v) : v))), feeds: FEEDS, deployedAt: new Date().toISOString() };
+  const out = { network: network.name, deployBlock: block, owner: deployer.address, chainId: network.config.chainId, ThesisCalls: address, TouchMathLib: library, stakeTokens: { QUSDC: stake, QIE: NATIVE }, treasury, keeper, params: Object.fromEntries(Object.entries(PARAMS).map(([k, v]) => [k, String(v)])), stakeLimits: JSON.parse(JSON.stringify(STAKE_LIMITS, (k, v) => (typeof v === "bigint" ? String(v) : v))), feeds: FEEDS, deployedAt: new Date().toISOString() };
   fs.writeFileSync(`deployments/${network.name}.json`, JSON.stringify(out, null, 2) + "\n");
   console.log(`wrote deployments/${network.name}.json`);
 }
