@@ -152,8 +152,12 @@ async function smoke() {
   } else if (!(share.status === 302 && /\/app\/$/.test(share.headers.get("location") ?? ""))) {
     problems.push(`/s/0 answered ${share.status} → ${share.headers.get("location")}`);
   }
-  const junk = await get("/s/0?utm=x");
-  if (junk.status !== 301 && junk.status !== 302) problems.push(`/s/0?utm=x answered ${junk.status} (expected a redirect to the canonical URL)`);
+  // A link with tracking parameters must still unfurl (and never loop).
+  const tracked = await fetch(SITE_URL + "/s/0?fbclid=x&utm_source=y", { redirect: "follow" }).catch((e) => ({ status: `error ${e.cause?.code ?? e.message}` }));
+  if (share.status === 200 && (tracked.status !== 200 || !/og:title/.test(await tracked.text()))) problems.push(`/s/0 with tracking parameters answered ${tracked.status}`);
+  // Junk on the image redirects to its canonical URL, which serves a PNG.
+  const img = await fetch(SITE_URL + "/.netlify/functions/share/0?img=1&junk=1", { redirect: "follow" }).catch(() => null);
+  if (share.status === 200 && (!img || img.status !== 200 || img.headers.get("content-type") !== "image/png")) problems.push(`the card image answered ${img?.status}`);
   const me = await get("/.netlify/functions/qie-pass?action=me");
   if (me.status !== 401) problems.push(`qie-pass ?action=me answered ${me.status} (expected 401 without a session)`);
   if (me.headers.get("x-content-type-options") !== "nosniff") problems.push("qie-pass responses lack x-content-type-options");

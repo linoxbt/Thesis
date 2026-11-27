@@ -38,10 +38,11 @@ test("unknown or malformed ids go to the markets page, with nosniff", async () =
   assert.equal(r.headers["x-content-type-options"], "nosniff");
 });
 
-test("audit M5: junk query parameters get a redirect to the canonical URL, before any read or render", async () => {
-  const page = await share.handler({ path: "/.netlify/functions/share/5", queryStringParameters: { utm_source: "x" } });
-  assert.equal(page.statusCode, 301);
-  assert.equal(page.headers.location, "https://thesis-qie.netlify.app/s/5");
+test("audit M5: junk on the image is redirected to the canonical URL before any render; the page ignores it (no loop)", async () => {
+  // Netlify copies a rewritten request's query onto redirects: a page redirect to /s/5 would loop.
+  const page = await share.handler({ path: "/.netlify/functions/share/5", queryStringParameters: { fbclid: "x" } });
+  assert.notEqual(page.statusCode, 301);
+  assert.notEqual(page.headers.location, "https://thesis-qie.netlify.app/s/5");
   const img = await share.handler({ path: "/.netlify/functions/share/5", queryStringParameters: { img: "1", junk: "1" } });
   assert.equal(img.statusCode, 301);
   assert.equal(img.headers.location, "https://thesis-qie.netlify.app/.netlify/functions/share/5?img=1");

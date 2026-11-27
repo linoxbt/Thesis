@@ -6,9 +6,11 @@
 //       → a tiny HTML page with the call's Open Graph / X card tags that sends
 //         people on to /t/?id=<id>
 //   GET /.netlify/functions/share/<id>?img=1&v=<state>  → the 1200×630 PNG card
-// The id is read from the path (or ?id=). Any other query (junk, or an
-// out-of-date `v`) gets a redirect to the canonical URL, so the CDN caches
-// one response per call state and junk can't force fresh renders.
+// The id is read from the path (or ?id=). On the image, any other query (junk,
+// or an out-of-date `v`) gets a redirect to the canonical URL, so the CDN
+// caches one image per call state and junk can't force fresh renders. The page
+// ignores extra query parameters (links get ?fbclid=, ?utm_…): Netlify copies
+// a rewritten request's query onto any redirect, so redirecting would loop.
 //
 // Everything on the card is read from the chain (and QIE's name service).
 // THESIS_CALLS / THESIS_RPC / THESIS_SITE are fixed at bundle time
@@ -213,11 +215,9 @@ export const handler = async (event) => {
   const id = callIdFrom(event);
   if (id === null || !CALLS) return notFound();
   const wantImg = q.img === "1";
-  // Only canonical queries are served: the page takes none (beyond a legacy
-  // ?id=), the image takes img=1 and v. Anything else is redirected before
-  // any RPC read or render.
-  const extra = Object.keys(q).filter((k) => !(k === "id" || (wantImg && (k === "img" || k === "v"))));
-  if (extra.length) return redirect(wantImg ? `${SITE}/.netlify/functions/share/${id}?img=1` : `${SITE}/s/${id}`);
+  // The image takes only img=1 and v: anything else is redirected before any
+  // RPC read or render. (The page ignores extras; see the note at the top.)
+  if (wantImg && Object.keys(q).some((k) => !["id", "img", "v"].includes(k))) return redirect(`${SITE}/.netlify/functions/share/${id}?img=1`);
   try {
     if (id >= Number(await client.readContract({ address: CALLS, abi: THESIS_CALLS_ABI, functionName: "callCount" }))) return notFound();
     const d = await readCall(id);
