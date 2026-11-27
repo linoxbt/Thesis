@@ -92,6 +92,15 @@ async function main() {
   check("landing shows live contract stats", /calls/.test((await page.textContent('[data-testid="live-stats"]')) ?? ""));
   await page.screenshot({ path: `${OUT}/landing.png`, fullPage: true });
 
+  // Docs: the live parameter and feed tables read the contract
+  await page.goto(BASE + "/docs/");
+  await page.waitForSelector('[data-testid="docs-params"]', { timeout: 30_000 });
+  await page.waitForSelector('[data-testid="docs-feeds"]', { timeout: 30_000 });
+  const docsText = (await page.textContent('[data-testid="docs-params"]')) ?? "";
+  check("docs show the live contract parameters and feeds", /QUSDC/.test(docsText) && /BTC \/ USDT/.test((await page.textContent('[data-testid="docs-feeds"]')) ?? ""));
+  await page.goto(BASE + "/");
+  await page.waitForSelector('[data-testid="launch-app"]');
+
   // 1. Markets: oracle prices and the demo calls
   await page.click('[data-testid="launch-app"]');
   await page.waitForSelector('[data-testid="thesis-card"]', { timeout: 30_000 });

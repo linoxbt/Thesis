@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowUpRight, AtSign, BarChart3, Coins, LayoutGrid, LogIn, LogOut, ShieldCheck, PanelLeftClose, PanelLeftOpen, PenLine, Trophy, User } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, AtSign, BarChart3, BookOpen, Coins, LayoutGrid, LogIn, LogOut, ShieldCheck, PanelLeftClose, PanelLeftOpen, PenLine, Trophy, User } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -20,6 +20,7 @@ const NAV: { href: string; label: string; short?: string; icon: typeof User; mob
   { href: "/new/", label: "Post a trade", short: "Post", icon: PenLine },
   { href: "/stats/", label: "Stats", icon: BarChart3 },
   { href: "/profile/", label: "Profile", icon: User },
+  { href: "/docs/", label: "Docs", icon: BookOpen, mobile: false },
 ];
 
 /** Latest QIE Oracle prints: SOL always, BTC and ETH on wider screens. */

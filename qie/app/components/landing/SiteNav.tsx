@@ -5,10 +5,11 @@ import Link from "next/link";
 import { LogoMark } from "../Brand";
 
 const LINKS = [
-  ["How it works", "#how"],
-  ["Proof", "#proof"],
-  ["Markets", "#markets"],
-  ["FAQ", "#faq"],
+  ["How it works", "/#how"],
+  ["Proof", "/#proof"],
+  ["Markets", "/#markets"],
+  ["Docs", "/docs/"],
+  ["FAQ", "/#faq"],
 ] as const;
 
 /** Black notched tab pinned to the top edge, over the colour field. */

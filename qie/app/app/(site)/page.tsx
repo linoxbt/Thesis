@@ -29,7 +29,7 @@ await wallet.writeContract({
   address: THESIS_CALLS,         // ${CALLS_ADDRESS}
   abi: THESIS_CALLS_ABI,
   functionName: "proveTouch",
-  args: [callId, roundId],       // a QIE Oracle round at or past the target
+  args: [callId, roundId],       // checks every round up to it, in order
 });
 
 // Or let the contract scan every new round itself:
@@ -37,14 +37,14 @@ await wallet.writeContract({ address: THESIS_CALLS, abi: THESIS_CALLS_ABI, funct
   },
   {
     label: "ThesisCalls.sol",
-    code: `function proveTouch(uint256 id, uint80 roundId) external {
+    code: `function proveTouch(uint256 id, uint80 roundId) external nonReentrant {
     Call storage c = _call(id);
     if (c.touched || c.settled) revert AlreadyFinal();
-    (, int256 price,, uint256 updatedAt,) = IPriceFeed(c.feed).getRoundData(roundId);
-    if (price <= 0 || updatedAt == 0) revert BadPrice();
-    if (updatedAt < c.start || updatedAt > c.end) revert RoundOutsideWindow();
-    if (c.above ? price < c.strike : price > c.strike) revert NoTouch();
-    _touch(id, c, roundId, price, updatedAt);   // settles YES
+    if (block.timestamp > uint256(c.end) + c.grace) revert ProofTooLate();
+    if (roundId <= c.checkedRound) revert RoundOutsideWindow();
+    if (roundId - c.checkedRound > PROVE_SCAN_MAX) revert SyncRequired();
+    _scan(id, c, roundId - c.checkedRound); // every round in order: the FIRST touch settles YES
+    if (!c.settled) revert NoTouch();
 }`,
   },
   {
@@ -52,6 +52,7 @@ await wallet.writeContract({ address: THESIS_CALLS, abi: THESIS_CALLS_ABI, funct
     code: `feed      == the call's QIE Oracle feed         // BTC, ETH or SOL / USDT
 price     >  0                                  // a usable round
 start <= updatedAt <= end                       // inside the window
+first such round decides                        // rounds are scanned in order
 crossed(price, strike, direction)               // at or past the target
 // before every bet and before NO: every unchecked round is scanned`,
   },
@@ -61,7 +62,7 @@ const FAQ: [string, ReactNode][] = [
   ["What exactly is a thesis?", "Your trade call, made public and tradable. You post the position (long or short on BTC, ETH or SOL, a take profit and a deadline); Thesis turns it into a market the crowd backs or challenges in QUSDC, and records the outcome against your profile."],
   ["Is this a perp exchange?", "No. You keep trading wherever you trade. Thesis is the layer on top: it prices your call with a prediction market on QIE and settles it from the QIE Oracle. Nothing is lent to you and there is no liquidation."],
   ["What is a touch market?", "A market that asks whether price reaches a level at any moment before the deadline, not only at the close. If a QIE Oracle round prints at or past your target once, the call resolves YES, even if price falls back later."],
-  ["Who decides whether a call hit?", "Nobody decides. The contract reads the QIE Oracle's rounds itself: any round inside the window at or past the target settles YES. Before every bet and before a NO settlement it scans every round it hasn't checked, so a touch can't be missed. Bets placed while the latest oracle price was the round just before the touching one are refunded in full (fee included) instead of paid, so nobody can profit from betting on a move the oracle hasn't printed yet. A keeper makes settlement prompt, but anyone can prove or settle."],
+  ["Who decides whether a call hit?", "Nobody decides. The contract reads the QIE Oracle's rounds itself: the first round inside the window at or past the target settles YES. Before every bet and before a NO settlement it scans every round it hasn't checked, so a touch can't be missed. Bets placed while the latest oracle price was the round just before the touching one are refunded in full (fee included) instead of paid, so nobody can profit from betting on a move the oracle hasn't printed yet. A keeper makes settlement prompt, but anyone can prove or settle."],
   [
     "How are the opening odds set?",
     <>
@@ -361,7 +362,7 @@ export default function LandingPage() {
             </Link>
             <p className="mt-4 max-w-xs font-sans text-sm leading-relaxed text-muted">Trade calls as markets on QIE, settled by an oracle round anyone can prove.</p>
           </div>
-          <FooterCol title="Product" links={[["Markets", "/app/"], ["Post a trade", "/new/"], ["Leaderboard", "/leaderboard/"], ["Traction", "/stats/"]]} />
+          <FooterCol title="Product" links={[["Markets", "/app/"], ["Post a trade", "/new/"], ["Leaderboard", "/leaderboard/"], ["Traction", "/stats/"], ["Docs", "/docs/"]]} />
           <FooterCol title="Protocol" links={[["Thesis contract", EXPLORER], ["QIE Blockchain", "https://www.qie.digital"], ["QUSDC", QUSDC_URL]]} />
         </Container>
         <Container className="num flex flex-wrap justify-between gap-3 border-t border-line py-6 text-xs text-faint">
