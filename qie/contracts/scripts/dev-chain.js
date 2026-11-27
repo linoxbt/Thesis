@@ -1,10 +1,11 @@
 // Local stand-in for QIE mainnet, for UI work and the browser tests:
 //   npx hardhat node &   then   npx hardhat run scripts/dev-chain.js --network localhost
 // Mock BTC/ETH/SOL feeds start at the live QIE Oracle prices; a 6-decimal test
-// token stands in for QUSDC; test accounts get 1,000 each; two demo calls.
+// token stands in for QUSDC; test accounts get 1,000 each; three demo calls
+// (two in QUSDC, one in native QIE).
 // Writes deployments/localhost.json and ../app/.env.local.
 const { ethers } = require("hardhat");
-const { LAUNCH_PARAMS } = require("./params");
+const { LAUNCH_PARAMS, STAKE_LIMITS, NATIVE, QIE } = require("./params");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -34,7 +35,9 @@ async function main() {
   const [owner, keeper, ...users] = await ethers.getSigners();
   const now = async () => (await ethers.provider.getBlock("latest")).timestamp;
   const token = await (await ethers.getContractFactory("MockToken")).deploy();
-  const calls = await (await ethers.getContractFactory("ThesisCalls")).deploy(await token.getAddress(), owner.address, keeper.address, 5_000, LAUNCH_PARAMS);
+  const calls = await (await ethers.getContractFactory("ThesisCalls")).deploy(owner.address, keeper.address, 5_000, LAUNCH_PARAMS);
+  await calls.setStakeToken(await token.getAddress(), STAKE_LIMITS.QUSDC);
+  await calls.setStakeToken(NATIVE, STAKE_LIMITS.QIE);
   const feeds = {};
   for (const [asset, live] of Object.entries(LIVE)) {
     const f = await (await ethers.getContractFactory("MockFeed")).deploy(`${asset} / USDT`);
@@ -48,15 +51,20 @@ async function main() {
     await token.mint(u.address, 1_000n * USDC);
     await token.connect(u).approve(await calls.getAddress(), ethers.MaxUint256);
   }
-  // Two demo calls: SOL +3% in 48h (by user 0) and BTC −5% in 7d (by user 1).
+  // Demo calls: SOL +3% in 48h (user 0) and BTC −5% in 7d (user 1) in QUSDC;
+  // ETH +4% in 3d (user 2) in QIE.
   const sol = BigInt(feeds.SOL.price);
   const btc = BigInt(feeds.BTC.price);
-  await calls.connect(users[0]).createCall(feeds.SOL.address, true, (sol * 10_300n) / 10_000n, (await now()) + 2 * 86_400, 20n * USDC, "SOL squeezes into the weekend");
-  await calls.connect(users[1]).createCall(feeds.BTC.address, false, (btc * 9_500n) / 10_000n, (await now()) + 7 * 86_400, 25n * USDC, "BTC retests support before month end");
+  const eth = BigInt(feeds.ETH.price);
+  const usdc = await token.getAddress();
+  await calls.connect(users[0]).createCall(usdc, feeds.SOL.address, true, (sol * 10_300n) / 10_000n, (await now()) + 2 * 86_400, 20n * USDC, "SOL squeezes into the weekend");
+  await calls.connect(users[1]).createCall(usdc, feeds.BTC.address, false, (btc * 9_500n) / 10_000n, (await now()) + 7 * 86_400, 25n * USDC, "BTC retests support before month end");
   await calls.connect(users[2]).bet(0, true, 8n * USDC);
   await calls.connect(users[3]).bet(0, false, 5n * USDC);
+  await calls.connect(users[2]).createCall(NATIVE, feeds.ETH.address, true, (eth * 10_400n) / 10_000n, (await now()) + 3 * 86_400, 100n * QIE, "ETH breaks out in QIE terms", { value: 100n * QIE });
+  await calls.connect(users[4]).bet(2, false, 40n * QIE, { value: 40n * QIE });
 
-  const out = { network: "localhost", chainId: 31337, ThesisCalls: await calls.getAddress(), stakeToken: await token.getAddress(), feeds, keeper: keeper.address };
+  const out = { network: "localhost", chainId: 31337, ThesisCalls: await calls.getAddress(), stakeTokens: { QUSDC: usdc, QIE: NATIVE }, feeds, keeper: keeper.address };
   fs.writeFileSync(path.join(__dirname, "..", "deployments", "localhost.json"), JSON.stringify(out, null, 2) + "\n");
   fs.writeFileSync(
     path.join(__dirname, "..", "..", "app", ".env.local"),

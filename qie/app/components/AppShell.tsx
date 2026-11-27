@@ -7,7 +7,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { readBalances } from "@/lib/chain";
 import { IS_MAINNET, NETWORK, QUSDC_URL } from "@/lib/config";
 import { useData } from "@/lib/data";
-import { ago, qusdc, shortAddr } from "@/lib/format";
+import { ago, shortAddr } from "@/lib/format";
+import { amtSym } from "@/lib/tokens";
 import { openQieIdWidget } from "@/lib/qieidWidget";
 import { useWallet } from "@/lib/wallet";
 import { Logo } from "./Brand";
@@ -45,9 +46,11 @@ function SpotTicker() {
 
 export function WalletButton() {
   const w = useWallet();
-  const { stakeToken } = useData();
+  const { stakeTokens } = useData();
+  const usdc = stakeTokens.find((t) => !t.native);
+  const stakeToken = usdc?.address ?? null;
   const [open, setOpen] = useState(false);
-  const [bal, setBal] = useState<{ usd: bigint; gas: bigint } | null>(null);
+  const [bal, setBal] = useState<{ stake: bigint; gas: bigint } | null>(null);
   const menu = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -109,7 +112,7 @@ export function WalletButton() {
             {w.session && <span> · signed in until {new Date(w.session.expiresAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>}
             {bal && (
               <span className="num mt-1 block text-ink">
-                {qusdc(bal.usd)} QUSDC · {(Number(bal.gas) / 1e18).toFixed(3)} QIE
+                {(Number(bal.gas) / 1e18).toLocaleString("en-US", { maximumFractionDigits: 3 })} QIE · {usdc ? amtSym(bal.stake, usdc) : ""}
               </span>
             )}
           </div>
@@ -229,11 +232,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="mt-auto">
               <div className="rounded-xl border border-line bg-panel p-3">
                 <div className="flex items-center gap-2 text-sm text-ink">
-                  <Coins size={14} className="text-brand" /> {IS_MAINNET ? "Real QUSDC" : "Test QUSDC"}
+                  <Coins size={14} className="text-brand" /> {IS_MAINNET ? "Real QIE and QUSDC" : "Test QIE and QUSDC"}
                 </div>
                 <p className="mt-1 text-xs text-faint">
                   {IS_MAINNET
-                    ? "QIE mainnet: seeds, bets and payouts are in QUSDC. Gas is paid in QIE."
+                    ? "QIE mainnet: each call is staked in QIE or QUSDC, its creator's choice. Gas is paid in QIE."
                     : `QIE ${NETWORK}: test tokens only. Nothing here has real value.`}
                 </p>
                 <a href={QUSDC_URL} target="_blank" rel="noreferrer" className="btn btn-primary mt-3 w-full text-xs">

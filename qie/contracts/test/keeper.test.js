@@ -5,7 +5,7 @@ const { ethers, network } = require("hardhat");
 const { time } = require("@nomicfoundation/hardhat-network-helpers");
 const { tick, makeCtx, send } = require("../scripts/keeper");
 const ABI = require("../scripts/keeper-abi.json");
-const { LAUNCH_PARAMS } = require("../scripts/params");
+const { LAUNCH_PARAMS, STAKE_LIMITS } = require("../scripts/params");
 
 const USDC = 1_000_000n;
 const PX = (usd) => BigInt(Math.round(usd * 1e8));
@@ -16,7 +16,8 @@ async function setup() {
   const [owner, keeper, creator, alice] = await ethers.getSigners();
   const token = await (await ethers.getContractFactory("MockToken")).deploy();
   const feed = await (await ethers.getContractFactory("MockFeed")).deploy("SOL / USDT");
-  const calls = await (await ethers.getContractFactory("ThesisCalls")).deploy(await token.getAddress(), owner.address, keeper.address, 5_000, LAUNCH_PARAMS);
+  const calls = await (await ethers.getContractFactory("ThesisCalls")).deploy(owner.address, keeper.address, 5_000, LAUNCH_PARAMS);
+  await calls.setStakeToken(await token.getAddress(), STAKE_LIMITS.QUSDC);
   await calls.setFeed(await feed.getAddress(), true, 6_800, 300);
   await print(feed, 100);
   for (const s of [creator, alice]) {
@@ -24,7 +25,7 @@ async function setup() {
     await token.connect(s).approve(await calls.getAddress(), ethers.MaxUint256);
   }
   const end = (await time.latest()) + 2 * DAY;
-  await calls.connect(creator).createCall(await feed.getAddress(), true, PX(105), end, 100n * USDC, "");
+  await calls.connect(creator).createCall(await token.getAddress(), await feed.getAddress(), true, PX(105), end, 100n * USDC, "");
   await calls.connect(alice).bet(0, false, 10n * USDC);
   // A quiet round (a touch in the very first round after posting would void the call).
   await time.increase(300);

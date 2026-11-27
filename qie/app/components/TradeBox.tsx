@@ -6,7 +6,8 @@ import { ERC20_ABI, THESIS_CALLS_ABI } from "@/lib/abi";
 import { publicClient, readBalances, readBetStatus } from "@/lib/chain";
 import { CALLS_ADDRESS, QUSDC_URL } from "@/lib/config";
 import { useData, useNow } from "@/lib/data";
-import { decimalInput, parseAmount, pct, qusdc, timeLeft } from "@/lib/format";
+import { decimalInput, pct, timeLeft } from "@/lib/format";
+import { amt, amtSym, NATIVE, parseTokenAmount } from "@/lib/tokens";
 import { errorName, explain, useWallet } from "@/lib/wallet";
 
 interface Props {
@@ -17,26 +18,29 @@ interface Props {
 }
 
 /**
- * Back (YES) or challenge (NO) a call with QUSDC. The quote is the contract's
+ * Back (YES) or challenge (NO) a call, in the token the call is staked in
+ * (QIE, sent with the bet, or QUSDC, approved first). The quote is the contract's
  * own `quote`: what the stake pays if that side wins, at the pools as they are
  * now (later bets on either side move it).
  */
 export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
   const w = useWallet();
-  const { stakeToken, params, calls, refresh, paused: tradingPaused } = useData();
+  const { params, calls, refresh, tokenOf, paused: tradingPaused } = useData();
   const c = calls.find((x) => x.id === id);
+  const tok = tokenOf(c?.token ?? NATIVE);
+  const stakeToken = c?.token ?? null;
   const [yes, setYes] = useState(initialSide === "yes");
-  const [amount, setAmount] = useState("5");
+  const [amount, setAmount] = useState(tok.native ? "25" : "5");
   const [quote, setQuote] = useState<{ net: bigint; pays: bigint } | null>(null);
   const [quoting, setQuoting] = useState(false);
-  const [bal, setBal] = useState<{ usd: bigint; allowance: bigint } | null>(null);
+  const [bal, setBal] = useState<{ stake: bigint; gas: bigint; allowance: bigint } | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [gate, setGate] = useState<Awaited<ReturnType<typeof readBetStatus>> | null>(null);
   const sending = useRef(false);
   const now = useNow(1000);
-  const micro = parseAmount(amount);
+  const micro = parseTokenAmount(amount, tok.decimals);
 
   // Whether the contract takes bets right now (closes before the deadline, and
   // while the target is too near the latest oracle print for its age).
@@ -53,8 +57,7 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
 
   const loadBal = useCallback(async () => {
     if (!w.account || !stakeToken) return setBal(null);
-    const b = await readBalances(stakeToken, w.account);
-    setBal({ usd: b.usd, allowance: b.allowance });
+    setBal(await readBalances(stakeToken, w.account));
   }, [w.account, stakeToken]);
   useEffect(() => void loadBal().catch(() => {}), [loadBal]);
 
@@ -77,9 +80,9 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
     };
   }, [id, yes, micro, c?.yesPool, c?.noPool]);
 
-  const minStake = params?.minStake ?? 0n;
-  const needsApprove = !!micro && !!bal && bal.allowance < micro;
-  const short = !!micro && !!bal && bal.usd < micro;
+  const minStake = tok.minStake;
+  const needsApprove = !tok.native && !!micro && !!bal && bal.allowance < micro;
+  const short = !!micro && !!bal && bal.stake < micro;
   const tooSmall = !!micro && micro < minStake;
 
   // Crowd odds before and after this bet, from the pools.
@@ -94,21 +97,22 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
   const paused = !closed && gate !== null && !gate.open;
 
   const submit = async () => {
-    if (!micro || !stakeToken || sending.current) return;
+    if (!micro || !stakeToken || !c || sending.current) return;
     sending.current = true;
     setBusy(true);
     setErr(null);
     setNote(null);
     try {
       if (needsApprove) {
-        await w.write(`Approve ${qusdc(micro)} QUSDC`, { address: stakeToken, abi: ERC20_ABI as Abi, functionName: "approve", args: [CALLS_ADDRESS, micro] });
+        await w.write(`Approve ${amtSym(micro, tok)}`, { address: stakeToken, abi: ERC20_ABI as Abi, functionName: "approve", args: [CALLS_ADDRESS, micro] });
       }
       const bet = () =>
-        w.write(`${yes ? "Back" : "Challenge"} ${qusdc(micro)} QUSDC`, {
+        w.write(`${yes ? "Back" : "Challenge"} ${amtSym(micro, tok)}`, {
           address: CALLS_ADDRESS,
           abi: THESIS_CALLS_ABI as Abi,
           functionName: "bet",
           args: [BigInt(id), yes, micro],
+          value: tok.native ? micro : undefined,
         });
       let hash: string;
       try {
@@ -128,7 +132,7 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
         setNote(
           voided
             ? "The oracle touched the target in its first round after the call was posted, so the call is void and your bet wasn't taken. Nothing left your wallet but gas."
-            : "The oracle had already touched the target, so the call settled YES and your bet wasn't taken. Nothing left your wallet but gas.",
+            : "The oracle had already touched the target, so the call settled YES and your bet wasn't taken. Nothing left your wallet but gas (QIE sent with it came straight back).",
         );
       }
       await Promise.all([refresh(), loadBal()]);
@@ -177,12 +181,12 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
           value={amount}
           onChange={(e) => setAmount(decimalInput(e.target.value))}
           className="num w-full bg-transparent text-base outline-none"
-          aria-label="Amount in QUSDC"
+          aria-label={`Amount in ${tok.symbol}`}
           aria-invalid={micro === null}
           data-testid="bet-amount"
         />
         <span className="num flex items-center gap-1.5 rounded-full bg-panel-3 px-2 py-1 text-xs text-ink">
-          <span className="h-3 w-3 rounded-full bg-[#2775ca]" /> QUSDC
+          <span className={"h-3 w-3 rounded-full " + (tok.native ? "bg-brand" : "bg-[#2775ca]")} /> {tok.symbol}
         </span>
       </label>
       {amount !== "" && micro === null && <p className="mt-1 px-1 text-[11px] text-bad">Enter an amount, up to 6 decimals.</p>}
@@ -191,7 +195,7 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
       </div>
       <div className="field flex items-center gap-2 px-3 py-2.5" data-testid="quote">
         <span className="num w-full text-base text-ink">
-          {quoting ? <span className="text-faint">quoting…</span> : quote ? qusdc(quote.pays) : <span className="text-faint">0.00</span>}
+          {quoting ? <span className="text-faint">quoting…</span> : quote ? amt(quote.pays, tok) : <span className="text-faint">0.00</span>}
         </span>
         <span className={"num rounded-full px-2 py-1 text-xs " + (yes ? "bg-yes/15 text-yes" : "bg-panel-3 text-ink")}>{tokenLabel}</span>
       </div>
@@ -199,7 +203,7 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
         {!quoting && quote && micro && (
           <>
             <div>
-              pays <span className="text-muted">{qusdc(quote.pays)} QUSDC</span> {yes ? "if it hits" : "if it misses"}
+              pays <span className="text-muted">{amtSym(quote.pays, tok)}</span> {yes ? "if it hits" : "if it misses"}
               {avg !== null && <> · avg {pct(avg)}</>}
             </div>
             {before !== null && after !== null && (
@@ -211,8 +215,8 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
         )}
         {bal && (
           <div>
-            wallet {qusdc(bal.usd)} QUSDC
-            {bal.usd === 0n && (
+            wallet {amtSym(bal.stake, tok)}
+            {!tok.native && bal.stake === 0n && (
               <>
                 {" · "}
                 <a href={QUSDC_URL} target="_blank" rel="noreferrer" className="underline hover:text-ink">
@@ -222,8 +226,8 @@ export function TradeBox({ id, initialSide = "yes", compact, onDone }: Props) {
             )}
           </div>
         )}
-        {tooSmall && <div className="text-bad">Minimum bet is {qusdc(minStake)} QUSDC.</div>}
-        {short && <div className="text-bad">Not enough QUSDC in this wallet.</div>}
+        {tooSmall && <div className="text-bad">Minimum bet is {amtSym(minStake, tok)}.</div>}
+        {short && <div className="text-bad">Not enough {tok.symbol} in this wallet{tok.native ? " (keep a little for gas)" : ""}.</div>}
       </div>
       {closed ? (
         <p className="mt-2 rounded-xl border border-line px-3 py-2 text-xs text-muted" data-testid="bet-closed">

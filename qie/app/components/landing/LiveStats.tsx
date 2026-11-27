@@ -2,16 +2,16 @@
 
 import { NETWORK } from "@/lib/config";
 import { useData } from "@/lib/data";
-import { qusdc } from "@/lib/format";
+import { perToken } from "@/lib/tokens";
 
 /** One live line from the contract, shown only once there is activity. */
 export function LiveLine() {
-  const { calls, events } = useData();
+  const { calls, events, stakeTokens } = useData();
   if (calls.length === 0) return null;
   const wallets = new Set([...events.trades.map((t) => t.user.toLowerCase()), ...calls.map((c) => c.creator.toLowerCase())]).size;
   const items: [string, string][] = [
     ["calls", String(calls.length)],
-    ["traded", `${qusdc(calls.reduce((s, c) => s + c.volume, 0n), 0)} QUSDC`],
+    ["traded", perToken(calls.map((c) => ({ token: c.token, value: c.volume })), stakeTokens)],
     ["wallets", String(wallets)],
     ["touches proven", String(calls.filter((c) => c.touched && !c.voided).length)],
   ];

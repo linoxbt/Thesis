@@ -3,7 +3,8 @@
 import Link from "next/link";
 import type { Address } from "viem";
 import { useData } from "@/lib/data";
-import { callLine, fmtSkill, pct, qusdc } from "@/lib/format";
+import { callLine, fmtSkill, pct } from "@/lib/format";
+import { amtSym, NATIVE, perToken } from "@/lib/tokens";
 
 function Tile({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
@@ -34,7 +35,7 @@ export function useSkillRank(who: Address | null): number | null {
  * outcome, so a hit on a 90% call doesn't read like a hit on a 20% call.
  */
 export function ProfileStats({ who }: { who: Address }) {
-  const { calls, creators, feedOf, events, creatorShareBps, ready } = useData();
+  const { calls, creators, feedOf, tokenOf, stakeTokens, events, creatorShareBps, ready } = useData();
   const me = who.toLowerCase();
   const s = creators.find((x) => x.creator.toLowerCase() === me)?.stats;
   const rank = useSkillRank(who);
@@ -42,9 +43,13 @@ export function ProfileStats({ who }: { who: Address }) {
   const ids = new Set(mine.map((c) => c.id));
   const scored = s?.scored ?? 0;
   const avgOpen = mine.length ? Math.round(mine.reduce((a, c) => a + c.openBps, 0) / mine.length) : null;
-  const feesEarned = events.trades.filter((t) => ids.has(t.id)).reduce((a, t) => a + (t.fee * BigInt(creatorShareBps)) / 10_000n, 0n);
-  const won = events.claims.filter((c) => c.user.toLowerCase() === me).reduce((a, c) => a + c.amount, 0n);
-  const staked = events.trades.filter((t) => t.user.toLowerCase() === me).reduce((a, t) => a + t.amount, 0n);
+  // Amounts are kept per stake token (a call is in QIE or in QUSDC, never both).
+  const tokenOfCall = new Map(calls.map((c) => [c.id, c.token]));
+  const tk = (id: number) => tokenOfCall.get(id) ?? NATIVE;
+  const volume = perToken(mine.map((c) => ({ token: c.token, value: c.volume })), stakeTokens);
+  const feesEarned = perToken(events.trades.filter((t) => ids.has(t.id)).map((t) => ({ token: tk(t.id), value: (t.fee * BigInt(creatorShareBps)) / 10_000n })), stakeTokens, 2);
+  const won = perToken(events.claims.filter((c) => c.user.toLowerCase() === me).map((c) => ({ token: tk(c.id), value: c.amount })), stakeTokens, 2);
+  const staked = perToken(events.trades.filter((t) => t.user.toLowerCase() === me).map((t) => ({ token: tk(t.id), value: t.amount })), stakeTokens);
   const skillOf = new Map(events.settlements.map((x) => [x.id, x.skillDeltaBps]));
   const history = [...mine].reverse();
   return (
@@ -57,10 +62,10 @@ export function ProfileStats({ who }: { who: Address }) {
         />
         <Tile label="Calls posted" value={String(s?.posted ?? 0)} />
         <Tile label="Hit / missed" value={`${s?.hits ?? 0} / ${s?.misses ?? 0}`} sub={avgOpen !== null ? `avg opening odds ${pct(avgOpen, 0)}` : undefined} />
-        <Tile label="Volume generated" value={`${qusdc(s?.volume ?? 0n, 0)}`} sub="QUSDC on their calls" />
-        <Tile label="Fees earned" value={qusdc(feesEarned)} sub={`QUSDC, ${pct(creatorShareBps, 0)} of every fee`} />
-        <Tile label="Staked" value={qusdc(staked, 0)} sub="QUSDC backed or challenged" />
-        <Tile label="Winnings claimed" value={qusdc(won)} sub="QUSDC" />
+        <Tile label="Volume generated" value={volume} sub="bet on their calls" />
+        <Tile label="Fees earned" value={feesEarned} sub={`${pct(creatorShareBps, 0)} of every fee on their calls`} />
+        <Tile label="Staked" value={staked} sub="backed or challenged" />
+        <Tile label="Winnings claimed" value={won} />
       </div>
       <section className="panel p-5">
         <span className="label">History</span>
@@ -95,7 +100,7 @@ export function ProfileStats({ who }: { who: Address }) {
                       <td className="text-muted">{pct(c.openBps, 0)}</td>
                       <td>{c.voided ? <span className="text-muted">void</span> : c.settled ? c.yesWon ? <span className="text-yes">hit</span> : "missed" : <span className="text-muted">open</span>}</td>
                       <td>{k === undefined ? <span className="text-faint">—</span> : <span className={k >= 0 ? "text-yes" : "text-bad"}>{fmtSkill(k)}</span>}</td>
-                      <td className="text-right">{qusdc(c.volume, 0)}</td>
+                      <td className="text-right">{amtSym(c.volume, tokenOf(c.token), 0)}</td>
                     </tr>
                   );
                 })}

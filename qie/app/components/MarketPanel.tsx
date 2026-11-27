@@ -6,7 +6,8 @@ import { THESIS_CALLS_ABI } from "@/lib/abi";
 import { publicClient, readPosition, type Call, type Feed } from "@/lib/chain";
 import { CALLS_ADDRESS, explorerTx } from "@/lib/config";
 import { impliedYesBps, oddsHistory, useData, useNow } from "@/lib/data";
-import { pct, price, qusdc, timeLeft, when } from "@/lib/format";
+import { pct, price, timeLeft, when } from "@/lib/format";
+import { amt } from "@/lib/tokens";
 import { errorName, explain, useWallet } from "@/lib/wallet";
 import { LineChart } from "./LineChart";
 import { usdPx } from "./Position";
@@ -18,7 +19,8 @@ const CALLS = { address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI as Abi };
 /** The call's market: crowd odds over time on the left, the trade ticket or the outcome on the right. */
 export function MarketPanel({ c, feed }: { c: Call; feed: Feed | undefined }) {
   const w = useWallet();
-  const { tradesOf, events, refresh } = useData();
+  const { tradesOf, events, refresh, tokenOf } = useData();
+  const tok = tokenOf(c.token);
   const now = useNow(1000);
   const [pos, setPos] = useState<Awaited<ReturnType<typeof readPosition>> | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -120,7 +122,7 @@ export function MarketPanel({ c, feed }: { c: Call; feed: Feed | undefined }) {
       }
       throw new Error("The oracle has a very long backlog of rounds. Press the button again to keep checking.");
     });
-  const claim = (amount: bigint) => act("claim", () => write(`Claim ${qusdc(amount)} QUSDC`, "claim", [BigInt(c.id)]));
+  const claim = (amount: bigint) => act("claim", () => write(`Claim ${amt(amount, tok)} ${tok.symbol}`, "claim", [BigInt(c.id)]));
 
   const won = pos && c.settled ? pos.claimable : 0n;
   const open = !c.settled && now > 0 && c.end > now;
@@ -172,13 +174,13 @@ export function MarketPanel({ c, feed }: { c: Call; feed: Feed | undefined }) {
           </div>
           <div className="num mt-3 grid grid-cols-3 gap-3 text-xs text-faint">
             <span>
-              pot <span className="block text-sm text-ink">{qusdc(c.yesPool + c.noPool)} QUSDC</span>
+              pot <span className="block text-sm text-ink">{amt(c.yesPool + c.noPool, tok)} {tok.symbol}</span>
             </span>
             <span>
-              backing · YES <span className="block text-sm text-yes">{qusdc(c.yesPool)}</span>
+              backing · YES <span className="block text-sm text-yes">{amt(c.yesPool, tok)}</span>
             </span>
             <span>
-              challenging · NO <span className="block text-sm text-ink">{qusdc(c.noPool)}</span>
+              challenging · NO <span className="block text-sm text-ink">{amt(c.noPool, tok)}</span>
             </span>
           </div>
         </div>
@@ -208,7 +210,7 @@ export function MarketPanel({ c, feed }: { c: Call; feed: Feed | undefined }) {
                 )}
               </div>
               {c.yesWon && c.voidYes + c.voidNo > 0n && (
-                <div className="num mt-1 text-xs text-faint">{qusdc(c.voidYes + c.voidNo)} QUSDC bet in the oracle round before the touch was refunded in full, not paid.</div>
+                <div className="num mt-1 text-xs text-faint">{amt(c.voidYes + c.voidNo, tok)} {tok.symbol} bet in the oracle round before the touch was refunded in full, not paid.</div>
               )}
               {c.touched && (
                 <div className="num mt-1 text-xs text-muted">
@@ -223,7 +225,7 @@ export function MarketPanel({ c, feed }: { c: Call; feed: Feed | undefined }) {
               )}
               {w.account && won > 0n ? (
                 <button onClick={() => void claim(won)} disabled={!!acting} className="btn btn-primary mt-3 w-full disabled:opacity-40" data-testid="claim">
-                  {acting === "claim" ? "Claiming…" : `Claim ${qusdc(won)} QUSDC`}
+                  {acting === "claim" ? "Claiming…" : `Claim ${amt(won, tok)} ${tok.symbol}`}
                 </button>
               ) : (
                 w.account && <div className="mt-1 text-xs text-faint">{pos?.hasClaimed ? "Claimed." : "Nothing to claim in this wallet."}</div>
@@ -263,17 +265,17 @@ export function MarketPanel({ c, feed }: { c: Call; feed: Feed | undefined }) {
               <div className="flex justify-between">
                 <span className="text-faint">Your position</span>
                 <span>
-                  {qusdc(pos.yes)} YES · {qusdc(pos.no)} NO
+                  {amt(pos.yes, tok)} YES · {amt(pos.no, tok)} NO
                 </span>
               </div>
               {!c.settled ? (
                 <div className="mt-1 text-faint">
-                  {pos.yes > 0n && <>pays {qusdc(pos.payoutIfYes)} if it hits</>}
+                  {pos.yes > 0n && <>pays {amt(pos.payoutIfYes, tok)} if it hits</>}
                   {pos.yes > 0n && pos.no > 0n && " · "}
-                  {pos.no > 0n && <>pays {qusdc(pos.payoutIfNo)} if it misses</>}
+                  {pos.no > 0n && <>pays {amt(pos.payoutIfNo, tok)} if it misses</>}
                 </div>
               ) : (
-                <div className="mt-1 text-faint">{pos.hasClaimed ? "claimed" : pos.claimable > 0n ? `${qusdc(pos.claimable)} QUSDC to claim` : "nothing to claim"}</div>
+                <div className="mt-1 text-faint">{pos.hasClaimed ? "claimed" : pos.claimable > 0n ? `${amt(pos.claimable, tok)} ${tok.symbol} to claim` : "nothing to claim"}</div>
               )}
             </div>
           )}

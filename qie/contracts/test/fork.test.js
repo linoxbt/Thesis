@@ -9,7 +9,7 @@ const FEEDS = {
   ETH: "0x4bb7012Fbc79fE4Ae9B664228977b442b385500d",
   SOL: "0xe86999c8e6C8eeF71bebd35286bCa674E0AD7b21",
 };
-const { USDC, LAUNCH_PARAMS, FEEDS: FEED_CFG } = require("../scripts/params");
+const { USDC, LAUNCH_PARAMS, STAKE_LIMITS, FEEDS: FEED_CFG } = require("../scripts/params");
 
 (process.env.FORK ? describe : describe.skip)("on a QIE mainnet fork (real oracle)", function () {
   this.timeout(300_000);
@@ -24,7 +24,8 @@ const { USDC, LAUNCH_PARAMS, FEEDS: FEED_CFG } = require("../scripts/params");
   it("prices, scans real oracle rounds and settles", async () => {
     const [owner, creator, alice] = await ethers.getSigners();
     const token = await (await ethers.getContractFactory("MockToken")).deploy();
-    const calls = await (await ethers.getContractFactory("ThesisCalls")).deploy(await token.getAddress(), owner.address, owner.address, 5_000, LAUNCH_PARAMS);
+    const calls = await (await ethers.getContractFactory("ThesisCalls")).deploy(owner.address, owner.address, 5_000, LAUNCH_PARAMS);
+    await calls.setStakeToken(await token.getAddress(), STAKE_LIMITS.QUSDC);
     for (const [name, addr] of Object.entries(FEEDS)) {
       const feed = await ethers.getContractAt("IPriceFeed", addr);
       const [roundId, price, , updatedAt] = await feed.latestRoundData();
@@ -43,7 +44,7 @@ const { USDC, LAUNCH_PARAMS, FEEDS: FEED_CFG } = require("../scripts/params");
     const end = (await time.latest()) + 48 * 3600;
     const [open] = await calls.previewOpenBps(FEEDS.SOL, true, strike, end);
     console.log(`      opening odds for +5% in 48h: ${(Number(open) / 100).toFixed(2)}%; strike needs ${await calls.minDistanceNow(FEEDS.SOL)} bps now`);
-    await calls.connect(creator).createCall(FEEDS.SOL, true, strike, end, 25n * USDC, "fork test");
+    await calls.connect(creator).createCall(await token.getAddress(), FEEDS.SOL, true, strike, end, 25n * USDC, "fork test");
     const st = await calls.betStatus(0);
     console.log(`      bet status: open ${st.open}, needs ${st.needBps} bps, has ${st.distBps}, print ${st.oracleAge}s old`);
     const tx = await calls.connect(alice).bet(0, false, 10n * USDC);

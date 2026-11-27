@@ -48,6 +48,9 @@ const REASONS: Record<string, string> = {
   TextTooLong: "Keep the reason under 280 bytes (emoji and accents count double or more).",
   CallClosed: "Betting on this call has closed.",
   StakeTooSmall: "That's below the minimum bet.",
+  TokenNotEnabled: "New calls can't be staked in that token right now.",
+  BadValue: "The amount sent didn't match the stake. Try again.",
+  PayoutFailed: "This wallet couldn't receive QIE. Claim from a wallet that can.",
   AlreadyFinal: "Already settled.",
   ProofTooLate: "The proof window has closed; settle it instead.",
   RoundOutsideWindow: "That oracle round is outside the call's window.",
@@ -74,7 +77,7 @@ export function explain(e: unknown): string {
     const name = revert?.data?.errorName;
     if (name && REASONS[name]) return REASONS[name];
     if (/User rejected|denied|4001/i.test(e.message)) return "You rejected the request in your wallet.";
-    if (/insufficient funds/i.test(e.message)) return "Not enough QIE for gas.";
+    if (/insufficient funds/i.test(e.message)) return "Not enough QIE for this (stake plus gas).";
     if (/ERC20InsufficientBalance|exceeds balance/i.test(e.message)) return "Not enough QUSDC.";
     return e.shortMessage;
   }
@@ -137,7 +140,7 @@ interface WalletState {
   signInOpen: boolean;
   closeSignIn(): void;
   /** Sends a contract write and waits for it; shows a toast; throws on failure. */
-  write(label: string, call: { address: Address; abi: Abi; functionName: string; args?: readonly unknown[] }): Promise<string>;
+  write(label: string, call: { address: Address; abi: Abi; functionName: string; args?: readonly unknown[]; value?: bigint }): Promise<string>;
   toasts: Toast[];
   dismiss(id: number): void;
 }

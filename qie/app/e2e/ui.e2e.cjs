@@ -96,8 +96,14 @@ async function main() {
   await page.goto(BASE + "/docs/");
   await page.waitForSelector('[data-testid="docs-params"]', { timeout: 30_000 });
   await page.waitForSelector('[data-testid="docs-feeds"]', { timeout: 30_000 });
+  await page.waitForSelector('[data-testid="docs-tokens"]', { timeout: 30_000 });
   const docsText = (await page.textContent('[data-testid="docs-params"]')) ?? "";
-  check("docs show the live contract parameters and feeds", /QUSDC/.test(docsText) && /BTC \/ USDT/.test((await page.textContent('[data-testid="docs-feeds"]')) ?? ""));
+  const tokensText = (await page.textContent('[data-testid="docs-tokens"]')) ?? "";
+  check(
+    "docs show the live parameters, stake tokens and feeds",
+    /Betting closes/.test(docsText) && /QIE \(native\)/.test(tokensText) && /QUSDC/.test(tokensText) && /BTC \/ USDT/.test((await page.textContent('[data-testid="docs-feeds"]')) ?? ""),
+    tokensText.replace(/\s+/g, " ").slice(0, 120),
+  );
   await page.goto(BASE + "/");
   await page.waitForSelector('[data-testid="launch-app"]');
 
@@ -191,9 +197,22 @@ async function main() {
   check("activity lists the bet from contract events", /backed · YES/.test((await page.textContent('[data-testid="activity"]')) ?? ""));
   await page.screenshot({ path: `${OUT}/call.png`, fullPage: true });
 
-  // 4. Post a call
+  // 3b. Back the QIE call (demo call #2) with 5 QIE: sent with the bet, nothing to approve
+  await page.goto(BASE + "/t/?id=2");
+  await page.waitForSelector('[data-testid="bet-box"]');
+  await page.fill('[data-testid="bet-amount"]', "5");
+  await page.waitForFunction(() => /pays [\d.]+ QIE/.test(document.querySelector('[data-testid="bet-quote"]')?.textContent ?? ""), null, { timeout: 20_000 });
+  check("a QIE call quotes in QIE, with no approval step", !/Approve/.test((await page.textContent('[data-testid="bet-submit"]')) ?? ""));
+  await page.click('[data-testid="bet-submit"]');
+  const backedQie = await page.waitForSelector('[data-testid="tx-confirmed"]:has-text("QIE"), [data-testid="tx-failed"]', { timeout: 60_000 });
+  check("backs a QIE call in one transaction", (await backedQie.getAttribute("data-testid")) === "tx-confirmed", ((await backedQie.textContent()) ?? "").replace(/\s+/g, " ").slice(0, 80));
+  await page.waitForFunction(() => /4\.90 YES/.test(document.querySelector('[data-testid="position"]')?.textContent ?? ""), null, { timeout: 20_000 });
+  check("the QIE position shows the stake net of the fee", true);
+
+  // 4. Post a call in QUSDC (approve, then post)
   await page.goto(BASE + "/new/");
   await page.click('[data-testid="asset-ETH"]');
+  await page.click('[data-testid="stake-QUSDC"]');
   await page.fill('[data-testid="seed"]', "10");
   await page.waitForFunction(() => /Opening odds: [\d.]+%/.test(document.querySelector('[data-testid="preview"]')?.textContent ?? ""), null, { timeout: 20_000 });
   const preview = (await page.textContent('[data-testid="preview"]')) ?? "";
@@ -206,6 +225,22 @@ async function main() {
     await page.click('[data-testid="view-call"]');
     await page.waitForSelector('[data-testid="call-title"]');
     check("the new call has its page", /ETH \/ USDT/.test((await page.textContent('[data-testid="call-title"]')) ?? ""));
+  }
+
+  // 4a. Post a call in QIE: the seed goes with the post, one confirm, no approval
+  await page.goto(BASE + "/new/");
+  await page.click('[data-testid="asset-BTC"]');
+  await page.click('[data-testid="stake-QIE"]');
+  await page.fill('[data-testid="seed"]', "30");
+  await page.waitForFunction(() => /Opening odds: [\d.]+%/.test(document.querySelector('[data-testid="preview"]')?.textContent ?? ""), null, { timeout: 20_000 });
+  await page.click('[data-testid="post-submit"]');
+  const postedQie = await page.waitForSelector('[data-testid="posted"]', { timeout: 60_000 }).then(() => true).catch(() => false);
+  check("posts a call staked in QIE, in one step", postedQie && (await page.locator('[data-testid="create-steps"] li').count().catch(() => 1)) <= 1);
+  if (postedQie) {
+    await page.click('[data-testid="view-call"]');
+    await page.waitForSelector('[data-testid="call-title"]');
+    await page.waitForFunction(() => /pot\s*30\.00 QIE/.test(document.body.textContent ?? ""), null, { timeout: 20_000 }).catch(() => {});
+    check("the QIE call's pot is in QIE", /pot\s*30\.00 QIE/.test((await page.textContent("body")) ?? ""));
   }
 
   // 4b. Share: the dialog draws the call's card image

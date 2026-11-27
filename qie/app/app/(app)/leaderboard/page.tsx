@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Address } from "viem";
 import { Avatar } from "@/components/ThesisCard";
 import { Who } from "@/components/Who";
+import { amtSym } from "@/lib/tokens";
 import { useData, useNow } from "@/lib/data";
 import { fmtSkill, pct } from "@/lib/format";
 import { QIE_PASS_URL } from "@/lib/wallet";
@@ -86,7 +87,7 @@ const byRank = (a: Row, b: Row) => {
  */
 export default function LeaderboardPage() {
   const [period, setPeriod] = useState<"week" | "all">("week");
-  const { ready, historyReady, creators, calls, events, params } = useData();
+  const { ready, historyReady, creators, calls, events, stakeTokens } = useData();
   const now = useNow(60_000);
 
   const rows = useMemo<Row[]>(() => {
@@ -140,7 +141,7 @@ export default function LeaderboardPage() {
             <span className="num text-yes"> +0.80</span>, a 90% call that misses costs
             <span className="num text-bad"> −0.90</span>. Safe calls earn almost nothing; only real edge climbs. Ranked by skill per
             call once a creator has {MIN_CALLS} scored calls; a call is scored once others have bet{" "}
-            {params ? (Number(params.minScoredVolume) / 1e6).toFixed(0) : "5"} QUSDC on it.
+            {stakeTokens.length ? stakeTokens.map((t) => amtSym(t.minScoredVolume, t, 0)).join(" or ") : "enough"} on it (whichever it&apos;s staked in).
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

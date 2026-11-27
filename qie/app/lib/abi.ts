@@ -3,11 +3,6 @@ export const THESIS_CALLS_ABI = [
   {
     "inputs": [
       {
-        "internalType": "contract IERC20",
-        "name": "stakeToken_",
-        "type": "address"
-      },
-      {
         "internalType": "address",
         "name": "treasury_",
         "type": "address"
@@ -28,21 +23,6 @@ export const THESIS_CALLS_ABI = [
             "internalType": "uint16",
             "name": "feeBps",
             "type": "uint16"
-          },
-          {
-            "internalType": "uint64",
-            "name": "minSeed",
-            "type": "uint64"
-          },
-          {
-            "internalType": "uint64",
-            "name": "maxSeed",
-            "type": "uint64"
-          },
-          {
-            "internalType": "uint64",
-            "name": "minStake",
-            "type": "uint64"
           },
           {
             "internalType": "uint32",
@@ -108,11 +88,6 @@ export const THESIS_CALLS_ABI = [
             "internalType": "uint32",
             "name": "voidAfter",
             "type": "uint32"
-          },
-          {
-            "internalType": "uint64",
-            "name": "minScoredVolume",
-            "type": "uint64"
           }
         ],
         "internalType": "struct ThesisCalls.Params",
@@ -146,6 +121,11 @@ export const THESIS_CALLS_ABI = [
   {
     "inputs": [],
     "name": "BadSeed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "BadValue",
     "type": "error"
   },
   {
@@ -196,6 +176,11 @@ export const THESIS_CALLS_ABI = [
   {
     "inputs": [],
     "name": "Paused",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "PayoutFailed",
     "type": "error"
   },
   {
@@ -257,6 +242,11 @@ export const THESIS_CALLS_ABI = [
   {
     "inputs": [],
     "name": "TextTooLong",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "TokenNotEnabled",
     "type": "error"
   },
   {
@@ -346,6 +336,12 @@ export const THESIS_CALLS_ABI = [
       },
       {
         "indexed": false,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "indexed": false,
         "internalType": "bool",
         "name": "above",
         "type": "bool"
@@ -428,6 +424,12 @@ export const THESIS_CALLS_ABI = [
         "indexed": true,
         "internalType": "address",
         "name": "creator",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "token",
         "type": "address"
       },
       {
@@ -533,21 +535,6 @@ export const THESIS_CALLS_ABI = [
             "type": "uint16"
           },
           {
-            "internalType": "uint64",
-            "name": "minSeed",
-            "type": "uint64"
-          },
-          {
-            "internalType": "uint64",
-            "name": "maxSeed",
-            "type": "uint64"
-          },
-          {
-            "internalType": "uint64",
-            "name": "minStake",
-            "type": "uint64"
-          },
-          {
             "internalType": "uint32",
             "name": "minWindow",
             "type": "uint32"
@@ -611,11 +598,6 @@ export const THESIS_CALLS_ABI = [
             "internalType": "uint32",
             "name": "voidAfter",
             "type": "uint32"
-          },
-          {
-            "internalType": "uint64",
-            "name": "minScoredVolume",
-            "type": "uint64"
           }
         ],
         "indexed": false,
@@ -675,6 +657,52 @@ export const THESIS_CALLS_ABI = [
       }
     ],
     "name": "Settled",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "components": [
+          {
+            "internalType": "bool",
+            "name": "enabled",
+            "type": "bool"
+          },
+          {
+            "internalType": "uint128",
+            "name": "minSeed",
+            "type": "uint128"
+          },
+          {
+            "internalType": "uint128",
+            "name": "maxSeed",
+            "type": "uint128"
+          },
+          {
+            "internalType": "uint128",
+            "name": "minStake",
+            "type": "uint128"
+          },
+          {
+            "internalType": "uint128",
+            "name": "minScoredVolume",
+            "type": "uint128"
+          }
+        ],
+        "indexed": false,
+        "internalType": "struct ThesisCalls.StakeToken",
+        "name": "config",
+        "type": "tuple"
+      }
+    ],
+    "name": "StakeTokenSet",
     "type": "event"
   },
   {
@@ -762,6 +790,12 @@ export const THESIS_CALLS_ABI = [
         "type": "address"
       },
       {
+        "indexed": true,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
         "indexed": false,
         "internalType": "uint256",
         "name": "amount",
@@ -823,6 +857,19 @@ export const THESIS_CALLS_ABI = [
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "NATIVE",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
       }
     ],
     "stateMutability": "view",
@@ -894,7 +941,7 @@ export const THESIS_CALLS_ABI = [
     ],
     "name": "bet",
     "outputs": [],
-    "stateMutability": "nonpayable",
+    "stateMutability": "payable",
     "type": "function"
   },
   {
@@ -983,7 +1030,13 @@ export const THESIS_CALLS_ABI = [
     "type": "function"
   },
   {
-    "inputs": [],
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      }
+    ],
     "name": "claimCreatorFees",
     "outputs": [
       {
@@ -1047,6 +1100,11 @@ export const THESIS_CALLS_ABI = [
     "inputs": [
       {
         "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
         "name": "feed",
         "type": "address"
       },
@@ -1084,7 +1142,7 @@ export const THESIS_CALLS_ABI = [
         "type": "uint256"
       }
     ],
-    "stateMutability": "nonpayable",
+    "stateMutability": "payable",
     "type": "function"
   },
   {
@@ -1102,6 +1160,11 @@ export const THESIS_CALLS_ABI = [
   },
   {
     "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      },
       {
         "internalType": "address",
         "name": "",
@@ -1240,6 +1303,11 @@ export const THESIS_CALLS_ABI = [
             "type": "address"
           },
           {
+            "internalType": "address",
+            "name": "token",
+            "type": "address"
+          },
+          {
             "internalType": "bool",
             "name": "above",
             "type": "bool"
@@ -1345,9 +1413,9 @@ export const THESIS_CALLS_ABI = [
             "type": "uint32"
           },
           {
-            "internalType": "uint64",
+            "internalType": "uint128",
             "name": "minScored",
-            "type": "uint64"
+            "type": "uint128"
           },
           {
             "internalType": "uint256",
@@ -1416,6 +1484,11 @@ export const THESIS_CALLS_ABI = [
             "type": "address"
           },
           {
+            "internalType": "address",
+            "name": "token",
+            "type": "address"
+          },
+          {
             "internalType": "bool",
             "name": "above",
             "type": "bool"
@@ -1521,9 +1594,9 @@ export const THESIS_CALLS_ABI = [
             "type": "uint32"
           },
           {
-            "internalType": "uint64",
+            "internalType": "uint128",
             "name": "minScored",
-            "type": "uint64"
+            "type": "uint128"
           },
           {
             "internalType": "uint256",
@@ -1605,11 +1678,6 @@ export const THESIS_CALLS_ABI = [
             "internalType": "int64",
             "name": "skillBps",
             "type": "int64"
-          },
-          {
-            "internalType": "uint128",
-            "name": "volume",
-            "type": "uint128"
           },
           {
             "internalType": "uint32",
@@ -1723,21 +1791,6 @@ export const THESIS_CALLS_ABI = [
         "type": "uint16"
       },
       {
-        "internalType": "uint64",
-        "name": "minSeed",
-        "type": "uint64"
-      },
-      {
-        "internalType": "uint64",
-        "name": "maxSeed",
-        "type": "uint64"
-      },
-      {
-        "internalType": "uint64",
-        "name": "minStake",
-        "type": "uint64"
-      },
-      {
         "internalType": "uint32",
         "name": "minWindow",
         "type": "uint32"
@@ -1801,11 +1854,6 @@ export const THESIS_CALLS_ABI = [
         "internalType": "uint32",
         "name": "voidAfter",
         "type": "uint32"
-      },
-      {
-        "internalType": "uint64",
-        "name": "minScoredVolume",
-        "type": "uint64"
       }
     ],
     "stateMutability": "view",
@@ -2091,21 +2139,6 @@ export const THESIS_CALLS_ABI = [
             "type": "uint16"
           },
           {
-            "internalType": "uint64",
-            "name": "minSeed",
-            "type": "uint64"
-          },
-          {
-            "internalType": "uint64",
-            "name": "maxSeed",
-            "type": "uint64"
-          },
-          {
-            "internalType": "uint64",
-            "name": "minStake",
-            "type": "uint64"
-          },
-          {
             "internalType": "uint32",
             "name": "minWindow",
             "type": "uint32"
@@ -2169,11 +2202,6 @@ export const THESIS_CALLS_ABI = [
             "internalType": "uint32",
             "name": "voidAfter",
             "type": "uint32"
-          },
-          {
-            "internalType": "uint64",
-            "name": "minScoredVolume",
-            "type": "uint64"
           }
         ],
         "internalType": "struct ThesisCalls.Params",
@@ -2195,6 +2223,51 @@ export const THESIS_CALLS_ABI = [
       }
     ],
     "name": "setPaused",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "components": [
+          {
+            "internalType": "bool",
+            "name": "enabled",
+            "type": "bool"
+          },
+          {
+            "internalType": "uint128",
+            "name": "minSeed",
+            "type": "uint128"
+          },
+          {
+            "internalType": "uint128",
+            "name": "maxSeed",
+            "type": "uint128"
+          },
+          {
+            "internalType": "uint128",
+            "name": "minStake",
+            "type": "uint128"
+          },
+          {
+            "internalType": "uint128",
+            "name": "minScoredVolume",
+            "type": "uint128"
+          }
+        ],
+        "internalType": "struct ThesisCalls.StakeToken",
+        "name": "t",
+        "type": "tuple"
+      }
+    ],
+    "name": "setStakeToken",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -2250,12 +2323,70 @@ export const THESIS_CALLS_ABI = [
   },
   {
     "inputs": [],
-    "name": "stakeToken",
+    "name": "stakeTokenCount",
     "outputs": [
       {
-        "internalType": "contract IERC20",
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "stakeTokenList",
+    "outputs": [
+      {
+        "internalType": "address",
         "name": "",
         "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "stakeTokens",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "enabled",
+        "type": "bool"
+      },
+      {
+        "internalType": "uint128",
+        "name": "minSeed",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint128",
+        "name": "maxSeed",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint128",
+        "name": "minStake",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint128",
+        "name": "minScoredVolume",
+        "type": "uint128"
       }
     ],
     "stateMutability": "view",
@@ -2290,11 +2421,6 @@ export const THESIS_CALLS_ABI = [
         "internalType": "int64",
         "name": "skillBps",
         "type": "int64"
-      },
-      {
-        "internalType": "uint128",
-        "name": "volume",
-        "type": "uint128"
       },
       {
         "internalType": "uint32",
@@ -2356,7 +2482,13 @@ export const THESIS_CALLS_ABI = [
     "type": "function"
   },
   {
-    "inputs": [],
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
     "name": "treasuryFees",
     "outputs": [
       {
@@ -2421,7 +2553,13 @@ export const THESIS_CALLS_ABI = [
     "type": "function"
   },
   {
-    "inputs": [],
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      }
+    ],
     "name": "withdrawTreasury",
     "outputs": [],
     "stateMutability": "nonpayable",

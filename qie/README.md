@@ -2,27 +2,31 @@
 
 **Prove you called it.** Post a call on BTC, ETH or SOL ("SOL touches $73.10
 by Saturday"). The contract prices it the moment you post, the crowd backs it
-(YES) or challenges it (NO) in **QUSDC**, and the **QIE Oracle** settles it.
+(YES) or challenges it (NO) in **QIE** or **QUSDC** (the caller picks), and the
+**QIE Oracle** settles it.
 Every result scores the caller's skill onchain: hitting a long shot counts for
 more than calling the obvious.
 
 This is the QIE edition of Thesis, a project first built on Solana
 (`programs/`, `apps/web` in this repository). The QIE edition is a native
 rebuild for QIE's EVM: new Solidity contracts, settlement by the QIE Oracle,
-QUSDC stakes, QIE Wallet, and pari-mutuel pools in place of the Solana
+native QIE or QUSDC stakes, QIE Wallet, and pari-mutuel pools in place of the Solana
 version's AMM.
 
 ## How it works
 
-1. **Post.** `createCall(feed, above, strike, end, seed, text)` reads the QIE
+1. **Post.** `createCall(token, feed, above, strike, end, seed, text)` reads the QIE
    Oracle and computes the opening odds onchain with the reflection
    principle, `P(touch) = 2·Φ(−|ln(K/S)| / σ√τ)` (fixed point, Solady math),
    with a discrete-monitoring correction (the oracle prints in rounds, not
    every tick). The window τ runs from the latest print, so the unseen time
    since then counts. The target must be at least 1% away from the latest
    price, and further the older that print is (z·σ·√age). The creator's seed
-   opens the YES and NO pools at those odds.
-2. **Back or challenge.** `bet(id, yes, amount)` in QUSDC. A 2% fee (fixed per
+   opens the YES and NO pools at those odds. `token` is what the call is
+   staked in: native QIE (`address(0)`, the seed sent as value, no approval)
+   or QUSDC. Seeds, bets, payouts and fees on that call all use it; limits
+   are set per token at about the same dollar amounts.
+2. **Back or challenge.** `bet(id, yes, amount)` in the call's token. A 2% fee (fixed per
    call): half to the call's creator, half to the treasury. Winners split the
    whole pot. Betting closes in the last 10% of the window, and pauses while
    the latest print is within 0.25% of the target (or over 3 hours old).
@@ -36,7 +40,7 @@ version's AMM.
    only once the oracle has printed past the deadline. If it never does (or
    the feed breaks), `voidCall` refunds everyone after 3 days; it settles the
    call instead whenever the oracle can.
-4. **Skill.** Each settled call that others traded (5 QUSDC of outside bets,
+4. **Skill.** Each settled call that others traded (5 QUSDC or 30 QIE of outside bets,
    refunds excluded) adds `(1 if hit, else 0) − opening odds` to the creator's
    onchain score. A 20% call that hits earns +0.80; a 90% call that misses
    costs −0.90; fair calls at random average zero. The leaderboard ranks skill
@@ -51,7 +55,8 @@ Anyone can call `proveTouch`, `sync`, `settle` or `voidCall`; the keeper
 |---|---|
 | QIE Blockchain (EVM, chain 1990) | the `ThesisCalls` contract |
 | QIE Oracle | BTC, ETH, SOL feeds: opening price, touch proofs (`getRoundData`), volatility |
-| QIE Stable Coin (QUSDC) | seeds, bets, payouts, fees |
+| QIE (native coin) | stake option: seeds, bets, payouts, fees, sent as value (and gas) |
+| QIE Stable Coin (QUSDC) | stake option: seeds, bets, payouts, fees |
 | QIE Wallet | EIP-6963 discovery (`me.qiewallet`), network switch, signing |
 
 ## Layout
@@ -60,8 +65,8 @@ Anyone can call `proveTouch`, `sync`, `settle` or `voidCall`; the keeper
 |---|---|
 | `contracts/contracts/ThesisCalls.sol` | the market contract |
 | `contracts/contracts/TouchMath.sol` | onchain opening odds |
-| `contracts/test/` | 36 contract tests (incl. the audit's attack cases and an invariant fuzz), 9 keeper tests, and a test on a QIE mainnet fork against the live oracle |
-| `contracts/scripts/deploy.js` | mainnet deploy (QUSDC + feeds) |
+| `contracts/test/` | 43 contract tests (incl. the audit's attack cases, native-QIE payouts and re-entry, and an invariant fuzz across both stake tokens), 9 keeper tests, and a test on a QIE mainnet fork against the live oracle |
+| `contracts/scripts/deploy.js` | mainnet deploy (stake tokens QIE + QUSDC, feeds) |
 | `contracts/scripts/keeper.js` | proves touches, keeps calls synced, settles or voids, posts 7-day volatility and round gaps |
 | `contracts/scripts/params.js` | launch parameters and measured feed settings |
 | `contracts/scripts/dev-chain.js` | a local stand-in for QIE (mock feeds at live prices) |

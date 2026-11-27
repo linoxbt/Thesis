@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useState } from "react";
 import type { Call, Feed } from "@/lib/chain";
 import { impliedYesBps, oddsHistory, useData, useNow, volumeSince } from "@/lib/data";
-import { pct, price, qusdc, timeLeft, when } from "@/lib/format";
+import { pct, price, timeLeft, when } from "@/lib/format";
+import { amtSym } from "@/lib/tokens";
 import { positionOf } from "@/lib/position";
 import { PositionLevels, SidePill } from "./Position";
 import { Sparkline } from "./Sparkline";
@@ -60,7 +61,7 @@ export const pairOf = (feed: Feed | undefined) => `${feed?.asset ?? "…"} / USD
 
 export function ThesisCard({ c, feed }: { c: Call; feed: Feed | undefined }) {
   const now = useNow(1000);
-  const { tradesOf } = useData();
+  const { tradesOf, tokenOf } = useData();
   const [open, setOpen] = useState<null | "yes" | "no">(null);
   const trades = tradesOf(c.id);
   const live = !c.touched && !c.settled && c.end > now;
@@ -104,7 +105,7 @@ export function ThesisCard({ c, feed }: { c: Call; feed: Feed | undefined }) {
 
       <div className="num mt-4 flex items-center justify-between border-t border-line pt-3 text-xs text-faint">
         <span>
-          vol 24h <span className="text-muted">{qusdc(volumeSince(trades, now - 86_400), 0)} QUSDC</span>
+          vol 24h <span className="text-muted">{amtSym(volumeSince(trades, now - 86_400), tokenOf(c.token), 0)}</span>
         </span>
         <span className="flex items-center gap-1">
           <Clock size={11} />

@@ -2,8 +2,9 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Address } from "viem";
-import { publicClient, readCalls, readCreators, readFeeds, readParams, type Call, type Feed, type Params, type Stats } from "./chain";
+import { publicClient, readCalls, readCreators, readFeeds, readParams, readStakeTokens, type Call, type Feed, type Params, type Stats } from "./chain";
 import { DEPLOY_BLOCK, DEPLOYED } from "./config";
+import { unknownToken, type StakeToken } from "./tokens";
 import { cloneEvents, emptyEvents, loadCachedEvents, readEvents, saveCachedEvents, type Events, type Seen, type Trade } from "./events";
 
 interface Data {
@@ -12,7 +13,8 @@ interface Data {
   historyReady: boolean;
   error: string | null;
   params: Params | null;
-  stakeToken: Address | null;
+  /** What calls can be staked in: native QIE first, then tokens (QUSDC). */
+  stakeTokens: StakeToken[];
   creatorShareBps: number;
   paused: boolean;
   feeds: Feed[];
@@ -20,13 +22,15 @@ interface Data {
   creators: { creator: Address; stats: Stats }[];
   events: Events;
   feedOf(address: Address): Feed | undefined;
+  /** A stake token's symbol, decimals and limits (a placeholder until loaded). */
+  tokenOf(address: Address): StakeToken;
   tradesOf(id: number): Trade[];
   refresh(): Promise<void>;
 }
 
 const Ctx = createContext<Data | null>(null);
 
-type State = Omit<Data, "feedOf" | "tradesOf" | "refresh">;
+type State = Omit<Data, "feedOf" | "tokenOf" | "tradesOf" | "refresh">;
 
 /**
  * Everything the pages show, read straight from the contract, its events and
@@ -40,7 +44,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     historyReady: false,
     error: null,
     params: null,
-    stakeToken: null,
+    stakeTokens: [],
     creatorShareBps: 5000,
     paused: false,
     feeds: [],
@@ -68,9 +72,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
       }
     }
     try {
-      const [p, feeds, calls, creators] = await Promise.all([readParams(), readFeeds(), readCalls(callsRef.current), readCreators()]);
+      const [p, stakeTokens, feeds, calls, creators] = await Promise.all([readParams(), readStakeTokens(), readFeeds(), readCalls(callsRef.current), readCreators()]);
       callsRef.current = calls;
-      setState((s) => ({ ...s, ready: true, error: null, ...p, feeds, calls, creators }));
+      setState((s) => ({ ...s, ready: true, error: null, ...p, stakeTokens, feeds, calls, creators }));
       // History: from the last read block (a few blocks back, deduplicated) to the head.
       const head = await publicClient.getBlockNumber();
       const from = cursor.current > DEPLOY_BLOCK + 5n ? cursor.current - 5n : DEPLOY_BLOCK;
@@ -124,6 +128,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return {
       ...state,
       feedOf: (a) => state.feeds.find((f) => f.address.toLowerCase() === a.toLowerCase()),
+      tokenOf: (a) => state.stakeTokens.find((t) => t.address.toLowerCase() === a.toLowerCase()) ?? unknownToken(a),
       tradesOf: (id) => byCall.get(id) ?? [],
       refresh,
     };

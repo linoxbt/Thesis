@@ -55,6 +55,7 @@ export interface Claim {
 }
 export interface CreatorFeeClaim {
   creator: Address;
+  token: Address;
   amount: bigint;
   ts: number;
 }
@@ -179,7 +180,7 @@ export async function readEvents(from: bigint, to: bigint, into: Events, seen: S
       }
       case "CreatorFeesClaimed": {
         const a = l.args;
-        into.feeClaims.push({ creator: a.creator, amount: a.amount, ts });
+        into.feeClaims.push({ creator: a.creator, token: a.token, amount: a.amount, ts });
         break;
       }
       case "CallCreated":
@@ -196,7 +197,7 @@ export async function readEvents(from: bigint, to: bigint, into: Events, seen: S
 // ignored. A reorg deeper than the 5-block overlap is not expected on QIE
 // (CometBFT finality).
 
-const CACHE_KEY = `thesis-events:v3:${qie.id}:${CALLS_ADDRESS.toLowerCase()}`;
+const CACHE_KEY = `thesis-events:v4:${qie.id}:${CALLS_ADDRESS.toLowerCase()}`;
 const big = (_k: string, v: unknown) => (typeof v === "bigint" ? { $b: v.toString() } : v);
 const unbig = (_k: string, v: unknown) => (v && typeof v === "object" && "$b" in v ? BigInt((v as { $b: string }).$b) : v);
 

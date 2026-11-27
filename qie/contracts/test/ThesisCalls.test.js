@@ -10,9 +10,6 @@ const DAY = 86_400;
 
 const PARAMS = {
   feeBps: 200,
-  minSeed: 5n * USDC,
-  maxSeed: 1_000n * USDC,
-  minStake: 1n * USDC,
   minWindow: 600,
   maxWindow: 8 * DAY,
   grace: HOUR,
@@ -26,16 +23,23 @@ const PARAMS = {
   staleZTenths: 30,
   closeBps: 1_000,
   voidAfter: 3 * DAY,
-  minScoredVolume: 5n * USDC,
 };
+
+/** QUSDC (6 decimals) as a stake token. */
+const LIMITS = { enabled: true, minSeed: 5n * USDC, maxSeed: 1_000n * USDC, minStake: 1n * USDC, minScoredVolume: 5n * USDC };
+const QIE = 10n ** 18n;
+const NATIVE = ethers.ZeroAddress;
+/** Native QIE (18 decimals) as a stake token. */
+const QIE_LIMITS = { enabled: true, minSeed: 20n * QIE, maxSeed: 2_000n * QIE, minStake: 3n * QIE, minScoredVolume: 30n * QIE };
 
 async function deploy() {
   const [owner, treasury, keeper, creator, alice, bob, carol] = await ethers.getSigners();
   const token = await (await ethers.getContractFactory("MockToken")).deploy();
   const feed = await (await ethers.getContractFactory("MockFeed")).deploy("SOL / USDT");
-  const calls = await (await ethers.getContractFactory("ThesisCalls")).deploy(
-    await token.getAddress(), treasury.address, keeper.address, 5_000, PARAMS,
-  );
+  const calls = await (await ethers.getContractFactory("ThesisCalls")).deploy(treasury.address, keeper.address, 5_000, PARAMS);
+  const tokenAddr = await token.getAddress();
+  await calls.setStakeToken(tokenAddr, LIMITS);
+  await calls.setStakeToken(NATIVE, QIE_LIMITS);
   await calls.setFeed(await feed.getAddress(), true, 6_000, 0);
   const now = await time.latest();
   await feed.push(PX(100), now); // SOL at $100
@@ -43,7 +47,7 @@ async function deploy() {
     await token.mint(s.address, 100_000n * USDC);
     await token.connect(s).approve(await calls.getAddress(), ethers.MaxUint256);
   }
-  return { owner, treasury, keeper, creator, alice, bob, carol, token, feed, calls };
+  return { owner, treasury, keeper, creator, alice, bob, carol, token, tokenAddr, feed, calls };
 }
 
 /**
@@ -54,7 +58,7 @@ async function deploy() {
 async function withCall() {
   const f = await deploy();
   const end = (await time.latest()) + 2 * DAY;
-  await f.calls.connect(f.creator).createCall(await f.feed.getAddress(), true, PX(105), end, 100n * USDC, "SOL breaks $105");
+  await f.calls.connect(f.creator).createCall(f.tokenAddr, await f.feed.getAddress(), true, PX(105), end, 100n * USDC, "SOL breaks $105");
   await time.increase(5 * MIN);
   const t = (await time.latest()) + 1;
   await time.setNextBlockTimestamp(t);
@@ -130,7 +134,7 @@ describe("ThesisCalls: posting", () => {
     const feed = await f.feed.getAddress();
     const end = (await time.latest()) + 2 * DAY;
     const [open] = await f.calls.previewOpenBps(feed, true, PX(105), end);
-    await expect(f.calls.connect(f.creator).createCall(feed, true, PX(105), end, 100n * USDC, "SOL breaks $105"))
+    await expect(f.calls.connect(f.creator).createCall(f.tokenAddr, feed, true, PX(105), end, 100n * USDC, "SOL breaks $105"))
       .to.emit(f.calls, "CallCreated");
     const c = await f.calls.getCall(0);
     expect(c.creator).to.equal(f.creator.address);
@@ -149,7 +153,7 @@ describe("ThesisCalls: posting", () => {
     const feed = await f.feed.getAddress();
     await time.increase(90 * MIN); // the latest print is now 1.5h old
     const end = (await time.latest()) + 6 * HOUR;
-    await f.calls.connect(f.creator).createCall(feed, true, PX(104), end, 100n * USDC, "");
+    await f.calls.connect(f.creator).createCall(f.tokenAddr, feed, true, PX(104), end, 100n * USDC, "");
     const c = await f.calls.getCall(0);
     const h = await (await ethers.getContractFactory("TouchMathHarness")).deploy();
     const fromNow = await h.touchProbabilityBps(PX(100), PX(104), 6000, end - Number(c.start));
@@ -164,19 +168,19 @@ describe("ThesisCalls: posting", () => {
     const now = await time.latest();
     const c = f.calls.connect(f.creator);
     const end = now + 2 * DAY;
-    await expect(c.createCall(feed, true, PX(99), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "StrikeWrongSide");
-    await expect(c.createCall(feed, false, PX(101), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "StrikeWrongSide");
-    await expect(c.createCall(feed, true, PX(100.5), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "StrikeDistance");
-    await expect(c.createCall(feed, true, PX(160), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "StrikeDistance");
-    await expect(c.createCall(feed, true, PX(105), now + 60, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "BadWindow");
-    await expect(c.createCall(feed, true, PX(105), now + 9 * DAY, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "BadWindow");
-    await expect(c.createCall(feed, true, PX(140), now + 700, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "OddsOutOfRange");
-    await expect(c.createCall(feed, true, PX(105), end, 1n * USDC, "")).to.be.revertedWithCustomError(f.calls, "BadSeed");
-    await expect(c.createCall(feed, true, PX(105), end, 100n * USDC, "x".repeat(281))).to.be.revertedWithCustomError(f.calls, "TextTooLong");
-    await expect(c.createCall(feed, true, PX(105), end, 100n * USDC, "é".repeat(141))).to.be.revertedWithCustomError(f.calls, "TextTooLong"); // 282 bytes
-    await expect(c.createCall(f.alice.address, true, PX(105), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "FeedNotEnabled");
+    await expect(c.createCall(f.tokenAddr, feed, true, PX(99), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "StrikeWrongSide");
+    await expect(c.createCall(f.tokenAddr, feed, false, PX(101), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "StrikeWrongSide");
+    await expect(c.createCall(f.tokenAddr, feed, true, PX(100.5), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "StrikeDistance");
+    await expect(c.createCall(f.tokenAddr, feed, true, PX(160), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "StrikeDistance");
+    await expect(c.createCall(f.tokenAddr, feed, true, PX(105), now + 60, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "BadWindow");
+    await expect(c.createCall(f.tokenAddr, feed, true, PX(105), now + 9 * DAY, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "BadWindow");
+    await expect(c.createCall(f.tokenAddr, feed, true, PX(140), now + 700, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "OddsOutOfRange");
+    await expect(c.createCall(f.tokenAddr, feed, true, PX(105), end, 1n * USDC, "")).to.be.revertedWithCustomError(f.calls, "BadSeed");
+    await expect(c.createCall(f.tokenAddr, feed, true, PX(105), end, 100n * USDC, "x".repeat(281))).to.be.revertedWithCustomError(f.calls, "TextTooLong");
+    await expect(c.createCall(f.tokenAddr, feed, true, PX(105), end, 100n * USDC, "é".repeat(141))).to.be.revertedWithCustomError(f.calls, "TextTooLong"); // 282 bytes
+    await expect(c.createCall(f.tokenAddr, f.alice.address, true, PX(105), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "FeedNotEnabled");
     await f.calls.setPaused(true);
-    await expect(c.createCall(feed, true, PX(105), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "Paused");
+    await expect(c.createCall(f.tokenAddr, feed, true, PX(105), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "Paused");
   });
 
   it("needs more distance the older the print is (no posting into an unprinted move)", async () => {
@@ -185,9 +189,9 @@ describe("ThesisCalls: posting", () => {
     await time.increase(100 * MIN); // print is 100 min old: 3 * 60% * sqrt(100min) = 2.3%
     const end = (await time.latest()) + DAY;
     expect(await f.calls.minDistanceNow(feed)).to.be.greaterThan(220n);
-    await expect(f.calls.connect(f.creator).createCall(feed, true, PX(102), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "StrikeDistance");
+    await expect(f.calls.connect(f.creator).createCall(f.tokenAddr, feed, true, PX(102), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "StrikeDistance");
     await expect(f.calls.previewOpenBps(feed, true, PX(102), end)).to.be.revertedWithCustomError(f.calls, "StrikeDistance");
-    await f.calls.connect(f.creator).createCall(feed, true, PX(103), end, 100n * USDC, "");
+    await f.calls.connect(f.creator).createCall(f.tokenAddr, feed, true, PX(103), end, 100n * USDC, "");
   });
 
   it("refuses a stale oracle price or stale volatility", async () => {
@@ -195,15 +199,15 @@ describe("ThesisCalls: posting", () => {
     const feed = await f.feed.getAddress();
     await time.increase(3 * HOUR); // last round is now 3h old (max 2h)
     let end = (await time.latest()) + 2 * DAY;
-    await expect(f.calls.connect(f.creator).createCall(feed, true, PX(110), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "StaleOracle");
+    await expect(f.calls.connect(f.creator).createCall(f.tokenAddr, feed, true, PX(110), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "StaleOracle");
     await print(f, 100);
     await time.increase(15 * DAY);
     await print(f, 100);
     end = (await time.latest()) + 2 * DAY;
-    await expect(f.calls.connect(f.creator).createCall(feed, true, PX(105), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "StaleVolatility");
+    await expect(f.calls.connect(f.creator).createCall(f.tokenAddr, feed, true, PX(105), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "StaleVolatility");
     await f.calls.connect(f.keeper).setVolatility(feed, 7_000, 300);
     expect((await f.calls.feeds(feed)).monitorSecs).to.equal(300);
-    await f.calls.connect(f.creator).createCall(feed, true, PX(105), end, 100n * USDC, "");
+    await f.calls.connect(f.creator).createCall(f.tokenAddr, feed, true, PX(105), end, 100n * USDC, "");
   });
 });
 
@@ -219,12 +223,12 @@ describe("ThesisCalls: trading", () => {
     // The fee waits in escrow until the next oracle round passes without a touch...
     const pd = await f.calls.pending(0);
     expect([pd.creatorFee, pd.treasuryFee]).to.deep.equal([500_000n, 500_000n]);
-    expect(await f.calls.creatorFeesOwed(f.creator.address)).to.equal(0n);
+    expect(await f.calls.creatorFeesOwed(f.creator.address, f.tokenAddr)).to.equal(0n);
     // ... then it's credited.
     await later(f, 10 * MIN, 100);
     await f.calls.sync(0, 0);
-    expect(await f.calls.creatorFeesOwed(f.creator.address)).to.equal(500_000n);
-    expect(await f.calls.treasuryFees()).to.equal(500_000n);
+    expect(await f.calls.creatorFeesOwed(f.creator.address, f.tokenAddr)).to.equal(500_000n);
+    expect(await f.calls.treasuryFees(f.tokenAddr)).to.equal(500_000n);
     const [net, pays] = await f.calls.quote(0, false, 10n * USDC);
     expect(net).to.equal(9_800_000n);
     expect(pays).to.be.greaterThan(net);
@@ -306,7 +310,7 @@ describe("ThesisCalls: resolution", () => {
     const f = await deploy();
     const feed = await f.feed.getAddress();
     const end = (await time.latest()) + DAY;
-    await f.calls.connect(f.creator).createCall(feed, false, PX(95), end, 100n * USDC, "SOL loses $95");
+    await f.calls.connect(f.creator).createCall(f.tokenAddr, feed, false, PX(95), end, 100n * USDC, "SOL loses $95");
     await f.calls.connect(f.alice).bet(0, true, 20n * USDC);
     await later(f, HOUR, 96);
     await time.increaseTo(end + HOUR + 1);
@@ -362,12 +366,12 @@ describe("ThesisCalls: resolution", () => {
     await later(f, 10 * MIN, 100);
     await f.calls.sync(0, 0); // the next round passed: fees are final
     const k0 = await f.token.balanceOf(f.creator.address);
-    await f.calls.connect(f.creator).claimCreatorFees();
+    await f.calls.connect(f.creator).claimCreatorFees(f.tokenAddr);
     expect((await f.token.balanceOf(f.creator.address)) - k0).to.equal(1n * USDC);
-    await expect(f.calls.connect(f.creator).claimCreatorFees()).to.be.revertedWithCustomError(f.calls, "NothingToClaim");
-    await expect(f.calls.connect(f.alice).withdrawTreasury()).to.be.revertedWithCustomError(f.calls, "Unauthorized");
+    await expect(f.calls.connect(f.creator).claimCreatorFees(f.tokenAddr)).to.be.revertedWithCustomError(f.calls, "NothingToClaim");
+    await expect(f.calls.connect(f.alice).withdrawTreasury(f.tokenAddr)).to.be.revertedWithCustomError(f.calls, "Unauthorized");
     const t0 = await f.token.balanceOf(f.treasury.address);
-    await f.calls.connect(f.treasury).withdrawTreasury();
+    await f.calls.connect(f.treasury).withdrawTreasury(f.tokenAddr);
     expect((await f.token.balanceOf(f.treasury.address)) - t0).to.equal(1n * USDC);
   });
 
@@ -380,7 +384,7 @@ describe("ThesisCalls: resolution", () => {
     const hit = await later(f, HOUR, 106);
     await f.calls.proveTouch(0, hit);
     await f.calls.connect(f.alice).claim(0);
-    await f.calls.connect(f.creator).claimCreatorFees();
+    await f.calls.connect(f.creator).claimCreatorFees(f.tokenAddr);
   });
 });
 
@@ -402,7 +406,7 @@ describe("ThesisCalls: no racing the oracle", () => {
     const f = await deploy();
     const feed = await f.feed.getAddress();
     const end = (await time.latest()) + 6 * HOUR;
-    await f.calls.connect(f.creator).createCall(feed, true, PX(102.5), end, 250n * USDC, "");
+    await f.calls.connect(f.creator).createCall(f.tokenAddr, feed, true, PX(102.5), end, 250n * USDC, "");
     await later(f, 5 * MIN, 100.4); // a quiet round
     await time.increase(2 * HOUR - 10 * MIN); // the print goes stale; off-chain, SOL runs past $102.50
     const a0 = await f.token.balanceOf(f.alice.address);
@@ -417,14 +421,14 @@ describe("ThesisCalls: no racing the oracle", () => {
     const f = await loadFixture(withCall);
     await f.calls.connect(f.alice).bet(0, false, 50n * USDC); // honest, rounds before the touch
     await later(f, HOUR, 103);
-    const fees0 = await f.calls.treasuryFees();
+    const fees0 = await f.calls.treasuryFees(f.tokenAddr);
     await f.calls.connect(f.bob).bet(0, true, 200n * USDC); // bets on the move the next print shows
     await time.increase(4 * MIN); // minutes later, not seconds: a whole round gap is covered
     const hit = await print(f, 105.5); // the touching round
     await f.calls.proveTouch(0, hit);
     const c = await f.calls.getCall(0);
     expect(c.voidYes).to.equal(196n * USDC);
-    expect(await f.calls.treasuryFees()).to.equal(fees0 + 500_000n); // alice's fee was credited when her round passed; bob's never was
+    expect(await f.calls.treasuryFees(f.tokenAddr)).to.equal(fees0 + 500_000n); // alice's fee was credited when her round passed; bob's never was
     const b0 = await f.token.balanceOf(f.bob.address);
     await f.calls.connect(f.bob).claim(0);
     expect((await f.token.balanceOf(f.bob.address)) - b0).to.equal(200n * USDC); // the full 200 back, fee included
@@ -434,8 +438,8 @@ describe("ThesisCalls: no racing the oracle", () => {
     const pot = c.yesPool + c.noPool - c.voidYes - c.voidNo;
     expect((await f.token.balanceOf(f.creator.address)) - k0).to.be.closeTo(pot, 2n);
     // Everything owed is covered.
-    await f.calls.connect(f.creator).claimCreatorFees();
-    await f.calls.connect(f.treasury).withdrawTreasury();
+    await f.calls.connect(f.creator).claimCreatorFees(f.tokenAddr);
+    await f.calls.connect(f.treasury).withdrawTreasury(f.tokenAddr);
     expect(await f.token.balanceOf(await f.calls.getAddress())).to.be.lessThan(3n);
   });
 
@@ -458,7 +462,7 @@ describe("ThesisCalls: no racing the oracle", () => {
     const f = await deploy();
     const feed = await f.feed.getAddress();
     const end = (await time.latest()) + DAY;
-    await f.calls.connect(f.creator).createCall(feed, true, PX(101.5), end, 100n * USDC, "");
+    await f.calls.connect(f.creator).createCall(f.tokenAddr, feed, true, PX(101.5), end, 100n * USDC, "");
     await time.increase(4 * MIN);
     await print(f, 101.7); // the first round after posting touches
     await time.increase(4 * MIN);
@@ -471,7 +475,7 @@ describe("ThesisCalls: no racing the oracle", () => {
     const f = await deploy();
     const feed = await f.feed.getAddress();
     const end = (await time.latest()) + DAY;
-    await f.calls.connect(f.creator).createCall(feed, true, PX(101.5), end, 100n * USDC, "");
+    await f.calls.connect(f.creator).createCall(f.tokenAddr, feed, true, PX(101.5), end, 100n * USDC, "");
     await f.calls.connect(f.alice).bet(0, false, 10n * USDC);
     const hit = await print(f, 101.6);
     await expect(f.calls.proveTouch(0, hit)).to.emit(f.calls, "Voided").withArgs(0, 1);
@@ -571,6 +575,130 @@ describe("ThesisCalls: no racing the oracle", () => {
   });
 });
 
+/** A call in native QIE: "SOL touches $105 within 2 days", seeded with 100 QIE, plus a quiet round. */
+async function withQieCall() {
+  const f = await deploy();
+  const end = (await time.latest()) + 2 * DAY;
+  await f.calls.connect(f.creator).createCall(NATIVE, await f.feed.getAddress(), true, PX(105), end, 100n * QIE, "", { value: 100n * QIE });
+  await later(f, 5 * MIN, 100.2);
+  return { ...f, id: 0n, end };
+}
+
+describe("ThesisCalls: QIE stakes", () => {
+  it("posts and trades a call in native QIE; the pot and the fees pay out in QIE", async () => {
+    const f = await deploy();
+    const feed = await f.feed.getAddress();
+    const addr = await f.calls.getAddress();
+    const end = (await time.latest()) + 2 * DAY;
+    await expect(f.calls.connect(f.creator).createCall(NATIVE, feed, true, PX(105), end, 100n * QIE, "in QIE", { value: 100n * QIE }))
+      .to.changeEtherBalances([f.creator, addr], [-100n * QIE, 100n * QIE]);
+    const c = await f.calls.getCall(0);
+    expect(c.token).to.equal(NATIVE);
+    expect(c.minScored).to.equal(30n * QIE);
+    await later(f, 5 * MIN, 100.2);
+    await expect(f.calls.connect(f.alice).bet(0, true, 10n * QIE, { value: 10n * QIE })).to.changeEtherBalance(f.alice, -10n * QIE);
+    await f.calls.connect(f.bob).bet(0, false, 50n * QIE, { value: 50n * QIE });
+    expect(await f.token.balanceOf(addr)).to.equal(0n); // no QUSDC involved
+    await later(f, 10 * MIN, 101); // the bets' round passes quietly
+    const hit = await later(f, HOUR, 106);
+    const open = (await f.calls.getCall(0)).openBps;
+    // 60 QIE of outside bets clears QIE's 30 QIE threshold: the call scores.
+    await expect(f.calls.proveTouch(0, hit)).to.emit(f.calls, "Settled").withArgs(0, true, 10_000n - open, f.creator.address, true);
+    const a = await f.calls.claimable(0, f.alice.address);
+    expect(a).to.be.greaterThan(10n * QIE);
+    await expect(f.calls.connect(f.alice).claim(0)).to.changeEtherBalances([f.alice, addr], [a, -a]);
+    expect(await f.calls.claimable(0, f.bob.address)).to.equal(0n);
+    // 2% of 60 QIE = 1.2 QIE: half to the creator, half to the treasury, in QIE only.
+    expect(await f.calls.creatorFeesOwed(f.creator.address, NATIVE)).to.equal(6n * QIE / 10n);
+    expect(await f.calls.creatorFeesOwed(f.creator.address, f.tokenAddr)).to.equal(0n);
+    await expect(f.calls.connect(f.creator).claimCreatorFees(NATIVE)).to.changeEtherBalance(f.creator, 6n * QIE / 10n);
+    await expect(f.calls.connect(f.creator).claimCreatorFees(f.tokenAddr)).to.be.revertedWithCustomError(f.calls, "NothingToClaim");
+    await expect(f.calls.connect(f.owner).withdrawTreasury(NATIVE)).to.changeEtherBalance(f.treasury, 6n * QIE / 10n);
+  });
+
+  it("takes exactly the stake as value for QIE, and no value for a token", async () => {
+    const f = await loadFixture(withQieCall);
+    const feed = await f.feed.getAddress();
+    const end = (await time.latest()) + 2 * DAY;
+    const c = f.calls.connect(f.creator);
+    await expect(c.createCall(NATIVE, feed, true, PX(106), end, 100n * QIE, "", { value: 100n * QIE - 1n })).to.be.revertedWithCustomError(f.calls, "BadValue");
+    await expect(c.createCall(NATIVE, feed, true, PX(106), end, 100n * QIE, "")).to.be.revertedWithCustomError(f.calls, "BadValue");
+    await expect(c.createCall(f.tokenAddr, feed, true, PX(106), end, 100n * USDC, "", { value: 1n })).to.be.revertedWithCustomError(f.calls, "BadValue");
+    await expect(f.calls.connect(f.alice).bet(0, true, 10n * QIE, { value: 10n * QIE + 1n })).to.be.revertedWithCustomError(f.calls, "BadValue");
+    await expect(f.calls.connect(f.alice).bet(0, true, 10n * QIE)).to.be.revertedWithCustomError(f.calls, "BadValue");
+    await c.createCall(f.tokenAddr, feed, true, PX(106), end, 100n * USDC, "");
+    await later(f, 5 * MIN, 100.1);
+    await expect(f.calls.connect(f.alice).bet(1, true, 10n * USDC, { value: 1n })).to.be.revertedWithCustomError(f.calls, "BadValue");
+    // Plain transfers are refused: no QIE can get stuck outside a pot.
+    await expect(f.alice.sendTransaction({ to: await f.calls.getAddress(), value: 1n })).to.be.reverted;
+  });
+
+  it("applies each token's own limits, fixed per call", async () => {
+    const f = await loadFixture(withQieCall);
+    const feed = await f.feed.getAddress();
+    const end = (await time.latest()) + 2 * DAY;
+    await expect(f.calls.connect(f.creator).createCall(NATIVE, feed, true, PX(106), end, 19n * QIE, "", { value: 19n * QIE })).to.be.revertedWithCustomError(f.calls, "BadSeed");
+    await expect(f.calls.connect(f.creator).createCall(NATIVE, feed, true, PX(106), end, 2_001n * QIE, "", { value: 2_001n * QIE })).to.be.revertedWithCustomError(f.calls, "BadSeed");
+    await expect(f.calls.connect(f.alice).bet(0, true, 2n * QIE, { value: 2n * QIE })).to.be.revertedWithCustomError(f.calls, "StakeTooSmall");
+    await f.calls.connect(f.creator).createCall(f.tokenAddr, feed, true, PX(106), end, 5n * USDC, ""); // QUSDC's own minimum
+    // 29 QIE of outside bets is under QIE's scoring threshold (30 QIE).
+    await f.calls.connect(f.alice).bet(0, true, 29n * QIE, { value: 29n * QIE });
+    await later(f, 10 * MIN, 100.5);
+    const hit = await later(f, HOUR, 106);
+    await expect(f.calls.proveTouch(0, hit)).to.emit(f.calls, "Settled").withArgs(0, true, 0, f.creator.address, false);
+  });
+
+  it("a disabled or unknown stake token can't open calls; open calls keep trading", async () => {
+    const f = await loadFixture(withQieCall);
+    const feed = await f.feed.getAddress();
+    const end = (await time.latest()) + 2 * DAY;
+    await f.calls.setStakeToken(NATIVE, { ...QIE_LIMITS, enabled: false });
+    await expect(f.calls.connect(f.creator).createCall(NATIVE, feed, true, PX(106), end, 100n * QIE, "", { value: 100n * QIE })).to.be.revertedWithCustomError(f.calls, "TokenNotEnabled");
+    await expect(f.calls.connect(f.creator).createCall(feed, feed, true, PX(106), end, 100n * USDC, "")).to.be.revertedWithCustomError(f.calls, "TokenNotEnabled");
+    await f.calls.connect(f.alice).bet(0, true, 10n * QIE, { value: 10n * QIE });
+    expect(await f.calls.stakeTokenCount()).to.equal(2n); // re-setting a token doesn't list it twice
+  });
+
+  it("bounds each stake token's settings and leaves them to the owner", async () => {
+    const f = await deploy();
+    await expect(f.calls.connect(f.alice).setStakeToken(NATIVE, QIE_LIMITS)).to.be.revertedWithCustomError(f.calls, "Unauthorized");
+    for (const bad of [{ minSeed: 0n }, { minSeed: 3_000n * QIE }, { minStake: 0n }, { minScoredVolume: 0n }, { minSeed: 10n, maxSeed: 10n }])
+      await expect(f.calls.setStakeToken(NATIVE, { ...QIE_LIMITS, ...bad })).to.be.revertedWithCustomError(f.calls, "BadParams");
+    await expect(f.calls.setStakeToken(f.alice.address, LIMITS)).to.be.revertedWithCustomError(f.calls, "BadParams"); // not a contract
+    // Params can't make any token's minimum seed too small to open both pools.
+    await f.calls.setStakeToken(f.tokenAddr, { ...LIMITS, minSeed: 100n, maxSeed: 1_000n });
+    await expect(f.calls.setParams({ ...PARAMS, minOpenBps: 99 })).to.be.revertedWithCustomError(f.calls, "BadParams");
+  });
+
+  it("a wallet that refuses QIE only blocks its own payout, and re-entry can't claim twice", async () => {
+    const f = await loadFixture(withQieCall);
+    const addr = await f.calls.getAddress();
+    const w = await (await ethers.getContractFactory("QieBettor")).deploy(addr);
+    await w.bet(0, true, { value: 10n * QIE });
+    await f.calls.connect(f.alice).bet(0, true, 10n * QIE, { value: 10n * QIE });
+    await later(f, 10 * MIN, 100.5);
+    await f.calls.proveTouch(0, await later(f, HOUR, 106));
+    const wAddr = await w.getAddress();
+    const owed = await f.calls.claimable(0, wAddr);
+    await w.setMode(1, 0); // refuse
+    await expect(w.claim(0)).to.be.revertedWithCustomError(f.calls, "PayoutFailed");
+    await expect(f.calls.connect(f.alice).claim(0)).to.not.be.reverted; // others are unaffected
+    await w.setMode(2, 0); // try to claim again while being paid
+    await expect(w.claim(0)).to.changeEtherBalances([wAddr, addr], [owed, -owed]);
+    expect(await w.reentered()).to.equal(true);
+    expect(await w.reentryFailed()).to.equal(true);
+    await expect(w.claim(0)).to.be.revertedWithCustomError(f.calls, "NothingToClaim");
+  });
+
+  it("a QIE bet that arrives after an unproven touch isn't taken, and its QIE comes back", async () => {
+    const f = await loadFixture(withQieCall);
+    await later(f, HOUR, 106); // touched, nobody proved it yet
+    await expect(f.calls.connect(f.alice).bet(0, false, 10n * QIE, { value: 10n * QIE })).to.changeEtherBalance(f.alice, 0n);
+    expect((await f.calls.getCall(0)).settled).to.equal(true);
+    expect(await f.calls.noStake(0, f.alice.address)).to.equal(0n);
+  });
+});
+
 describe("ThesisCalls: invariants", () => {
   it("random trading never pays out more than it holds (fuzz, 40 rounds)", async () => {
     const f = await deploy();
@@ -582,10 +710,14 @@ describe("ThesisCalls: invariants", () => {
       const end = (await time.latest()) + 2 * HOUR + rnd(DAY);
       const above = rnd(2) === 0;
       const strike = above ? PX(100 + 1 + rnd(4)) : PX(100 - 1 - rnd(4));
-      await f.calls.connect(users[rnd(4)]).createCall(feed, above, strike, end, BigInt(5 + rnd(100)) * USDC, "").catch(() => null);
+      const native = rnd(2) === 0; // half the calls in QIE, half in QUSDC
+      const unit = native ? QIE : USDC;
+      const seedAmt = native ? BigInt(20 + rnd(100)) * QIE : BigInt(5 + rnd(100)) * USDC;
+      await f.calls.connect(users[rnd(4)]).createCall(native ? NATIVE : f.tokenAddr, feed, above, strike, end, seedAmt, "", { value: native ? seedAmt : 0n }).catch(() => null);
       const id = (await f.calls.callCount()) - 1n;
       for (let k = 0; k < 6; k++) {
-        await f.calls.connect(users[rnd(4)]).bet(id, rnd(2) === 0, BigInt(1 + rnd(50)) * USDC).catch(() => null);
+        const amt = BigInt(3 + rnd(50)) * unit;
+        await f.calls.connect(users[rnd(4)]).bet(id, rnd(2) === 0, amt, { value: native ? amt : 0n }).catch(() => null);
         if (rnd(3) === 0) await later(f, rnd(20 * MIN), 100 + (rnd(1000) - 500) / 100);
       }
       await time.increaseTo(end + HOUR + 2);
@@ -597,11 +729,17 @@ describe("ThesisCalls: invariants", () => {
     // Everyone claims everything; fees are withdrawn; the contract never runs dry.
     const n = await f.calls.callCount();
     for (let id = 0n; id < n; id++) for (const u of users) if ((await f.calls.claimable(id, u.address)) > 0n) await f.calls.connect(u).claim(id);
-    for (const u of users) if ((await f.calls.creatorFeesOwed(u.address)) > 0n) await f.calls.connect(u).claimCreatorFees();
-    if ((await f.calls.treasuryFees()) > 0n) await f.calls.connect(f.treasury).withdrawTreasury();
-    const left = await f.token.balanceOf(await f.calls.getAddress());
-    expect(left).to.be.at.least(0n);
-    expect(left).to.be.lessThan(BigInt(n) * 4n); // rounding dust only, a few units per call
+    for (const t of [f.tokenAddr, NATIVE]) {
+      for (const u of users) if ((await f.calls.creatorFeesOwed(u.address, t)) > 0n) await f.calls.connect(u).claimCreatorFees(t);
+      if ((await f.calls.treasuryFees(t)) > 0n) await f.calls.connect(f.treasury).withdrawTreasury(t);
+    }
+    const kinds = await Promise.all(Array.from({ length: Number(n) }, (_, i) => f.calls.getCall(i)));
+    const nNative = BigInt(kinds.filter((c) => c.token === NATIVE).length);
+    expect(nNative).to.be.greaterThan(0n);
+    expect(BigInt(n) - nNative).to.be.greaterThan(0n);
+    // Rounding dust only, a few units per call, in each token.
+    expect(await f.token.balanceOf(await f.calls.getAddress())).to.be.lessThan((BigInt(n) - nNative) * 4n);
+    expect(await ethers.provider.getBalance(await f.calls.getAddress())).to.be.lessThan(nNative * 4n);
   });
 });
 
@@ -609,7 +747,7 @@ describe("ThesisCalls: admin", () => {
   it("bounds every parameter and keeps roles separate", async () => {
     const f = await deploy();
     await expect(f.calls.connect(f.alice).setParams(PARAMS)).to.be.revertedWithCustomError(f.calls, "Unauthorized");
-    for (const bad of [{ feeBps: 600 }, { minOpenBps: 50 }, { grace: 10 }, { minSeed: 10n }, { betCutoffBps: 100 }, { staleZTenths: 5 }, { closeBps: 6000 }, { voidAfter: HOUR }, { minScoredVolume: 0n }])
+    for (const bad of [{ feeBps: 600 }, { minOpenBps: 50 }, { grace: 10 }, { betCutoffBps: 100 }, { staleZTenths: 5 }, { closeBps: 6000 }, { voidAfter: HOUR }])
       await expect(f.calls.setParams({ ...PARAMS, ...bad }), JSON.stringify(bad, (k, v) => (typeof v === "bigint" ? v.toString() : v))).to.be.revertedWithCustomError(f.calls, "BadParams");
     await expect(f.calls.setParams(PARAMS)).to.emit(f.calls, "ParamsSet");
     await expect(f.calls.connect(f.alice).setVolatility(await f.feed.getAddress(), 7_000, 0)).to.be.revertedWithCustomError(f.calls, "Unauthorized");
@@ -631,9 +769,9 @@ describe("ThesisCalls: admin", () => {
     const f = await deploy();
     const feed = await f.feed.getAddress();
     const end = (await time.latest()) + 2 * DAY;
-    await f.calls.connect(f.creator).createCall(feed, true, PX(105), end, 10n * USDC, "a");
-    await f.calls.connect(f.alice).createCall(feed, false, PX(95), end, 10n * USDC, "b");
-    await f.calls.connect(f.creator).createCall(feed, true, PX(110), end, 10n * USDC, "c");
+    await f.calls.connect(f.creator).createCall(f.tokenAddr, feed, true, PX(105), end, 10n * USDC, "a");
+    await f.calls.connect(f.alice).createCall(f.tokenAddr, feed, false, PX(95), end, 10n * USDC, "b");
+    await f.calls.connect(f.creator).createCall(f.tokenAddr, feed, true, PX(110), end, 10n * USDC, "c");
     expect((await f.calls.getCalls(1, 10)).length).to.equal(2);
     expect((await f.calls.getCalls(5, 10)).length).to.equal(0);
     const [who, s] = await f.calls.getCreators(0, 10);

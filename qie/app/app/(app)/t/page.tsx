@@ -14,7 +14,8 @@ import { THESIS_CALLS_ABI } from "@/lib/abi";
 import { publicClient, readRounds } from "@/lib/chain";
 import { CALLS_ADDRESS, explorerAddress, explorerTx } from "@/lib/config";
 import { impliedYesBps, useData, useNow } from "@/lib/data";
-import { ago, fmtSkill, pct, price, qusdc, timeLeft, when } from "@/lib/format";
+import { ago, fmtSkill, pct, price, timeLeft, when } from "@/lib/format";
+import { amt, amtSym } from "@/lib/tokens";
 import { explain, useWallet } from "@/lib/wallet";
 import { useSkillRank } from "@/components/ProfileStats";
 import { useQieName, Who } from "@/components/Who";
@@ -33,7 +34,7 @@ function TradeView() {
   const raw = useSearchParams().get("id") ?? "";
   // Only a plain non-negative integer is a call id ("", "abc", "1.5" are not).
   const id = /^\d{1,9}$/.test(raw) ? Number(raw) : -1;
-  const { ready, calls, creators, feedOf, tradesOf, events, refresh } = useData();
+  const { ready, calls, creators, feedOf, tokenOf, tradesOf, events, refresh } = useData();
   const w = useWallet();
   const now = useNow(1000);
   const c = calls.find((x) => x.id === id);
@@ -61,15 +62,16 @@ function TradeView() {
   useEffect(() => {
     if (!isCreator || !w.account) return setOwed(0n);
     publicClient
-      .readContract({ address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI, functionName: "creatorFeesOwed", args: [w.account] })
+      .readContract({ address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI, functionName: "creatorFeesOwed", args: [w.account, c!.token] })
       .then(setOwed)
       .catch(() => {});
-  }, [isCreator, w.account, c?.volume]);
+  }, [isCreator, w.account, c?.volume, c?.token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ids past the last call may be one just posted; anything else is invalid.
   if (!c) return <LoadState ready={ready} what="call" invalid={id < 0} pending={id >= calls.length && id < calls.length + 5} />;
   const dec = feed?.decimals ?? 8;
   const asset = feed?.asset ?? "…";
+  const tok = tokenOf(c.token);
   const pos = positionOfCall(c, feed);
   const mark = feed ? price(feed.price, dec) : null;
   const s = creators.find((x) => x.creator.toLowerCase() === c.creator.toLowerCase())?.stats;
@@ -92,7 +94,7 @@ function TradeView() {
     if (claiming) return;
     setClaiming(true);
     setErr(null);
-    w.write(`Claim ${qusdc(owed)} QUSDC creator fees`, { address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI as Abi, functionName: "claimCreatorFees" })
+    w.write(`Claim ${amtSym(owed, tok)} creator fees`, { address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI as Abi, functionName: "claimCreatorFees", args: [c.token] })
       .then(() => (setOwed(0n), refresh()))
       .catch((e) => setErr(explain(e)))
       .finally(() => setClaiming(false));
@@ -141,12 +143,12 @@ function TradeView() {
         {c.text && <p className="mt-4 max-w-2xl text-muted">{c.text}</p>}
         <div className="num mt-5 flex flex-wrap items-center gap-2 text-xs">
           <span className="rounded-full border border-line px-3 py-1.5 text-faint">
-            volume <span className="text-ink">{qusdc(c.volume)} QUSDC</span>
+            volume <span className="text-ink">{amtSym(c.volume, tok)}</span>
           </span>
           <span className="rounded-full border border-line px-3 py-1.5 text-faint">
             opened at <span className="text-ink">{pct(c.openBps, 1)}</span>
           </span>
-          {ownVolume > 0n && <span className="rounded-full border border-line px-3 py-1.5 text-faint">creator&apos;s own bets {qusdc(ownVolume)}</span>}
+          {ownVolume > 0n && <span className="rounded-full border border-line px-3 py-1.5 text-faint">creator&apos;s own bets {amtSym(ownVolume, tok)}</span>}
           <ShareButton
             id={c.id}
             text={shareText}
@@ -159,7 +161,7 @@ function TradeView() {
               deadline: when(c.end).replace(/^\w+, /, ""),
               crowdYes: pct(impliedYesBps(c), 0),
               openOdds: pct(c.openBps, 0),
-              pot: qusdc(c.yesPool + c.noPool, 0),
+              pot: amtSym(c.yesPool + c.noPool, tok, 0),
               creator: creatorName ?? `${c.creator.slice(0, 6)}…${c.creator.slice(-4)}`,
               status: c.voided ? "void · refunded" : c.settled ? (c.yesWon ? "called it" : "missed") : live ? "live" : "window closed",
               text: c.text || undefined,
@@ -167,7 +169,7 @@ function TradeView() {
           />
           {isCreator && owed > 0n && (
             <button onClick={() => void claimFees()} disabled={claiming} className="btn btn-primary px-3 py-1.5 text-xs disabled:opacity-40" data-testid="claim-fees">
-              {claiming ? "Claiming…" : `Claim ${qusdc(owed)} QUSDC creator fees`}
+              {claiming ? "Claiming…" : `Claim ${amtSym(owed, tok)} creator fees`}
             </button>
           )}
         </div>
@@ -234,7 +236,7 @@ function TradeView() {
                       {tr.user.toLowerCase() === c.creator.toLowerCase() && <span className="ml-1 text-guard">creator</span>}
                     </td>
                     <td className={tr.yes ? "text-yes" : "text-ink"}>{tr.yes ? "backed · YES" : "challenged · NO"}</td>
-                    <td className="text-right">{qusdc(tr.amount)}</td>
+                    <td className="text-right">{amt(tr.amount, tok)}</td>
                     <td className="text-right">
                       <a href={explorerTx(tr.tx)} target="_blank" rel="noreferrer" className="text-faint hover:text-ink">
                         {now ? ago(tr.ts, now) : "…"}

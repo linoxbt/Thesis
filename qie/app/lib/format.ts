@@ -1,15 +1,8 @@
-/** Stake token (QUSDC) has 6 decimals. */
-export const USD = 10n ** 6n;
 
 export const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
 export function usd(v: number, digits = 2): string {
   return "$" + v.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
-}
-
-/** Token amount (6 dp) as "12.34 QUSDC"-style number text. */
-export function qusdc(v: bigint, digits = 2): string {
-  return (Number(v) / 1e6).toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
 export const price = (v: bigint, decimals = 8) => Number(v) / 10 ** decimals;
@@ -67,14 +60,6 @@ export function distanceBps(spot: bigint, strike: bigint): number {
   if (spot <= 0n) return 0;
   const d = strike > spot ? strike - spot : spot - strike;
   return Number((d * 10_000n) / spot);
-}
-
-/** Parses a token amount ("5", "2.5"), at most 6 decimals; null if invalid or zero. */
-export function parseAmount(s: string): bigint | null {
-  if (!/^\d{1,9}(\.\d{0,6})?$/.test(s) || s === "" || s === ".") return null;
-  const [w, f = ""] = s.split(".");
-  const v = BigInt(w || "0") * USD + BigInt((f + "000000").slice(0, 6));
-  return v > 0n ? v : null;
 }
 
 /** A call as one line: "SOL ≥ $73.10" / "BTC ≤ $58,000". */

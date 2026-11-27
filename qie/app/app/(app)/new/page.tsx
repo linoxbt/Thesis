@@ -8,7 +8,8 @@ import { ERC20_ABI, THESIS_CALLS_ABI } from "@/lib/abi";
 import { publicClient, readBalances, readMinDistance } from "@/lib/chain";
 import { CALLS_ADDRESS, explorerTx, QUSDC_URL } from "@/lib/config";
 import { useData, useNow } from "@/lib/data";
-import { byteLength, callLine, decimalInput, distanceBps, parseAmount, pct, price, qusdc, timeLeft, when } from "@/lib/format";
+import { byteLength, callLine, decimalInput, distanceBps, pct, price, timeLeft, when } from "@/lib/format";
+import { amt, amtSym, parseTokenAmount, sameAddr } from "@/lib/tokens";
 import { fmtPct, positionOf } from "@/lib/position";
 import { explain, useWallet } from "@/lib/wallet";
 
@@ -25,25 +26,34 @@ type Step = { key: string; label: string; status: "todo" | "active" | "done" | "
 
 /** Post a trade: the contract prices it from the QIE Oracle the moment it lands. */
 export default function NewTrade() {
-  const { feeds, params, stakeToken, paused, refresh } = useData();
+  const { feeds, params, stakeTokens, paused, refresh } = useData();
   const w = useWallet();
   const now = useNow(5000);
   const [feedAddr, setFeedAddr] = useState<string>("");
   const [above, setAbove] = useState(true);
   const [target, setTarget] = useState("");
   const [windowSecs, setWindowSecs] = useState(172_800);
-  const [seed, setSeed] = useState("10");
+  const [tokenAddr, setTokenAddr] = useState<string>("");
+  const [seed, setSeed] = useState("");
   const [text, setText] = useState("");
   const [preview, setPreview] = useState<{ open: number; err?: string } | null>(null);
   const [steps, setSteps] = useState<Step[] | null>(null);
   const [posted, setPosted] = useState<number | null>(null);
-  const [bal, setBal] = useState<{ usd: bigint; gas: bigint } | null>(null);
+  const [bal, setBal] = useState<{ stake: bigint; gas: bigint } | null>(null);
   const [minDist, setMinDist] = useState<number | null>(null);
   const submitting = useRef(false);
 
   const live = feeds.filter((f) => f.enabled);
   const feed = live.find((f) => f.address === feedAddr) ?? live.find((f) => f.asset === "SOL") ?? live[0];
   const dec = feed?.decimals ?? 8;
+  // What the call is staked in: the creator's choice, QIE first.
+  const usable = stakeTokens.filter((t) => t.enabled);
+  const tok = usable.find((t) => sameAddr(t.address, tokenAddr)) ?? usable[0];
+  const stakeToken = tok?.address ?? null;
+  // A sensible default seed per token (a few dollars), reset when the token changes.
+  useEffect(() => {
+    if (tok) setSeed(tok.native ? "25" : "10");
+  }, [tok?.address]); // eslint-disable-line react-hooks/exhaustive-deps
   const spot = feed ? price(feed.price, dec) : null;
   const busy = !!steps && steps.some((s) => s.status === "active");
 
@@ -61,7 +71,7 @@ export default function NewTrade() {
   }, [target, dec]);
   const position = spot && strike ? positionOf(above ? "above" : "below", spot, price(strike, dec)) : null;
   const end = now + windowSecs;
-  const seedMicro = parseAmount(seed);
+  const seedMicro = tok ? parseTokenAmount(seed, tok.decimals) : null;
 
   // The least distance the contract accepts right now: it grows with the age
   // of the latest oracle print (the market may have moved since).
@@ -79,7 +89,7 @@ export default function NewTrade() {
 
   // Client-side checks mirror the contract's, so the button never sends a doomed call.
   const inputErr = (() => {
-    if (!params || !feed) return null;
+    if (!params || !feed || !tok) return null;
     if (paused) return "Posting is paused.";
     if (!strike || !position) return "Enter a take-profit price.";
     if (above ? strike <= feed.price : strike >= feed.price) return above ? "A long's take profit must be above the price." : "A short's take profit must be below the price.";
@@ -91,7 +101,7 @@ export default function NewTrade() {
         : `The take profit must be at least ${pct(need, 1)} from the price.`;
     if (bps > params.maxDistanceBps) return `The take profit can be at most ${pct(params.maxDistanceBps, 0)} from the price.`;
     if (windowSecs < params.minWindow || windowSecs > params.maxWindow) return "That window is outside the allowed range.";
-    if (!seedMicro || seedMicro < params.minSeed || seedMicro > params.maxSeed) return `Seed between ${qusdc(params.minSeed, 0)} and ${qusdc(params.maxSeed, 0)} QUSDC.`;
+    if (!seedMicro || seedMicro < tok.minSeed || seedMicro > tok.maxSeed) return `Seed between ${amt(tok.minSeed, tok, 0)} and ${amtSym(tok.maxSeed, tok, 0)}.`;
     if (textBytes > 280) return `The reason is ${textBytes} bytes; the limit is 280 (emoji and accents take more than one).`;
     if (now > 0 && printAge > params.maxOracleAge) return `The oracle price is ${Math.round(printAge / 60)} min old (limit ${params.maxOracleAge / 60}); try again after its next update.`;
     if (now > 0 && now - feed.volUpdatedAt > params.maxVolAge) return `${feed.asset} volatility hasn't been updated in ${Math.round((now - feed.volUpdatedAt) / 86_400)} days; posting reopens once it is.`;
@@ -116,34 +126,44 @@ export default function NewTrade() {
     readBalances(stakeToken, w.account).then(setBal).catch(() => {});
   }, [w.account, stakeToken, posted, steps]);
 
-  const short = bal !== null && seedMicro !== null && bal.usd < seedMicro;
+  const short = bal !== null && seedMicro !== null && bal.stake < seedMicro;
   const blocked = !!inputErr || !!preview?.err || !preview || busy || short;
 
   const go = async () => {
-    if (!feed || !strike || !seedMicro || !stakeToken || !w.account) return;
+    if (!feed || !strike || !seedMicro || !stakeToken || !tok || !w.account) return;
     if (submitting.current) return; // a second click while the first is still starting
     submitting.current = true;
+    // QIE goes with the post itself; a token needs approving first (unless it already is).
     const plan: Step[] = [
-      { key: "approve", label: `Approve ${qusdc(seedMicro)} QUSDC`, status: "todo" },
-      { key: "post", label: `Post ${callLine(feed.asset, above, strike, dec)}`, status: "todo" },
+      ...(tok.native ? [] : [{ key: "approve", label: `Approve ${amtSym(seedMicro, tok)}`, status: "todo" as const }]),
+      { key: "post", label: `Post ${callLine(feed.asset, above, strike, dec)} · ${amtSym(seedMicro, tok)}`, status: "todo" },
     ];
+    const postStep = plan[plan.length - 1];
     const upd = (key: string, patch: Partial<Step>) => setSteps((s) => (s ?? plan).map((x) => (x.key === key ? { ...x, ...patch } : x)));
     setSteps(plan.map((x, i) => (i === 0 ? { ...x, status: "active" } : x)));
-    let current = "approve";
+    let current = plan[0].key;
     try {
-      const b = await readBalances(stakeToken, w.account);
-      if (b.allowance >= seedMicro) plan[0].status = "skipped";
-      upd("approve", { status: plan[0].status === "skipped" ? "skipped" : "todo" });
-      if (plan[0].status !== "skipped") {
-        upd("approve", { status: "active" });
-        const tx = await w.write(plan[0].label, { address: stakeToken, abi: ERC20_ABI as Abi, functionName: "approve", args: [CALLS_ADDRESS, seedMicro] });
-        upd("approve", { status: "done", tx });
+      if (!tok.native) {
+        const b = await readBalances(stakeToken, w.account);
+        if (b.allowance >= seedMicro) plan[0].status = "skipped";
+        upd("approve", { status: plan[0].status === "skipped" ? "skipped" : "todo" });
+        if (plan[0].status !== "skipped") {
+          upd("approve", { status: "active" });
+          const tx = await w.write(plan[0].label, { address: stakeToken, abi: ERC20_ABI as Abi, functionName: "approve", args: [CALLS_ADDRESS, seedMicro] });
+          upd("approve", { status: "done", tx });
+        }
       }
       current = "post";
       upd("post", { status: "active" });
       // The deadline is fixed when you confirm.
       const deadline = BigInt(Math.floor(Date.now() / 1000) + windowSecs);
-      const hash = await w.write(plan[1].label, { address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI as Abi, functionName: "createCall", args: [feed.address, above, strike, deadline, seedMicro, text.trim()] });
+      const hash = await w.write(postStep.label, {
+        address: CALLS_ADDRESS,
+        abi: THESIS_CALLS_ABI as Abi,
+        functionName: "createCall",
+        args: [stakeToken, feed.address, above, strike, deadline, seedMicro, text.trim()],
+        value: tok.native ? seedMicro : undefined,
+      });
       upd("post", { status: "done", tx: hash });
       const receipt = await publicClient.getTransactionReceipt({ hash: hash as `0x${string}` });
       const ev = parseEventLogs({ abi: THESIS_CALLS_ABI, logs: receipt.logs, eventName: "CallCreated" })[0];
@@ -184,8 +204,8 @@ export default function NewTrade() {
         <span className="label">New trade</span>
         <h1 className="display mt-2 text-4xl">Post your trade</h1>
         <p className="mt-2 text-sm text-muted">
-          Your call becomes a market: the crowd backs or challenges your take profit in QUSDC, priced by the contract from the
-          QIE Oracle the moment it lands. One or two confirms.
+          Your call becomes a market: the crowd backs or challenges your take profit in QIE or QUSDC (you choose), priced by
+          the contract from the QIE Oracle the moment it lands. One confirm in QIE; one or two in QUSDC.
         </p>
       </div>
       <fieldset disabled={locked} className="contents">
@@ -280,8 +300,33 @@ export default function NewTrade() {
               {textBytes}/280
             </span>
           </label>
+          <div className="text-sm">
+            <span className="text-muted">Stake in (every bet on your call uses it)</span>
+            <div className="mt-1 grid grid-cols-2 gap-2" role="radiogroup" aria-label="Stake token">
+              {usable.map((t) => (
+                <button
+                  key={t.address}
+                  role="radio"
+                  aria-checked={tok?.address === t.address}
+                  onClick={() => setTokenAddr(t.address)}
+                  className={
+                    "num flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm transition-colors " +
+                    (tok?.address === t.address ? "bg-ink text-bg" : "border border-line text-muted hover:text-ink")
+                  }
+                  data-testid={`stake-${t.symbol}`}
+                >
+                  <span className={"h-3 w-3 rounded-full " + (t.native ? "bg-brand" : "bg-[#2775ca]")} /> {t.symbol}
+                </button>
+              ))}
+            </div>
+            {tok && (
+              <span className="num mt-1 block text-xs text-faint">
+                {tok.native ? "Sent with the post: no approval step. A QIE pot also moves with QIE's price." : "Approved once, then sent with the post."}
+              </span>
+            )}
+          </div>
           <label className="block text-sm">
-            <span className="text-muted">Seed (QUSDC: opens both sides at the odds below, paid out with whichever side wins)</span>
+            <span className="text-muted">Seed ({tok?.symbol ?? "…"}: opens both sides at the odds below, paid out with whichever side wins)</span>
             <input value={seed} onChange={(e) => setSeed(decimalInput(e.target.value))} inputMode="decimal" className="num field mt-1 w-full px-3 py-2.5 outline-none" data-testid="seed" />
           </label>
           <div className="num rounded-xl border border-line bg-panel-2 p-3 text-sm" data-testid="preview">
@@ -297,7 +342,7 @@ export default function NewTrade() {
                 {preview && params && (
                   <div className="mt-1 text-xs text-faint">
                     Hit it and your skill gains {((10_000 - preview.open) / 10_000).toFixed(2)}; miss and it loses {(preview.open / 10_000).toFixed(2)}. Skill counts once
-                    others have bet {qusdc(params.minScoredVolume, 0)} QUSDC on it.
+                    others have bet {tok ? amtSym(tok.minScoredVolume, tok, 0) : "…"} on it.
                   </div>
                 )}
               </>
@@ -329,16 +374,21 @@ export default function NewTrade() {
           </div>
         )}
         <div className="num mb-3 text-sm text-muted">
-          Total: <span className="text-ink">{seedMicro ? qusdc(seedMicro) : "…"}</span> QUSDC + a little QIE for gas
-          {bal !== null && (
+          Total: <span className="text-ink">{seedMicro && tok ? amt(seedMicro, tok) : "…"}</span> {tok?.symbol ?? ""} + a little QIE for gas
+          {bal !== null && tok && (
             <span className="block text-xs text-faint">
-              wallet: {qusdc(bal.usd)} QUSDC · {(Number(bal.gas) / 1e18).toFixed(3)} QIE
+              wallet: {tok.native ? amtSym(bal.gas, tok, 3) : `${amtSym(bal.stake, tok)} · ${(Number(bal.gas) / 1e18).toFixed(3)} QIE`}
               {short && (
                 <span className="text-bad">
-                  {" "}· not enough QUSDC:{" "}
-                  <a href={QUSDC_URL} target="_blank" rel="noreferrer" className="underline">
-                    get QUSDC
-                  </a>
+                  {" "}· not enough {tok.symbol}
+                  {!tok.native && (
+                    <>
+                      :{" "}
+                      <a href={QUSDC_URL} target="_blank" rel="noreferrer" className="underline">
+                        get QUSDC
+                      </a>
+                    </>
+                  )}
                 </span>
               )}
             </span>

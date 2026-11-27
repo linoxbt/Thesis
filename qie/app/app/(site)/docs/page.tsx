@@ -2,7 +2,7 @@ import { ArrowUpRight } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { FeedsTable, ParamsTable } from "@/components/docs/LiveTables";
+import { FeedsTable, ParamsTable, TokensTable } from "@/components/docs/LiveTables";
 import { SiteNav } from "@/components/landing/SiteNav";
 import { CALLS_ADDRESS, EXPLORER, QUSDC_URL } from "@/lib/config";
 
@@ -18,6 +18,7 @@ const TOC: [string, string][] = [
   ["overview", "Overview"],
   ["quick-start", "Quick start"],
   ["calls", "Calls"],
+  ["stakes", "QIE or QUSDC"],
   ["odds", "Opening odds"],
   ["trading", "Backing and challenging"],
   ["settlement", "Settlement"],
@@ -86,7 +87,7 @@ const FAQ: [string, string][] = [
   ["Can the team take the money in a pot?", "No. Pot money can only go to winners or back to bettors. The owner can tune limits within hard bounds, pause new calls and bets (claims and settlement always work) and withdraw the treasury's share of fees, nothing else."],
   ["Why does my call need a target further away sometimes?", "When the latest oracle price is older, the market may have moved since. New calls then need a target at least z·σ·√age away, so nobody can post a call the market has already reached. It resets as soon as the oracle prints again."],
   ["Why is my skill score still empty?", "A call counts toward skill once it settles and others have bet enough on it (the scored-volume threshold below). A call only you traded proves nothing, so it doesn't move your score."],
-  ["Is this real money?", "Yes. On QIE mainnet, seeds, bets and payouts are in QUSDC and gas is paid in QIE. Start small; this is not financial advice."],
+  ["Is this real money?", "Yes. On QIE mainnet, each call is staked in QIE or QUSDC (its creator picks), and its seeds, bets and payouts are in that token. Gas is paid in QIE. Start small; this is not financial advice."],
 ];
 
 export default function DocsPage() {
@@ -138,7 +139,7 @@ export default function DocsPage() {
             <P>
               Thesis turns a trading call into a live market on the QIE blockchain. A trader posts a call: <Strong>BTC, ETH or SOL</Strong>,
               long or short, a take-profit price and a deadline. The contract prices it the moment it lands, from the QIE Oracle. The
-              crowd backs it (YES) or challenges it (NO) with QUSDC. The QIE Oracle settles it, round by round, with no one in between.
+              crowd backs it (YES) or challenges it (NO), in QIE or QUSDC, whichever the creator chose. The QIE Oracle settles it, round by round, with no one in between.
               And every call is scored against the odds it opened at, so a trader&apos;s record shows real skill, not luck.
             </P>
             <UL>
@@ -168,7 +169,7 @@ export default function DocsPage() {
                 .
               </li>
               <li>
-                <Strong>Get QUSDC and a little QIE.</Strong> Bets and seeds are in{" "}
+                <Strong>Have some QIE (or QUSDC).</Strong> Calls are staked in native QIE or in{" "}
                 <a href={QUSDC_URL} target="_blank" rel="noreferrer" className="text-ink underline decoration-brand underline-offset-4">
                   QUSDC
                 </a>
@@ -176,7 +177,7 @@ export default function DocsPage() {
               </li>
               <li>
                 <Strong>Post a call</Strong> from <Link href="/new/" className="text-ink underline decoration-brand underline-offset-4">Post a trade</Link>: pick the asset and
-                side, set the take profit and window, add a seed. The opening odds show before you sign.
+                side, set the take profit and window, choose QIE or QUSDC and add a seed. The opening odds show before you sign.
               </li>
               <li>
                 <Strong>Or trade one</Strong> from <Link href="/app/" className="text-ink underline decoration-brand underline-offset-4">Markets</Link>: back it with YES or
@@ -195,6 +196,7 @@ export default function DocsPage() {
                 ["Direction", "Long: the call wins if the price touches the target at or above it. Short: at or below."],
                 ["Take profit", "The target price. It must be on the right side of the latest oracle price, and far enough from it (see limits)."],
                 ["Deadline", "When the window ends. Only oracle rounds published between posting and the deadline count."],
+                ["Stake token", "QIE or QUSDC, the creator's choice. Every bet on the call uses the same one."],
                 ["Seed", "Your stake. It opens both sides of the pot at the opening odds, and pays out with whichever side wins."],
                 ["Reason", "Optional text shown on the card, up to 280 bytes (emoji and accents take more than one)."],
               ]}
@@ -207,6 +209,29 @@ export default function DocsPage() {
               all of this before you sign, using the same rules. The live values:
             </P>
             <ParamsTable />
+
+            <H2 id="stakes">QIE or QUSDC</H2>
+            <P>
+              Whoever posts a call picks what it&apos;s staked in: <Strong>native QIE</Strong> or <Strong>QUSDC</Strong>, QIE&apos;s
+              stablecoin. Everything on that call uses the same token: the seed, every bet, the payouts and the fees. One pot never
+              mixes the two.
+            </P>
+            <UL>
+              <li>
+                <Strong>QIE</Strong> is sent with the transaction itself, so there&apos;s nothing to approve: posting or betting is one
+                confirm. Payouts come back as QIE. A QIE pot also moves with QIE&apos;s price, so you can win the bet and still be down
+                in dollars (or the other way round).
+              </li>
+              <li>
+                <Strong>QUSDC</Strong> holds its dollar value. The first time, your wallet approves the contract to take the amount,
+                then posts or bets.
+              </li>
+              <li>
+                <Strong>Limits are per token</Strong>, set to about the same dollar amounts. Skill doesn&apos;t care which token: it&apos;s
+                scored against the opening odds either way.
+              </li>
+            </UL>
+            <TokensTable />
 
             <H2 id="odds">Opening odds</H2>
             <P>
@@ -343,7 +368,7 @@ export default function DocsPage() {
             <P>
               Creators earn a share of the fee on every bet on their calls, whoever wins. Fees are credited once the bet&apos;s oracle round
               has passed without a touch (or the call settles), and you can withdraw them any time from your profile with{" "}
-              <C>claimCreatorFees()</C>. Your seed also pays out with whichever side wins.
+              <C>claimCreatorFees(token)</C>, once per token you&apos;ve earned in. Fees come in the token each call is staked in. Your seed also pays out with whichever side wins.
             </P>
 
             <H2 id="accounts">Sign-in, wallets and QIE ID</H2>
@@ -384,7 +409,7 @@ export default function DocsPage() {
               rows={[
                 ["Network", "QIE Blockchain mainnet (EVM, chain ID 1990)"],
                 ["ThesisCalls", CALLS_ADDRESS],
-                ["Stake token", "QUSDC (6 decimals)"],
+                ["Stake tokens", "Native QIE (18 decimals) and QUSDC (6 decimals), chosen per call"],
                 ["Source", "Verified on the QIE explorer; Solidity 0.8.24"],
               ]}
             />
@@ -401,14 +426,14 @@ export default function DocsPage() {
             <H3>Writes</H3>
             <Ref
               rows={[
-                ["createCall(feed, above, strike, end, seed, text)", "Posts a call; prices it and seeds both pools. Needs a QUSDC allowance."],
-                ["bet(id, yes, amount)", "Backs (yes) or challenges a call. Takes the fee; the rest joins the pool."],
+                ["createCall(token, feed, above, strike, end, seed, text)", "Posts a call; prices it and seeds both pools. token: the zero address for QIE (send the seed as value) or QUSDC (approve first)."],
+                ["bet(id, yes, amount)", "Backs (yes) or challenges a call in its token (QIE: send amount as value). Takes the fee; the rest joins the pool."],
                 ["sync(id, maxRounds)", "Checks unchecked oracle rounds; settles YES on a touch."],
                 ["proveTouch(id, roundId)", "Checks rounds up to roundId in order; settles on the first touch."],
                 ["settle(id)", "Settles NO after the deadline, grace and a print past the deadline."],
                 ["voidCall(id)", "After the void period: settles if possible, otherwise voids."],
                 ["claim(id)", "Pays winnings or refunds."],
-                ["claimCreatorFees()", "Withdraws your creator fees."],
+                ["claimCreatorFees(token)", "Withdraws your creator fees in that token."],
               ]}
             />
             <H3>Reads</H3>
@@ -421,12 +446,13 @@ export default function DocsPage() {
                 ["betStatus(id)", "Whether a call takes bets now, and why not."],
                 ["minDistanceNow(feed)", "The least target distance a new call needs right now."],
                 ["stats(creator) / getCreators(from, count)", "Calls posted, hits, misses, skill and scored calls."],
+                ["stakeTokens(token) / stakeTokenList(i)", "What calls can be staked in, and each token's seed, bet and scoring limits."],
               ]}
             />
             <H3>Events</H3>
             <P>
               <C>CallCreated</C>, <C>Bet</C>, <C>Touched</C>, <C>Settled</C>, <C>Voided</C>, <C>Synced</C>, <C>Claimed</C>,{" "}
-              <C>CreatorFeesClaimed</C>, plus admin events (<C>ParamsSet</C>, <C>FeedSet</C>, <C>VolatilitySet</C>, <C>PausedSet</C>, …).
+              <C>CreatorFeesClaimed</C>, plus admin events (<C>ParamsSet</C>, <C>StakeTokenSet</C>, <C>FeedSet</C>, <C>VolatilitySet</C>, <C>PausedSet</C>, …).
               The app reads its whole history from these events: there&apos;s no indexer or database.
             </P>
 
@@ -452,7 +478,7 @@ export default function DocsPage() {
                 later round, sniping before the deadline, oracle outages, broken feeds) and an invariant fuzz test that payouts never exceed
                 what the contract holds.
               </li>
-              <li>A test on a fork of QIE mainnet runs a full cycle against the live oracle and real QUSDC.</li>
+              <li>A test on a fork of QIE mainnet runs a full cycle against the live oracle and its real round history.</li>
               <li>The sign-in service, the keeper and the app have their own test suites, run on every change.</li>
             </UL>
             <Note title="Limits worth knowing">

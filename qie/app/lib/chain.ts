@@ -1,6 +1,7 @@
 import { createPublicClient, fallback, http, type Address } from "viem";
 import { ERC20_ABI, PRICE_FEED_ABI, THESIS_CALLS_ABI } from "./abi";
 import { CALLS_ADDRESS, qie, RPC_URLS } from "./config";
+import { isNative, type StakeToken } from "./tokens";
 
 /**
  * Read-only client. Fails over across QIE's RPC nodes (each retried twice)
@@ -20,6 +21,8 @@ export interface Call {
   id: number;
   creator: Address;
   feed: Address;
+  /** Stake: NATIVE (QIE) or a token (QUSDC). Every bet on the call uses it. */
+  token: Address;
   above: boolean;
   touched: boolean;
   settled: boolean;
@@ -75,15 +78,11 @@ export interface Stats {
   misses: number;
   /** Sum over scored calls (those with outside volume) of (hit ? 1 : 0) - opening odds. */
   skillBps: number;
-  volume: bigint;
   scored: number;
 }
 
 export interface Params {
   feeBps: number;
-  minSeed: bigint;
-  maxSeed: bigint;
-  minStake: bigint;
   minWindow: number;
   maxWindow: number;
   grace: number;
@@ -97,23 +96,51 @@ export interface Params {
   staleZTenths: number;
   closeBps: number;
   voidAfter: number;
-  minScoredVolume: bigint;
 }
 
-export async function readParams(): Promise<{ params: Params; stakeToken: Address; creatorShareBps: number; paused: boolean }> {
-  const [p, stakeToken, creatorShareBps, paused] = await Promise.all([
+export async function readParams(): Promise<{ params: Params; creatorShareBps: number; paused: boolean }> {
+  const [p, creatorShareBps, paused] = await Promise.all([
     publicClient.readContract({ ...calls, functionName: "params" }),
-    publicClient.readContract({ ...calls, functionName: "stakeToken" }),
     publicClient.readContract({ ...calls, functionName: "creatorShareBps" }),
     publicClient.readContract({ ...calls, functionName: "paused" }),
   ]);
-  const [feeBps, minSeed, maxSeed, minStake, minWindow, maxWindow, grace, maxOracleAge, maxVolAge, minDistanceBps, maxDistanceBps, minOpenBps, maxOpenBps, betCutoffBps, staleZTenths, closeBps, voidAfter, minScoredVolume] = p;
+  const [feeBps, minWindow, maxWindow, grace, maxOracleAge, maxVolAge, minDistanceBps, maxDistanceBps, minOpenBps, maxOpenBps, betCutoffBps, staleZTenths, closeBps, voidAfter] = p;
   return {
-    params: { feeBps, minSeed, maxSeed, minStake, minWindow, maxWindow, grace, maxOracleAge, maxVolAge, minDistanceBps, maxDistanceBps, minOpenBps, maxOpenBps, betCutoffBps, staleZTenths, closeBps, voidAfter, minScoredVolume },
-    stakeToken,
+    params: { feeBps, minWindow, maxWindow, grace, maxOracleAge, maxVolAge, minDistanceBps, maxDistanceBps, minOpenBps, maxOpenBps, betCutoffBps, staleZTenths, closeBps, voidAfter },
     creatorShareBps,
     paused,
   };
+}
+
+/** Token symbols and decimals never change: read once per session. */
+const tokenMeta = new Map<Address, { symbol: string; decimals: number }>();
+
+/** What calls can be staked in (native QIE first), with each token's limits. */
+export async function readStakeTokens(): Promise<StakeToken[]> {
+  const n = Number(await publicClient.readContract({ ...calls, functionName: "stakeTokenCount" }));
+  const addrs = await Promise.all(Array.from({ length: n }, (_, i) => publicClient.readContract({ ...calls, functionName: "stakeTokenList", args: [BigInt(i)] })));
+  const out = await Promise.all(
+    addrs.map(async (address) => {
+      const [cfg, meta] = await Promise.all([
+        publicClient.readContract({ ...calls, functionName: "stakeTokens", args: [address] }),
+        isNative(address)
+          ? { symbol: "QIE", decimals: 18 }
+          : (tokenMeta.get(address) ??
+            Promise.all([
+              publicClient.readContract({ address, abi: ERC20_ABI, functionName: "symbol" }),
+              publicClient.readContract({ address, abi: ERC20_ABI, functionName: "decimals" }),
+            ]).then(([symbol, decimals]) => {
+              // A test stand-in on the local chain is still QUSDC to the user.
+              const m = { symbol: symbol.replace(/^t(?=QUSDC$)/, ""), decimals };
+              tokenMeta.set(address, m);
+              return m;
+            })),
+      ]);
+      const [enabled, minSeed, maxSeed, minStake, minScoredVolume] = cfg;
+      return { address, ...meta, native: isNative(address), enabled, minSeed, maxSeed, minStake, minScoredVolume };
+    }),
+  );
+  return out.sort((a, b) => Number(b.native) - Number(a.native));
 }
 
 /** Feed descriptions and decimals never change: read once per session. */
@@ -151,6 +178,7 @@ function toCall(id: number, c: RawCall, text: string): Call {
     id,
     creator: c.creator,
     feed: c.feed,
+    token: c.token,
     above: c.above,
     touched: c.touched,
     settled: c.settled,
@@ -207,7 +235,7 @@ export async function readCreators(): Promise<{ creator: Address; stats: Stats }
   for (let from = 0; from < n; from += 100) {
     const [who, s] = await publicClient.readContract({ ...calls, functionName: "getCreators", args: [BigInt(from), 100n] });
     who.forEach((creator, i) =>
-      out.push({ creator, stats: { posted: s[i].posted, hits: s[i].hits, misses: s[i].misses, skillBps: Number(s[i].skillBps), volume: s[i].volume, scored: s[i].scored } }),
+      out.push({ creator, stats: { posted: s[i].posted, hits: s[i].hits, misses: s[i].misses, skillBps: Number(s[i].skillBps), scored: s[i].scored } }),
     );
   }
   return out;
@@ -232,13 +260,21 @@ export async function readMinDistance(feed: Address): Promise<number> {
   return Number(await publicClient.readContract({ ...calls, functionName: "minDistanceNow", args: [feed] }));
 }
 
+/**
+ * A wallet's balance of a stake token, its QIE (for gas), and what the
+ * contract may take. Native QIE needs no approval: it's sent with the call.
+ */
 export async function readBalances(token: Address, user: Address) {
-  const [usd, gas, allowance] = await Promise.all([
+  if (isNative(token)) {
+    const gas = await publicClient.getBalance({ address: user });
+    return { stake: gas, gas, allowance: 2n ** 256n - 1n };
+  }
+  const [stake, gas, allowance] = await Promise.all([
     publicClient.readContract({ address: token, abi: ERC20_ABI, functionName: "balanceOf", args: [user] }),
     publicClient.getBalance({ address: user }),
     publicClient.readContract({ address: token, abi: ERC20_ABI, functionName: "allowance", args: [user, CALLS_ADDRESS] }),
   ]);
-  return { usd, gas, allowance };
+  return { stake, gas, allowance };
 }
 
 /** The feed's last `count` rounds (oldest first), for price charts. */

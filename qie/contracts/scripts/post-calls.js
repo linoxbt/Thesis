@@ -2,6 +2,7 @@
 //
 //   node --env-file=.env scripts/post-calls.js          dry run: prices each call onchain, checks balances
 //   node --env-file=.env scripts/post-calls.js --send   posts them (approves QUSDC once if needed)
+//   add --qie to stake them in native QIE instead of QUSDC
 //
 // Each target is the call's distance from the latest QIE Oracle price, widened
 // if the contract currently needs more (minDistanceNow). Nothing is posted if
@@ -9,14 +10,17 @@
 const { ethers } = require("ethers");
 const fs = require("fs");
 const path = require("path");
-const { FEEDS, QUSDC } = require("./params");
+const { FEEDS, QUSDC, NATIVE } = require("./params");
 
 const CALLS = JSON.parse(fs.readFileSync(path.join(__dirname, "../deployments/qieMainnet.json"), "utf8")).ThesisCalls;
 const ABI = JSON.parse(fs.readFileSync(path.join(__dirname, "keeper-abi.json"), "utf8"));
 const ERC20 = ["function balanceOf(address) view returns (uint256)", "function allowance(address,address) view returns (uint256)", "function approve(address,uint256) returns (bool)"];
 const FEED = ["function latestRoundData() view returns (uint80,int256,uint256,uint256,uint80)", "function decimals() view returns (uint8)"];
 
-const SEED = 4_000_000n; // 4 QUSDC each
+const QIE_MODE = process.argv.includes("--qie");
+const SEED = QIE_MODE ? 25n * 10n ** 18n : 4_000_000n; // 25 QIE or 4 QUSDC each
+const DEC = QIE_MODE ? 18 : 6;
+const UNIT = QIE_MODE ? "QIE" : "QUSDC";
 const H = 3600;
 const PLAN = [
   { asset: "BTC", long: true, bps: 300, hours: 48, text: "BTC reclaims +3% inside two days. Funding has reset and spot bids are stacking under the range." },
@@ -35,10 +39,12 @@ async function main() {
   const token = new ethers.Contract(QUSDC, ERC20, wallet);
   const feedOf = Object.fromEntries(Object.entries(FEEDS).map(([k, f]) => [k, f.address]));
 
-  const [bal, gas, fee] = await Promise.all([token.balanceOf(wallet.address), provider.getBalance(wallet.address), provider.getFeeData()]);
+  const [usdc, gas, fee] = await Promise.all([token.balanceOf(wallet.address), provider.getBalance(wallet.address), provider.getFeeData()]);
   const need = SEED * BigInt(PLAN.length);
-  console.log(`wallet ${wallet.address}: ${ethers.formatUnits(bal, 6)} QUSDC, ${ethers.formatEther(gas)} QIE (gas price ${ethers.formatUnits(fee.gasPrice ?? 0n, "gwei")} gwei)`);
-  console.log(`contract ${CALLS}; ${PLAN.length} calls × ${ethers.formatUnits(SEED, 6)} QUSDC = ${ethers.formatUnits(need, 6)} QUSDC\n`);
+  // In QIE mode the seeds and the gas both come out of the QIE balance (keep 0.05 QIE for gas).
+  const bal = QIE_MODE ? (gas > 5n * 10n ** 16n ? gas - 5n * 10n ** 16n : 0n) : usdc;
+  console.log(`wallet ${wallet.address}: ${ethers.formatUnits(usdc, 6)} QUSDC, ${ethers.formatEther(gas)} QIE (gas price ${ethers.formatUnits(fee.gasPrice ?? 0n, "gwei")} gwei)`);
+  console.log(`contract ${CALLS}; ${PLAN.length} calls × ${ethers.formatUnits(SEED, DEC)} ${UNIT} = ${ethers.formatUnits(need, DEC)} ${UNIT}\n`);
 
   const now = (await provider.getBlock("latest")).timestamp;
   const ready = [];
@@ -56,18 +62,18 @@ async function main() {
   }
 
   if (bal < need) {
-    console.log(`\nNot enough QUSDC: has ${ethers.formatUnits(bal, 6)}, needs ${ethers.formatUnits(need, 6)}. Nothing posted.`);
+    console.log(`\nNot enough ${UNIT}: has ${ethers.formatUnits(bal, DEC)} to stake, needs ${ethers.formatUnits(need, DEC)}. Nothing posted.`);
     return;
   }
   if (!send) return console.log("\nDry run. Run with --send to post.");
 
-  if ((await token.allowance(wallet.address, CALLS)) < need) {
+  if (!QIE_MODE && (await token.allowance(wallet.address, CALLS)) < need) {
     const tx = await token.approve(CALLS, need);
     await tx.wait();
     console.log(`approved ${ethers.formatUnits(need, 6)} QUSDC: ${tx.hash}`);
   }
   for (const c of ready) {
-    const tx = await calls.createCall(c.feed, c.long, c.strike, c.end, SEED, c.text);
+    const tx = await calls.createCall(QIE_MODE ? NATIVE : QUSDC, c.feed, c.long, c.strike, c.end, SEED, c.text, { value: QIE_MODE ? SEED : 0n });
     const r = await tx.wait();
     const ev = r.logs.map((l) => { try { return calls.interface.parseLog(l); } catch { return null; } }).find((e) => e?.name === "CallCreated");
     console.log(`posted ${c.asset} ${c.long ? "long" : "short"}: call #${ev?.args.id ?? "?"}, gas ${r.gasUsed}, ${tx.hash}`);

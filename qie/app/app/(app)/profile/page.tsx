@@ -13,7 +13,8 @@ import { THESIS_CALLS_ABI } from "@/lib/abi";
 import { publicClient, readBalances, readPosition } from "@/lib/chain";
 import { CALLS_ADDRESS, explorerAddress, QUSDC_URL } from "@/lib/config";
 import { useData } from "@/lib/data";
-import { pct, price, qusdc, shortAddr } from "@/lib/format";
+import { pct, price, shortAddr } from "@/lib/format";
+import { amt, amtSym, NATIVE, type StakeToken } from "@/lib/tokens";
 import { fmtPct, markMove, positionOf } from "@/lib/position";
 import { usdPx } from "@/components/Position";
 import { explain, useWallet } from "@/lib/wallet";
@@ -165,58 +166,66 @@ function OwnerPanel({ who }: { who: Address }) {
 
 function WalletPanel({ who }: { who: Address }) {
   const w = useWallet();
-  const { stakeToken, refresh, params, creatorShareBps } = useData();
-  const [bal, setBal] = useState<{ usd: bigint; gas: bigint } | null>(null);
-  const [owed, setOwed] = useState(0n);
+  const { stakeTokens, refresh, params, creatorShareBps } = useData();
+  const [bals, setBals] = useState<{ token: StakeToken; stake: bigint; owed: bigint }[] | null>(null);
+  const [gas, setGas] = useState<bigint | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, run] = useOnce();
+  const key = stakeTokens.map((t) => t.address).join(",");
   const load = useCallback(async () => {
-    if (!stakeToken) return;
-    const [b, fees] = await Promise.all([
-      readBalances(stakeToken, who),
-      publicClient.readContract({ address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI, functionName: "creatorFeesOwed", args: [who] }),
-    ]);
-    setBal(b);
-    setOwed(fees);
-  }, [who, stakeToken]);
+    if (!stakeTokens.length) return;
+    const got = await Promise.all(
+      stakeTokens.map(async (t) => {
+        const [b, owed] = await Promise.all([
+          readBalances(t.address, who),
+          publicClient.readContract({ address: CALLS_ADDRESS, abi: THESIS_CALLS_ABI, functionName: "creatorFeesOwed", args: [who, t.address] }),
+        ]);
+        return { token: t, stake: b.stake, owed, gas: b.gas };
+      }),
+    );
+    setBals(got);
+    setGas(got[0]?.gas ?? null);
+  }, [who, key]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => void load().catch(() => {}), [load]);
   return (
     <section className="panel p-6" data-testid="wallet-panel">
       <span className="label">Wallet</span>
       <div className="num mt-3 grid grid-cols-2 gap-3">
-        <div>
-          <div className="text-xs text-faint">QUSDC</div>
-          <div className="text-2xl text-ink">{bal ? qusdc(bal.usd) : "…"}</div>
-        </div>
-        <div>
-          <div className="text-xs text-faint">QIE for gas</div>
-          <div className="text-2xl text-ink">{bal ? (Number(bal.gas) / 1e18).toFixed(3) : "…"}</div>
-        </div>
+        {(bals ?? stakeTokens.map((t) => ({ token: t, stake: null as bigint | null, owed: 0n }))).map((b) => (
+          <div key={b.token.address}>
+            <div className="text-xs text-faint">{b.token.native ? "QIE (stakes and gas)" : b.token.symbol}</div>
+            <div className="text-2xl text-ink">{b.stake !== null ? amt(b.stake, b.token, b.token.native ? 3 : 2) : "…"}</div>
+          </div>
+        ))}
+        {!stakeTokens.length && <div className="text-2xl text-ink">{gas !== null ? (Number(gas) / 1e18).toFixed(3) : "…"}</div>}
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
         <a href={QUSDC_URL} target="_blank" rel="noreferrer" className="btn btn-ghost text-sm">
           Get QUSDC <ExternalLink size={13} />
         </a>
-        {owed > 0n && (
-          <button
-            onClick={() =>
-              void run("fees", () =>
-                w
-                  .write(`Claim ${qusdc(owed)} QUSDC creator fees`, { ...CALLS, functionName: "claimCreatorFees" })
-                  .then(() => Promise.all([load(), refresh()]))
-                  .catch((e) => setErr(explain(e))),
-              )
-            }
-            disabled={!!busy}
-            className="btn btn-yes text-sm disabled:opacity-40"
-            data-testid="claim-fees"
-          >
-            {busy ? "Claiming…" : `Claim ${qusdc(owed)} QUSDC in fees`}
-          </button>
-        )}
+        {(bals ?? [])
+          .filter((b) => b.owed > 0n)
+          .map((b) => (
+            <button
+              key={b.token.address}
+              onClick={() =>
+                void run(`fees-${b.token.symbol}`, () =>
+                  w
+                    .write(`Claim ${amtSym(b.owed, b.token)} creator fees`, { ...CALLS, functionName: "claimCreatorFees", args: [b.token.address] })
+                    .then(() => Promise.all([load(), refresh()]))
+                    .catch((e) => setErr(explain(e))),
+                )
+              }
+              disabled={!!busy}
+              className="btn btn-yes text-sm disabled:opacity-40"
+              data-testid={`claim-fees-${b.token.symbol}`}
+            >
+              {busy === `fees-${b.token.symbol}` ? "Claiming…" : `Claim ${amtSym(b.owed, b.token)} in fees`}
+            </button>
+          ))}
       </div>
       <p className="mt-3 text-xs text-faint">
-        You earn {pct(creatorShareBps, 0)} of the {pct(params?.feeBps ?? 200, 0)} fee on every bet on your calls; claim any time.
+        You earn {pct(creatorShareBps, 0)} of the {pct(params?.feeBps ?? 200, 0)} fee on every bet on your calls, in the token each call is staked in; claim any time.
       </p>
       {err && <p className="mt-2 text-xs text-bad">{err}</p>}
     </section>
@@ -245,7 +254,7 @@ type Row = { id: number; yes: bigint; no: bigint; claimable: bigint; claimed: bo
 
 function Positions({ who }: { who: Address }) {
   const w = useWallet();
-  const { calls, events, feedOf, refresh, historyReady } = useData();
+  const { calls, events, feedOf, tokenOf, refresh, historyReady } = useData();
   const [rows, setRows] = useState<Row[] | null>(null);
   const [failed, setFailed] = useState(0);
   const [err, setErr] = useState<string | null>(null);
@@ -275,7 +284,7 @@ function Positions({ who }: { who: Address }) {
   const claim = (id: number, amount: bigint) =>
     run(`claim-${id}`, () =>
       w
-        .write(`Claim ${qusdc(amount)} QUSDC`, { ...CALLS, functionName: "claim", args: [BigInt(id)] })
+        .write(`Claim ${amtSym(amount, tokenOf(calls.find((c) => c.id === id)?.token ?? NATIVE))}`, { ...CALLS, functionName: "claim", args: [BigInt(id)] })
         .then(() => Promise.all([load(), refresh()]))
         .catch((e) => setErr(explain(e))),
     );
@@ -309,6 +318,7 @@ function Positions({ who }: { who: Address }) {
               {rows.map((p) => {
                 const c = calls.find((x) => x.id === p.id);
                 const f = c ? feedOf(c.feed) : undefined;
+                const tok = tokenOf(c?.token ?? NATIVE);
                 const dec = f?.decimals ?? 8;
                 const pos = c ? positionOf(c.above ? "above" : "below", price(c.spotAtOpen, dec), price(c.strike, dec)) : null;
                 const mark = f ? price(f.price, dec) : null;
@@ -337,18 +347,18 @@ function Positions({ who }: { who: Address }) {
                       )}
                     </td>
                     <td className="pr-2">
-                      {p.yes > 0n && <div>YES {qusdc(p.yes)}</div>}
-                      {p.no > 0n && <div>NO {qusdc(p.no)}</div>}
+                      {p.yes > 0n && <div>YES {amt(p.yes, tok)}</div>}
+                      {p.no > 0n && <div>NO {amt(p.no, tok)}</div>}
                     </td>
                     <td className="text-right">
                       {!c?.settled ? (
                         <span className="text-faint">
-                          {p.yes > 0n && <div>{qusdc(p.payoutIfYes)} if hit</div>}
-                          {p.no > 0n && <div>{qusdc(p.payoutIfNo)} if missed</div>}
+                          {p.yes > 0n && <div>{amt(p.payoutIfYes, tok)} if hit</div>}
+                          {p.no > 0n && <div>{amt(p.payoutIfNo, tok)} if missed</div>}
                         </span>
                       ) : p.claimable > 0n ? (
                         <button onClick={() => void claim(p.id, p.claimable)} disabled={!!busy} className="btn btn-yes px-3 py-1 text-xs disabled:opacity-40">
-                          {busy === `claim-${p.id}` ? "Claiming…" : `Claim ${qusdc(p.claimable)}`}
+                          {busy === `claim-${p.id}` ? "Claiming…" : `Claim ${amt(p.claimable, tok)}`}
                         </button>
                       ) : (
                         <span className="text-faint">{p.claimed ? "claimed" : "nothing to claim"}</span>
@@ -356,7 +366,7 @@ function Positions({ who }: { who: Address }) {
                       {pnl !== null && (
                         <div className={pnl >= 0n ? "text-yes" : "text-bad"}>
                           {pnl >= 0n ? "+" : "−"}
-                          {qusdc(pnl >= 0n ? pnl : -pnl)} P&amp;L
+                          {amt(pnl >= 0n ? pnl : -pnl, tok)} P&amp;L
                         </div>
                       )}
                     </td>

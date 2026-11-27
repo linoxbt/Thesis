@@ -1,11 +1,8 @@
-// Launch parameters for ThesisCalls (v2), shared by deploy, verification and the dev chain.
+// Launch parameters for ThesisCalls (v3), shared by deploy, verification and the dev chain.
 const USDC = 1_000_000n;
 
 const LAUNCH_PARAMS = {
   feeBps: 200, // 2% per bet: half to the call's creator, half to the treasury
-  minSeed: 2n * USDC,
-  maxSeed: 250n * USDC,
-  minStake: 500_000n, // 0.5 QUSDC
   minWindow: 30 * 60,
   maxWindow: 8 * 86_400,
   grace: 300,
@@ -22,7 +19,15 @@ const LAUNCH_PARAMS = {
   staleZTenths: 30, // z = 3
   closeBps: 1_000, // betting closes in the last 10% of the window
   voidAfter: 3 * 86_400, // no oracle print 3 days past the deadline: void, refund all
-  minScoredVolume: 5n * USDC, // calls need 5 QUSDC of outside bets to count toward skill
+};
+
+// What calls can be staked in. Amounts are in each token's own units. QIE was
+// $0.158 on 27 Nov 2026, so its limits match QUSDC's in dollars, rounded.
+const QIE = 10n ** 18n;
+const NATIVE = "0x0000000000000000000000000000000000000000";
+const STAKE_LIMITS = {
+  QUSDC: { enabled: true, minSeed: 2n * USDC, maxSeed: 250n * USDC, minStake: 500_000n, minScoredVolume: 5n * USDC },
+  QIE: { enabled: true, minSeed: 15n * QIE, maxSeed: 1_500n * QIE, minStake: 3n * QIE, minScoredVolume: 30n * QIE },
 };
 
 // 7-day realised volatility and median gap between rounds (seconds, for the
@@ -36,4 +41,4 @@ const FEEDS = {
 
 const QUSDC = "0x3F43DA82eC9A4f5285F10FaF1F26EcA7319E5DA5";
 
-module.exports = { USDC, LAUNCH_PARAMS, FEEDS, QUSDC };
+module.exports = { USDC, QIE, NATIVE, LAUNCH_PARAMS, STAKE_LIMITS, FEEDS, QUSDC };

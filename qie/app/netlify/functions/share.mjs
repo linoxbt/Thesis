@@ -32,7 +32,12 @@ const C = { bg: "#f4f2ec", panel: "#ffffff", ink: "#16171b", muted: "#6b6a64", f
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const usd = (v) => "$" + v.toLocaleString("en-US", { minimumFractionDigits: v >= 1000 ? 0 : 2, maximumFractionDigits: v >= 1000 ? 0 : 2 });
 const pct = (bps, d = 0) => (bps / 100).toFixed(d) + "%";
-const qusdc = (v) => (Number(v) / 1e6).toLocaleString("en-US", { maximumFractionDigits: 0 });
+// A call is staked in native QIE (the zero address, 18 decimals) or QUSDC (6 decimals).
+const NATIVE = "0x0000000000000000000000000000000000000000";
+const stake = (v, token) => {
+  const native = token.toLowerCase() === NATIVE;
+  return `${(Number(v) / (native ? 1e18 : 1e6)).toLocaleString("en-US", { maximumFractionDigits: 0 })} ${native ? "QIE" : "QUSDC"}`;
+};
 const short = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const when = (ts) => new Date(ts * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" }) + " UTC";
 
@@ -87,6 +92,7 @@ async function readCall(id) {
     crowd,
     open: c.openBps,
     pot,
+    token: c.token,
     creator: name ?? short(c.creator),
     status,
     text,
@@ -123,7 +129,7 @@ function card(d) {
       h("div", { flexDirection: "column" },
         h("div", { fontSize: 24, color: C.muted }, "Crowd says"),
         h("div", { fontFamily: "Sora", fontSize: 52 }, pct(d.crowd))),
-      h("div", { fontSize: 24, color: C.muted, marginLeft: 26, marginBottom: 8 }, `YES · opened at ${pct(d.open)} · pot ${qusdc(d.pot)} QUSDC`)),
+      h("div", { fontSize: 24, color: C.muted, marginLeft: 26, marginBottom: 8 }, `YES · opened at ${pct(d.open)} · pot ${stake(d.pot, d.token)}`)),
     d.text ? h("div", { fontSize: 22, color: C.muted, marginTop: 8, maxWidth: 1072, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }, `“${d.text}”`) : null,
     h("div", { position: "absolute", left: 64, right: 64, bottom: 30, justifyContent: "space-between", fontFamily: "Mono", fontSize: 20 },
       h("div", { color: C.faint, maxWidth: 420, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }, `by ${d.creator}`),
@@ -149,7 +155,7 @@ async function png(d) {
 function page(d) {
   const url = `${SITE}/t/?id=${d.id}`;
   const title = `${d.long ? "Long" : "Short"} ${d.asset}: take profit ${usd(d.tp)} — crowd says ${pct(d.crowd)}`;
-  const desc = `${d.text ? d.text + " · " : ""}Entry ${usd(d.entry)}, deadline ${when(d.end)}. Back it or challenge it in QUSDC on Thesis, settled by the QIE Oracle.`;
+  const desc = `${d.text ? d.text + " · " : ""}Entry ${usd(d.entry)}, deadline ${when(d.end)}. Back it or challenge it in ${d.token.toLowerCase() === NATIVE ? "QIE" : "QUSDC"} on Thesis, settled by the QIE Oracle.`;
   // The image URL changes with the call's state, so caches pick up new odds and outcomes.
   const img = `${SITE}/.netlify/functions/share?id=${d.id}&img=1&v=${d.status.replace(/\W/g, "")}-${d.crowd}`;
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">

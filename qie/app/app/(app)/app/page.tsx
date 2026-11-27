@@ -6,7 +6,7 @@ import { useMemo, useState } from "react";
 import { Pills } from "@/components/Pills";
 import { ThesisCard } from "@/components/ThesisCard";
 import { useData, useNow, volumeSince } from "@/lib/data";
-import { qusdc } from "@/lib/format";
+import { inMinBets, perToken } from "@/lib/tokens";
 
 const SORTS = [
   { key: "hot", label: "Hot" },
@@ -17,7 +17,7 @@ const SORTS = [
 /** Markets: every call on the contract, newest data every 15 s. */
 export default function FeedPage() {
   const [sort, setSort] = useState<(typeof SORTS)[number]["key"]>("hot");
-  const { ready, calls, events, feedOf, tradesOf } = useData();
+  const { ready, calls, events, feedOf, tradesOf, tokenOf, stakeTokens } = useData();
   const now = useNow(30_000);
 
   const shown = useMemo(() => {
@@ -28,14 +28,15 @@ export default function FeedPage() {
     // Hot: open calls first, by the last day's volume, then all-time volume.
     return list.sort((a, b) => {
       if (live(a) !== live(b)) return live(a) ? -1 : 1;
-      const d = volumeSince(tradesOf(b.id), now - 86_400) - volumeSince(tradesOf(a.id), now - 86_400);
-      if (d !== 0n) return d > 0n ? 1 : -1;
-      return b.volume === a.volume ? b.start - a.start : b.volume > a.volume ? 1 : -1;
+      // Compared in minimum bets, so QIE and QUSDC calls rank fairly.
+      const day = (c: typeof a) => inMinBets(volumeSince(tradesOf(c.id), now - 86_400), tokenOf(c.token));
+      const all = (c: typeof a) => inMinBets(c.volume, tokenOf(c.token));
+      return day(b) - day(a) || all(b) - all(a) || b.start - a.start;
     });
-  }, [calls, sort, now, tradesOf]);
+  }, [calls, sort, now, tradesOf, tokenOf]);
 
   const traders = new Set([...events.trades.map((t) => t.user.toLowerCase()), ...calls.map((c) => c.creator.toLowerCase())]).size;
-  const volume = calls.reduce((s, c) => s + c.volume, 0n);
+  const volume = perToken(calls.map((c) => ({ token: c.token, value: c.volume })), stakeTokens);
 
   return (
     <div className="space-y-10">
@@ -44,7 +45,7 @@ export default function FeedPage() {
         <h1 className="display mt-4 max-w-2xl text-4xl leading-[1.05] sm:text-5xl">Trade the call. Keep the score.</h1>
         <p className="mt-4 max-w-xl text-muted">
           Traders post their BTC, ETH or SOL call: long or short, a target and a deadline. The crowd backs or challenges it
-          in QUSDC, and the QIE Oracle settles it, round by round, with no one to trust.
+          in QIE or QUSDC, and the QIE Oracle settles it, round by round, with no one to trust.
         </p>
         <div className="mt-6 flex flex-wrap gap-2">
           <Link href="/new/" className="btn btn-primary">
@@ -60,7 +61,7 @@ export default function FeedPage() {
       {calls.length > 0 && (
         <section className="grid grid-cols-2 overflow-hidden rounded-2xl border border-line sm:grid-cols-4" data-testid="feed-stats">
           {[
-            ["Volume", `${qusdc(volume, 0)} QUSDC`],
+            ["Volume", volume],
             ["Traders", String(traders)],
             ["Calls", String(calls.length)],
             ["Touches proven", String(calls.filter((c) => c.touched && !c.voided).length)],

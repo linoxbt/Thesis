@@ -17,7 +17,7 @@ export const metadata: Metadata = {
 
 const EXPLORER = `${EXPLORER_URL}/address/${CALLS_ADDRESS}#code`;
 
-const STACK = ["QIE Blockchain", "QIE Oracle", "QUSDC stablecoin", "QIE Wallet", "Solidity 0.8.24", "Onchain opening odds", "Round-by-round settlement", "Verified contract"];
+const STACK = ["QIE Blockchain", "QIE Oracle", "Native QIE stakes", "QUSDC stablecoin", "QIE Wallet", "Solidity 0.8.24", "Onchain opening odds", "Round-by-round settlement", "Verified contract"];
 
 const CODE = [
   {
@@ -59,7 +59,7 @@ crossed(price, strike, direction)               // at or past the target
 ];
 
 const FAQ: [string, ReactNode][] = [
-  ["What exactly is a thesis?", "Your trade call, made public and tradable. You post the position (long or short on BTC, ETH or SOL, a take profit and a deadline); Thesis turns it into a market the crowd backs or challenges in QUSDC, and records the outcome against your profile."],
+  ["What exactly is a thesis?", "Your trade call, made public and tradable. You post the position (long or short on BTC, ETH or SOL, a take profit and a deadline); Thesis turns it into a market the crowd backs or challenges in QIE or QUSDC (you pick which), and records the outcome against your profile."],
   ["Is this a perp exchange?", "No. You keep trading wherever you trade. Thesis is the layer on top: it prices your call with a prediction market on QIE and settles it from the QIE Oracle. Nothing is lent to you and there is no liquidation."],
   ["What is a touch market?", "A market that asks whether price reaches a level at any moment before the deadline, not only at the close. If a QIE Oracle round prints at or past your target once, the call resolves YES, even if price falls back later."],
   ["Who decides whether a call hit?", "Nobody decides. The contract reads the QIE Oracle's rounds itself: the first round inside the window at or past the target settles YES. Before every bet and before a NO settlement it scans every round it hasn't checked, so a touch can't be missed. Bets placed while the latest oracle price was the round just before the touching one are refunded in full (fee included) instead of paid, so nobody can profit from betting on a move the oracle hasn't printed yet. A keeper makes settlement prompt, but anyone can prove or settle."],
@@ -80,7 +80,7 @@ const FAQ: [string, ReactNode][] = [
   ["When does betting close?", "In the last 10% of the window (a 48h call closes about 4.8 hours before its deadline), so nobody can pile in once the outcome is all but known. Betting also pauses while the latest oracle price is within 0.25% of the target, or more than 3 hours old."],
   ["Can a quick wick be missed?", "Only between oracle rounds. Calls settle from the QIE Oracle's published rounds, typically 3 to 6 minutes apart and sometimes over an hour in quiet markets, so a wick that starts and ends between two rounds can't count. Every round that is published inside the window does, and the opening odds account for it."],
   ["What if the oracle stops?", "NO only wins once the oracle has printed a price after the deadline, so an outage can't hand NO a win. If no price comes within 3 days of the deadline (or the feed breaks), anyone can void the call and every stake is refunded. A call the oracle can still settle is never voided."],
-  ["Is this real money?", `Yes, on QIE ${NETWORK === "mainnet" ? "mainnet" : NETWORK}: seeds, bets and payouts are in QUSDC, QIE's stablecoin, and gas is paid in QIE. Start small; this is a hackathon build and not financial advice.`],
+  ["Is this real money?", `Yes, on QIE ${NETWORK === "mainnet" ? "mainnet" : NETWORK}: each call is staked in QIE or in QUSDC (QIE's stablecoin), its creator's choice, and seeds, bets and payouts are in that token. Gas is paid in QIE. Start small; this is a hackathon build and not financial advice.`],
 ];
 
 function Container({ children, className = "", id }: { children: ReactNode; className?: string; id?: string }) {
@@ -111,7 +111,7 @@ export default function LandingPage() {
           </h1>
           <p className="rise mt-7 max-w-[560px] text-[17px] font-medium leading-relaxed text-white/90" style={{ ["--d" as string]: "120ms" }}>
             Anyone can claim they called the move. On Thesis your call is a live market on QIE: the contract prices it the
-            moment you post, the crowd backs or challenges it in QUSDC, the QIE Oracle settles it, and your record is
+            moment you post, the crowd backs or challenges it in QIE or QUSDC, the QIE Oracle settles it, and your record is
             scored against those odds onchain, for good.
           </p>
           <div className="rise mt-9 flex flex-wrap items-center gap-3" style={{ ["--d" as string]: "240ms" }}>
@@ -185,7 +185,7 @@ export default function LandingPage() {
           <Reveal>
             <H2>Every call is a market</H2>
             <p className="mt-5 max-w-md text-[17px] font-medium leading-relaxed text-white/90">
-              Your take profit becomes a pot the crowd backs or challenges in QUSDC, opened at the odds the contract computes.
+              Your take profit becomes a pot the crowd backs or challenges in QIE or QUSDC, opened at the odds the contract computes.
               The oracle settles it, your record keeps it, and you earn on every bet.
             </p>
             <Link href="/new/" className="mt-8 inline-flex items-center gap-1.5 rounded-lg bg-black px-5 py-3 text-[15px] font-medium text-white hover:bg-black/80">
@@ -220,7 +220,7 @@ export default function LandingPage() {
             </div>
             <div className="num mt-2 text-xs text-muted">opening odds 40.4% · +5.0% to TP</div>
           </StepCard></Reveal>
-          <Reveal className="h-full" delay={110}><StepCard n="02" title="The crowd prices it" body="Backers stake YES on your take profit, challengers stake NO, in QUSDC. The pot is the crowd's live probability, and you earn on every bet.">
+          <Reveal className="h-full" delay={110}><StepCard n="02" title="The crowd prices it" body="Backers stake YES on your take profit, challengers stake NO, in QIE or QUSDC. The pot is the crowd's live probability, and you earn on every bet.">
             <div className="num flex justify-between text-xs">
               <span className="text-yes">YES 64%</span>
               <span className="text-muted">NO 36%</span>
@@ -304,7 +304,7 @@ export default function LandingPage() {
             </div>
           </Bento>
           <Bento icon={<Wallet size={18} />} title="QIE Wallet, one click">
-            Connect QIE Wallet (or any browser wallet), switch to QIE in one tap, and trade in QUSDC. No sign-up.
+            Connect QIE Wallet (or any browser wallet), switch to QIE in one tap, and trade in QIE or QUSDC. No sign-up.
             <Link href="/app/" className="inline-flex w-fit items-center gap-1 rounded-lg bg-ink px-3.5 py-2 text-sm font-medium text-bg">
               Launch app <ArrowRight size={14} />
             </Link>
@@ -338,7 +338,7 @@ export default function LandingPage() {
           <DotField cell={8} seed={8} touchAt={0.7} className="pointer-events-none absolute -right-10 bottom-0 h-[300px] w-auto opacity-60" />
           <div className="relative">
             <H2 className="sm:text-[56px]">Take your call live.</H2>
-            <p className="mx-auto mt-4 max-w-md text-[17px] font-medium text-white/90">A QIE wallet, some QUSDC, and a market in under a minute.</p>
+            <p className="mx-auto mt-4 max-w-md text-[17px] font-medium text-white/90">A QIE wallet, some QIE or QUSDC, and a market in under a minute.</p>
             <div className="mt-8 flex flex-wrap justify-center gap-3">
               <Link href="/app/" className="inline-flex items-center gap-1.5 rounded-lg bg-white px-5 py-3 text-[15px] font-medium text-black hover:bg-white/90">
                 Launch app <ArrowUpRight size={16} />
@@ -367,7 +367,7 @@ export default function LandingPage() {
         </Container>
         <Container className="num flex flex-wrap justify-between gap-3 border-t border-line py-6 text-xs text-faint">
           <span>© 2026 Thesis</span>
-          <span>QIE {NETWORK} · {NETWORK === "mainnet" ? "real QUSDC" : "test tokens only"} · not financial advice</span>
+          <span>QIE {NETWORK} · {NETWORK === "mainnet" ? "real QIE and QUSDC" : "test tokens only"} · not financial advice</span>
         </Container>
       </footer>
     </div>

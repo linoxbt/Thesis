@@ -2,7 +2,8 @@
 
 import { useData, useNow } from "@/lib/data";
 import { explorerAddress } from "@/lib/config";
-import { pct, qusdc } from "@/lib/format";
+import { pct } from "@/lib/format";
+import { amtSym } from "@/lib/tokens";
 
 const dur = (s: number) => (s % 86_400 === 0 ? `${s / 86_400} days` : s % 3600 === 0 ? `${s / 3600} h` : s % 60 === 0 ? `${s / 60} min` : `${s} s`);
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -42,8 +43,6 @@ export function ParamsTable() {
   if (!ready || !params) return <p className="my-5 text-sm text-muted">Reading the live parameters from QIE…</p>;
   const p = params;
   const rows: [string, string, string][] = [
-    ["Seed", `${qusdc(p.minSeed, 0)} – ${qusdc(p.maxSeed, 0)} QUSDC`, "minSeed / maxSeed"],
-    ["Minimum bet", `${qusdc(p.minStake)} QUSDC`, "minStake"],
     ["Fee per bet", `${pct(p.feeBps, 1)}, ${pct(creatorShareBps, 0)} of it to the call's creator`, "feeBps / creatorShareBps"],
     ["Call window", `${dur(p.minWindow)} – ${dur(p.maxWindow)}`, "minWindow / maxWindow"],
     ["Target distance", `${pct(p.minDistanceBps, 0)} – ${pct(p.maxDistanceBps, 0)} from the latest price`, "minDistanceBps / maxDistanceBps"],
@@ -55,10 +54,34 @@ export function ParamsTable() {
     ["Volatility freshness", `posted at most ${dur(p.maxVolAge)} ago`, "maxVolAge"],
     ["Proof grace", `${dur(p.grace)} after the deadline`, "grace"],
     ["Void after", `${dur(p.voidAfter)} past the deadline with no settlement possible`, "voidAfter"],
-    ["Scored skill", `needs ${qusdc(p.minScoredVolume, 0)} QUSDC of outside bets`, "minScoredVolume"],
     ["Paused", paused ? "yes: posting and betting are paused" : "no", "paused"],
   ];
   return <Table head={["Setting", "Live value", "Contract field"]} rows={rows} testid="docs-params" />;
+}
+
+/** What calls can be staked in, with each token's live limits. */
+export function TokensTable() {
+  const { stakeTokens, ready } = useData();
+  if (!ready) return <p className="my-5 text-sm text-muted">Reading the stake tokens from QIE…</p>;
+  return (
+    <Table
+      head={["Stake", "Seed", "Minimum bet", "Scores with", "New calls"]}
+      testid="docs-tokens"
+      rows={stakeTokens.map((t) => [
+        t.native ? (
+          "QIE (native)"
+        ) : (
+          <a key="a" href={explorerAddress(t.address)} target="_blank" rel="noreferrer" className="underline decoration-line-2 underline-offset-4 hover:text-ink">
+            {t.symbol}
+          </a>
+        ),
+        `${amtSym(t.minSeed, t, 0)} – ${amtSym(t.maxSeed, t, 0)}`,
+        amtSym(t.minStake, t),
+        `${amtSym(t.minScoredVolume, t, 0)} of outside bets`,
+        t.enabled ? "yes" : "no",
+      ])}
+    />
+  );
 }
 
 /** The QIE Oracle feeds the contract uses, with live prices and settings. */

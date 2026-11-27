@@ -17,8 +17,8 @@ interface IPriceFeed {
 /// @title ThesisCalls (QIE edition of Thesis)
 /// @notice Trade calls as markets. A creator posts "BTC/ETH/SOL touches K
 /// before T"; the contract prices it onchain (touch probability from spot,
-/// distance, time and volatility) and opens two QUSDC pools seeded at those
-/// odds. The crowd backs it (YES) or challenges it (NO). Anyone can prove a
+/// distance, time and volatility) and opens two pools seeded at those odds,
+/// in the stake its creator chose: native QIE or a whitelisted token (QUSDC). The crowd backs it (YES) or challenges it (NO). Anyone can prove a
 /// touch with a QIE Oracle round inside the window, which settles YES at once;
 /// otherwise it settles NO after the deadline plus a grace period. Winners
 /// split the whole pot. Each settled call updates the creator's onchain skill
@@ -67,7 +67,8 @@ contract ThesisCalls is ReentrancyGuard {
 
     // ------------------------------------------------------------ config
 
-    IERC20 public immutable stakeToken;
+    /// @notice The stake "token" for native QIE (sent as value, paid back as value).
+    address public constant NATIVE = address(0);
     /// @notice Creators' share of each trade fee, in bps of the fee. Fixed at deploy.
     uint16 public immutable creatorShareBps;
 
@@ -79,9 +80,6 @@ contract ThesisCalls is ReentrancyGuard {
 
     struct Params {
         uint16 feeBps; // per bet, of the amount (200 = 2%); <= 500
-        uint64 minSeed; // token units
-        uint64 maxSeed;
-        uint64 minStake;
         uint32 minWindow; // seconds
         uint32 maxWindow;
         uint32 grace; // after end_ts, to submit a late proof
@@ -95,10 +93,21 @@ contract ThesisCalls is ReentrancyGuard {
         uint16 staleZTenths; // z for the z*sigma*sqrt(age) margin, in tenths (30 = 3.0)
         uint16 closeBps; // betting closes this share of the window before the deadline
         uint32 voidAfter; // after end: no oracle round past the deadline by then => void
-        uint64 minScoredVolume; // outside volume a call needs to count toward skill
     }
 
     Params public params;
+
+    /// @notice What a call can be staked in, with its amounts in that token's units.
+    struct StakeToken {
+        bool enabled; // new calls can use it (open calls keep working either way)
+        uint128 minSeed;
+        uint128 maxSeed;
+        uint128 minStake; // smallest bet
+        uint128 minScoredVolume; // outside volume a call needs to count toward skill
+    }
+
+    mapping(address => StakeToken) public stakeTokens;
+    address[] public stakeTokenList;
 
     struct Feed {
         bool enabled;
@@ -115,6 +124,7 @@ contract ThesisCalls is ReentrancyGuard {
     struct Call {
         address creator;
         address feed;
+        address token; // stake: NATIVE (QIE) or a whitelisted ERC20
         bool above; // true: touches at or above strike; false: at or below
         bool touched;
         bool settled;
@@ -136,7 +146,7 @@ contract ThesisCalls is ReentrancyGuard {
         uint64 touchAt; // time of the touching round
         uint80 openRound; // latest round when the call was posted
         uint32 voidAfter; // fixed at posting
-        uint64 minScored; // outside volume needed to score, fixed at posting
+        uint128 minScored; // outside volume needed to score, fixed at posting
         uint256 yesPool; // net of fees
         uint256 noPool;
         uint256 volume; // gross bets
@@ -178,14 +188,15 @@ contract ThesisCalls is ReentrancyGuard {
         uint32 hits;
         uint32 misses;
         int64 skillBps; // sum over scored calls of (hit ? 10000 : 0) - openBps
-        uint128 volume; // gross bets on their calls
         uint32 scored; // settled calls with enough outside volume to count toward skill
     }
 
     mapping(address => Stats) public stats;
     address[] public creators;
-    mapping(address => uint256) public creatorFeesOwed;
-    uint256 public treasuryFees;
+    /// @notice Creator => stake token => fees owed.
+    mapping(address => mapping(address => uint256)) public creatorFeesOwed;
+    /// @notice Stake token => treasury fees owed.
+    mapping(address => uint256) public treasuryFees;
 
     // ------------------------------------------------------------ events
 
@@ -193,6 +204,7 @@ contract ThesisCalls is ReentrancyGuard {
         uint256 indexed id,
         address indexed creator,
         address indexed feed,
+        address token,
         bool above,
         int256 strike,
         int256 spot,
@@ -208,8 +220,9 @@ contract ThesisCalls is ReentrancyGuard {
     event Voided(uint256 indexed id, VoidReason reason);
     event Synced(uint256 indexed id, uint80 checkedRound, bool caughtUp);
     event Claimed(uint256 indexed id, address indexed user, uint256 amount);
-    event CreatorFeesClaimed(address indexed creator, uint256 amount);
-    event TreasuryWithdrawn(address indexed to, uint256 amount);
+    event CreatorFeesClaimed(address indexed creator, address indexed token, uint256 amount);
+    event TreasuryWithdrawn(address indexed to, address indexed token, uint256 amount);
+    event StakeTokenSet(address indexed token, StakeToken config);
     event FeedSet(address indexed feed, bool enabled, uint32 volBps, uint32 monitorSecs);
     event VolatilitySet(address indexed feed, uint32 volBps, uint32 monitorSecs);
     event ParamsSet(Params params);
@@ -248,6 +261,9 @@ contract ThesisCalls is ReentrancyGuard {
     error NearStrike();
     error AwaitingOracle();
     error OutOfGas();
+    error TokenNotEnabled();
+    error BadValue();
+    error PayoutFailed();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert Unauthorized();
@@ -259,9 +275,8 @@ contract ThesisCalls is ReentrancyGuard {
         _;
     }
 
-    constructor(IERC20 stakeToken_, address treasury_, address keeper_, uint16 creatorShareBps_, Params memory params_) {
-        if (address(stakeToken_) == address(0) || treasury_ == address(0) || creatorShareBps_ > BPS) revert BadParams();
-        stakeToken = stakeToken_;
+    constructor(address treasury_, address keeper_, uint16 creatorShareBps_, Params memory params_) {
+        if (treasury_ == address(0) || creatorShareBps_ > BPS) revert BadParams();
         creatorShareBps = creatorShareBps_;
         owner = msg.sender;
         treasury = treasury_;
@@ -274,22 +289,41 @@ contract ThesisCalls is ReentrancyGuard {
 
     function _setParams(Params memory p) internal {
         if (
-            p.feeBps > 500 || p.minSeed == 0 || p.minSeed > p.maxSeed || p.minStake == 0 || p.minWindow < 300
+            p.feeBps > 500 || p.minWindow < 300
                 || p.minWindow > p.maxWindow || p.maxWindow > 30 days || p.grace < 60 || p.grace > 1 days
                 || p.maxOracleAge == 0 || p.maxOracleAge > 1 days || p.maxVolAge == 0 || p.minDistanceBps == 0
                 || p.minDistanceBps > p.maxDistanceBps || p.maxDistanceBps > 9_000 || p.minOpenBps < 100
                 || p.minOpenBps > p.maxOpenBps || p.maxOpenBps > 9_900 || p.betCutoffBps > 500
                 || p.betCutoffBps >= p.minDistanceBps || p.staleZTenths < 10 || p.staleZTenths > 60
-                || p.closeBps > 5_000 || p.voidAfter < 1 days || p.voidAfter > 30 days || p.minScoredVolume == 0
+                || p.closeBps > 5_000 || p.voidAfter < 1 days || p.voidAfter > 30 days
         ) revert BadParams();
         // A pool must start with stake on both sides: seed * minOpenBps / BPS > 0.
-        if ((uint256(p.minSeed) * p.minOpenBps) / BPS == 0) revert BadParams();
+        for (uint256 i; i < stakeTokenList.length; i++) {
+            if ((uint256(stakeTokens[stakeTokenList[i]].minSeed) * p.minOpenBps) / BPS == 0) revert BadParams();
+        }
         params = p;
         emit ParamsSet(p);
     }
 
     function setParams(Params calldata p) external onlyOwner {
         _setParams(p);
+    }
+
+    /// @notice Add a stake token (NATIVE for QIE), or change its amounts or
+    /// enable it. Calls already open keep their token and scoring threshold.
+    function setStakeToken(address token, StakeToken calldata t) external onlyOwner {
+        if (
+            t.minSeed == 0 || t.minSeed > t.maxSeed || t.minStake == 0 || t.minScoredVolume == 0
+                || (uint256(t.minSeed) * params.minOpenBps) / BPS == 0
+        ) revert BadParams();
+        if (token != NATIVE && token.code.length == 0) revert BadParams();
+        bool known;
+        for (uint256 i; i < stakeTokenList.length; i++) {
+            if (stakeTokenList[i] == token) known = true;
+        }
+        if (!known) stakeTokenList.push(token);
+        stakeTokens[token] = t;
+        emit StakeTokenSet(token, t);
     }
 
     /// @notice Enable or disable an oracle feed (calls already open keep working).
@@ -339,34 +373,72 @@ contract ThesisCalls is ReentrancyGuard {
         pendingOwner = address(0);
     }
 
-    function withdrawTreasury() external nonReentrant {
+    /// @notice Pays the treasury's fees in `token` to the treasury.
+    function withdrawTreasury(address token) external nonReentrant {
         if (msg.sender != owner && msg.sender != treasury) revert Unauthorized();
-        uint256 amount = treasuryFees;
+        uint256 amount = treasuryFees[token];
         if (amount == 0) revert NothingToClaim();
-        treasuryFees = 0;
-        stakeToken.safeTransfer(treasury, amount);
-        emit TreasuryWithdrawn(treasury, amount);
+        treasuryFees[token] = 0;
+        _pay(token, treasury, amount);
+        emit TreasuryWithdrawn(treasury, token, amount);
+    }
+
+    /// @dev Takes `amount` of `token` from the sender: native QIE must come as
+    /// exactly that much value; a token must come with no value.
+    function _pull(address token, uint256 amount) internal {
+        if (token == NATIVE) {
+            if (msg.value != amount) revert BadValue();
+        } else {
+            if (msg.value != 0) revert BadValue();
+            IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        }
+    }
+
+    /// @dev Pays `amount` of `token` to `to`. Every payout goes to the caller
+    /// (or the treasury), so a recipient that refuses QIE only blocks itself.
+    function _pay(address token, address to, uint256 amount) internal {
+        if (token == NATIVE) {
+            bool ok;
+            assembly ("memory-safe") {
+                ok := call(gas(), to, amount, 0, 0, 0, 0) // no return data copied
+            }
+            if (!ok) revert PayoutFailed();
+        } else {
+            IERC20(token).safeTransfer(to, amount);
+        }
     }
 
     // ------------------------------------------------------------ calls
 
     /// @notice Post a call: `feed` touches `strike` (feed units) before `end`.
-    /// The creator's `seed` opens both pools at the onchain odds.
-    function createCall(address feed, bool above, int256 strike, uint64 end, uint256 seed, string calldata text)
+    /// The creator's `seed`, in `token` (NATIVE: send it as value), opens both
+    /// pools at the onchain odds; every bet on the call uses the same token.
+    function createCall(
+        address token,
+        address feed,
+        bool above,
+        int256 strike,
+        uint64 end,
+        uint256 seed,
+        string calldata text
+    )
         external
+        payable
         nonReentrant
         whenNotPaused
         returns (uint256 id)
     {
         Params memory p = params;
+        StakeToken memory t = stakeTokens[token];
+        if (!t.enabled) revert TokenNotEnabled();
         if (bytes(text).length > MAX_TEXT_BYTES) revert TextTooLong();
-        if (seed < p.minSeed || seed > p.maxSeed) revert BadSeed();
+        if (seed < t.minSeed || seed > t.maxSeed) revert BadSeed();
         if (end <= block.timestamp) revert BadWindow();
         uint256 window = end - block.timestamp;
         if (window < p.minWindow || window > p.maxWindow) revert BadWindow();
         (uint256 open, int256 spot, uint80 roundId, uint256 updatedAt) = _price(feed, above, strike, end, p);
 
-        stakeToken.safeTransferFrom(msg.sender, address(this), seed);
+        _pull(token, seed);
         uint256 yes = (seed * open) / BPS;
         uint256 no = seed - yes;
 
@@ -374,6 +446,7 @@ contract ThesisCalls is ReentrancyGuard {
         Call storage c = calls.push();
         c.creator = msg.sender;
         c.feed = feed;
+        c.token = token;
         c.above = above;
         c.openBps = uint16(open);
         c.start = uint64(block.timestamp);
@@ -387,7 +460,7 @@ contract ThesisCalls is ReentrancyGuard {
         c.oracleAt = uint64(updatedAt);
         c.openRound = roundId;
         c.voidAfter = p.voidAfter;
-        c.minScored = p.minScoredVolume;
+        c.minScored = t.minScoredVolume;
         c.yesPool = yes;
         c.noPool = no;
         if (bytes(text).length > 0) callText[id] = text;
@@ -397,7 +470,7 @@ contract ThesisCalls is ReentrancyGuard {
         Stats storage s = stats[msg.sender];
         if (s.posted == 0 && s.hits == 0 && s.misses == 0) creators.push(msg.sender);
         s.posted += 1;
-        emit CallCreated(id, msg.sender, feed, above, strike, spot, uint64(block.timestamp), end, uint16(open), seed, text);
+        emit CallCreated(id, msg.sender, feed, token, above, strike, spot, uint64(block.timestamp), end, uint16(open), seed, text);
     }
 
     /// @dev Every check a new call must pass, and its opening odds. The odds
@@ -431,16 +504,22 @@ contract ThesisCalls is ReentrancyGuard {
     /// one already touched the strike, the call settles YES and nothing is taken.
     /// Betting closes at `closeAt`, while the latest print is too old
     /// (maxOracleAge), and while the strike is within betCutoffBps of it.
-    function bet(uint256 id, bool yes, uint256 amount) external nonReentrant whenNotPaused {
+    function bet(uint256 id, bool yes, uint256 amount) external payable nonReentrant whenNotPaused {
         Call storage c = _call(id);
         if (c.settled || block.timestamp >= c.closeAt) revert CallClosed();
-        if (amount < params.minStake) revert StakeTooSmall();
+        if (amount < stakeTokens[c.token].minStake) revert StakeTooSmall();
+        if (amount > type(uint128).max) revert BadValue();
         bool caughtUp = _scan(id, c, SCAN_PER_TX);
-        if (c.settled) return; // touched (or voided) just now; the bet is not taken
+        if (c.settled) {
+            // Touched (or voided) just now: the bet is not taken. Value sent
+            // for it goes back (a token bet was never pulled).
+            if (msg.value != 0) _pay(NATIVE, msg.sender, msg.value);
+            return;
+        }
         if (!caughtUp) revert SyncRequired();
         (uint256 needBps, uint256 distBps, uint80 tag) = _betGap(c);
         if (distBps < needBps) revert NearStrike();
-        stakeToken.safeTransferFrom(msg.sender, address(this), amount);
+        _pull(c.token, amount);
 
         uint256 fee = (amount * c.feeBps) / BPS;
         uint256 toCreator = (fee * creatorShareBps) / BPS;
@@ -473,7 +552,6 @@ contract ThesisCalls is ReentrancyGuard {
             c.outsideVolume += amount;
             pd.outside += uint128(amount);
         }
-        stats[c.creator].volume += uint128(amount);
         emit Bet(id, msg.sender, yes, amount, fee, c.yesPool, c.noPool);
     }
 
@@ -602,8 +680,8 @@ contract ThesisCalls is ReentrancyGuard {
     /// @dev Pending bets become final: credit their fees, forget the escrow.
     function _release(Call storage c, Pending storage pd) internal {
         if (pd.creatorFee | pd.treasuryFee | pd.yesNet | pd.noNet | pd.outside == 0) return;
-        creatorFeesOwed[c.creator] += pd.creatorFee;
-        treasuryFees += pd.treasuryFee;
+        creatorFeesOwed[c.creator][c.token] += pd.creatorFee;
+        treasuryFees[c.token] += pd.treasuryFee;
         pd.creatorFee = 0;
         pd.treasuryFee = 0;
         pd.yesNet = 0;
@@ -675,16 +753,17 @@ contract ThesisCalls is ReentrancyGuard {
         amount = _claimable(id, c, msg.sender);
         if (amount == 0) revert NothingToClaim();
         claimed[id][msg.sender] = true;
-        stakeToken.safeTransfer(msg.sender, amount);
+        _pay(c.token, msg.sender, amount);
         emit Claimed(id, msg.sender, amount);
     }
 
-    function claimCreatorFees() external nonReentrant returns (uint256 amount) {
-        amount = creatorFeesOwed[msg.sender];
+    /// @notice Withdraw your creator fees in `token` (NATIVE for QIE).
+    function claimCreatorFees(address token) external nonReentrant returns (uint256 amount) {
+        amount = creatorFeesOwed[msg.sender][token];
         if (amount == 0) revert NothingToClaim();
-        creatorFeesOwed[msg.sender] = 0;
-        stakeToken.safeTransfer(msg.sender, amount);
-        emit CreatorFeesClaimed(msg.sender, amount);
+        creatorFeesOwed[msg.sender][token] = 0;
+        _pay(token, msg.sender, amount);
+        emit CreatorFeesClaimed(msg.sender, token, amount);
     }
 
     // ------------------------------------------------------------ views
@@ -805,6 +884,10 @@ contract ThesisCalls is ReentrancyGuard {
 
     function feedCount() external view returns (uint256) {
         return feedList.length;
+    }
+
+    function stakeTokenCount() external view returns (uint256) {
+        return stakeTokenList.length;
     }
 
     /// @notice Opening odds a call would get right now (for the Post form).

@@ -14,7 +14,7 @@ import { THEME_SCRIPT } from "@/components/ThemeToggle";
 
 const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "https://thesis-qie.netlify.app";
 const DESCRIPTION =
-  "Post a BTC, ETH or SOL call on QIE. The contract prices it the moment you post, the crowd backs or challenges it in QUSDC, the QIE Oracle settles it, and your skill score lives onchain.";
+  "Post a BTC, ETH or SOL call on QIE. The contract prices it the moment you post, the crowd backs or challenges it in QIE or QUSDC, the QIE Oracle settles it, and your skill score lives onchain.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE),

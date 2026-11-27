@@ -149,7 +149,7 @@ export async function drawCard(d: CardData): Promise<Blob> {
   const cx = 64 + g.measureText(d.crowdYes).width + 28;
   g.font = inter(24);
   g.fillStyle = C.muted;
-  g.fillText(`YES · opened at ${d.openOdds} · pot ${d.pot} QUSDC`, cx, 517);
+  g.fillText(`YES · opened at ${d.openOdds} · pot ${d.pot}`, cx, 517);
 
   // The creator's reason, if any (one line).
   if (d.text) {
