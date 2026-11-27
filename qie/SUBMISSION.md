@@ -10,7 +10,7 @@ Deadline: **30 November 2026, 23:59 CET** (demos Dec 1–5).
 | Track | **Consumer Apps & Social** (creator reputation, creator earnings, community calls) |
 | GitHub | https://github.com/linoxbt/Thesis (QIE edition in `qie/`; README: `qie/README.md`) |
 | Live demo | https://thesis-qie.netlify.app |
-| Contract (QIE mainnet, verified) | `0x6945294DD8E8Cab0A39aff48Df97EaAB67742AEf` — https://mainnet.qie.digital/address/0x6945294DD8E8Cab0A39aff48Df97EaAB67742AEf#code |
+| Contract (QIE mainnet, verified) | `0xc5346cf73729D02ecD339AA101457bddB9337c85` — https://mainnet.qie.digital/address/0xc5346cf73729D02ecD339AA101457bddB9337c85#code |
 
 ## QIE components (bonus scoring)
 
@@ -57,7 +57,8 @@ Callers earn half of every trade fee on their calls.
 - [ ] **Rotate the QIE Pass secret key** (the old one was shared in a chat),
       then update `QIE_PASS_SECRET_KEY` on Netlify.
 - [ ] **Optional:** pause the old v1 contract `0x40fB…eF66` from your owner
-      wallet (it has no calls; v2 replaced it).
+      wallet (it has no calls). v2 (`0x6945…2AEf`, no calls) is already paused;
+      v3 replaced both.
 - [ ] **QIE or QUSDC** in your wallet, then post the first calls (seed ≥ 15 QIE or 2 QUSDC) and
       share them so others trade: traction is a judging criterion and decides
       the second half of the prize.
