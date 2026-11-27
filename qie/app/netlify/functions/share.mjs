@@ -61,13 +61,13 @@ const stake = (v, t) => {
   return `${n.toLocaleString("en-US", { maximumFractionDigits: n !== 0 && n < 1 ? 4 : 0 })} ${t.symbol}`;
 };
 
-/** The call id from /s/<id>, /share/<id> or ?id=<id>; null if none or malformed. */
+/** The call id from /s/<id> or /share/<id> (or, for old links, ?id=<id>); null if none or malformed. */
 export function callIdFrom(event) {
   const q = event.queryStringParameters ?? {};
   const fromQuery = q.id != null ? String(q.id).replace(/\/$/, "") : null;
   const paths = [event.path, event.rawUrl, event.headers?.["x-nf-original-path"]].filter(Boolean).map(String);
   const fromPath = paths.map((p) => /\/(?:s|share)\/(\d{1,9})\/?(?:[?#]|$)/.exec(p)?.[1]).find(Boolean) ?? null;
-  const raw = fromQuery ?? fromPath;
+  const raw = fromPath ?? fromQuery; // the path wins: /s/0?id=1 is call 0
   return raw != null && /^\d{1,9}$/.test(raw) ? Number(raw) : null;
 }
 const short = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -95,6 +95,27 @@ async function qieName(address) {
   } catch {
     return null;
   }
+}
+
+// Chain reads are kept for 15 s per instance: a burst of requests for one call
+// (or junk query variants the CDN can't merge) costs one set of reads.
+const recent = new Map();
+async function readCallCached(id) {
+  const hit = recent.get(id);
+  if (hit && Date.now() - hit.at < 15_000) return hit.d;
+  const d = await readCall(id);
+  recent.set(id, { d, at: Date.now() });
+  if (recent.size > 500) recent.clear();
+  return d;
+}
+let countAt = 0;
+let count = 0;
+async function callCount() {
+  if (Date.now() - countAt > 15_000) {
+    count = Number(await client.readContract({ address: CALLS, abi: THESIS_CALLS_ABI, functionName: "callCount" }));
+    countAt = Date.now();
+  }
+  return count;
 }
 
 async function readCall(id) {
@@ -206,7 +227,8 @@ function page(d) {
 
 const NOSNIFF = { "x-content-type-options": "nosniff" };
 const notFound = () => ({ statusCode: 302, headers: { ...NOSNIFF, location: `${SITE}/app/`, "cache-control": "no-store" }, body: "" });
-const redirect = (to) => ({ statusCode: 301, headers: { ...NOSNIFF, location: to, "cache-control": "public, max-age=60" }, body: "" });
+// Temporary: the canonical image changes with the call's state, so crawlers mustn't remember it.
+const redirect = (to) => ({ statusCode: 302, headers: { ...NOSNIFF, location: to, "cache-control": "public, max-age=60" }, body: "" });
 const stateTag = (d) => `${d.status.replace(/\W/g, "")}-${d.crowd}`;
 const imageUrl = (d) => `${SITE}/.netlify/functions/share/${d.id}?img=1&v=${stateTag(d)}`;
 
@@ -219,15 +241,21 @@ export const handler = async (event) => {
   // RPC read or render. (The page ignores extras; see the note at the top.)
   if (wantImg && Object.keys(q).some((k) => !["id", "img", "v"].includes(k))) return redirect(`${SITE}/.netlify/functions/share/${id}?img=1`);
   try {
-    if (id >= Number(await client.readContract({ address: CALLS, abi: THESIS_CALLS_ABI, functionName: "callCount" }))) return notFound();
-    const d = await readCall(id);
+    if (id >= (await callCount())) return notFound();
+    const d = await readCallCached(id);
     if (wantImg) {
       // An out-of-date (or made-up) state tag: point at the current one, without rendering.
       if (q.v !== stateTag(d)) return redirect(imageUrl(d));
       const buf = await png(d);
       return {
         statusCode: 200,
-        headers: { ...NOSNIFF, "content-type": "image/png", "cache-control": "public, max-age=300", "netlify-cdn-cache-control": "public, s-maxage=300, stale-while-revalidate=600" },
+        headers: {
+          ...NOSNIFF,
+          "content-type": "image/png",
+          "cache-control": "public, max-age=300",
+          "netlify-cdn-cache-control": "public, s-maxage=300, stale-while-revalidate=600",
+          "netlify-vary": "query=img|v", // junk parameters share the cached copy
+        },
         body: Buffer.from(buf).toString("base64"),
         isBase64Encoded: true,
       };
@@ -239,6 +267,7 @@ export const handler = async (event) => {
         "content-type": "text/html; charset=utf-8",
         "cache-control": "public, max-age=60",
         "netlify-cdn-cache-control": "public, s-maxage=60, stale-while-revalidate=120",
+        "netlify-vary": "query=id", // ?fbclid=, ?utm_… share the cached copy
         "content-security-policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
       },
       body: page(d),

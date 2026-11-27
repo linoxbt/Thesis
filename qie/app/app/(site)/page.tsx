@@ -75,7 +75,7 @@ const FAQ: [string, ReactNode][] = [
   ],
   [
     "How is the skill score calculated?",
-    "Each settled call scores 1 if it hit, minus the probability the contract gave it when it was posted (so nobody can choose it). A 20% call that hits earns +0.80; a 90% call that misses costs −0.90. Posting safe or random calls averages zero, so the leaderboard only rewards real edge. Only calls others actually bet on count, and the leaderboard ranks skill per call once you have three. The score is stored onchain.",
+    "Each settled call scores 1 if it hit, minus the probability the contract gave it when it was posted (so nobody can choose it). A 20% call that hits earns +0.80; a 90% call that misses costs −0.90. Posting safe or random calls averages zero, so the leaderboard only rewards real edge. Calls seeded at the scoring size count (decided when they're posted), and the leaderboard ranks skill per call once you have five, weighted toward zero for short records. The score is stored onchain.",
   ],
   [
     "What do creators earn?",

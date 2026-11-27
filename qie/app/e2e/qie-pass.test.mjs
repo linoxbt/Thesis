@@ -345,3 +345,31 @@ test("responses carry nosniff; weak secrets and unknown upstream codes don't get
     process.env.SESSION_SECRET = saved;
   }
 });
+
+test("final review N2: a ceiling on prompts to one QIE ID from all IPs together, pointing to wallet sign-in", async () => {
+  _internal.resetLimits();
+  const codes = [];
+  for (let i = 0; i < 31; i++) codes.push((await browser(`198.18.${Math.floor(i / 200)}.${i % 200}`).call("start", { method: "POST", body: { qieId: "busy-person" } })).body.code ?? "OK");
+  assert.equal(codes.filter((c) => c === "QIE_ID_NOT_FOUND").length, 30);
+  assert.equal(codes[30], "ID_BUSY");
+});
+
+test("final review N8: x-forwarded-for isn't trusted outside local dev", async () => {
+  _internal.resetLimits();
+  // Without Netlify's own client-IP header, a spoofed x-forwarded-for doesn't buy fresh limits.
+  const codes = [];
+  for (let i = 0; i < 7; i++) {
+    const r = await handler({ httpMethod: "GET", queryStringParameters: { action: "challenge" }, headers: {} });
+    const ch = JSON.parse(r.body);
+    let n = 0;
+    while (_internal.zeroBits(_internal.sha256hex(`${ch.challenge}:${n}`)) < ch.bits) n++;
+    const res = await handler({
+      httpMethod: "POST",
+      queryStringParameters: { action: "start" },
+      headers: { "content-type": "application/json", origin: "https://thesis-qie.netlify.app", "sec-fetch-site": "same-origin", "x-forwarded-for": `192.0.2.${i}` },
+      body: JSON.stringify({ qieId: `spoof-${i}`, pow: { challenge: ch.challenge, nonce: String(n) } }),
+    });
+    codes.push(res.statusCode);
+  }
+  assert.equal(codes[6], 429);
+});

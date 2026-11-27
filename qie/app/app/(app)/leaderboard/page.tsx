@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Address } from "viem";
 import { Avatar } from "@/components/ThesisCard";
 import { Who } from "@/components/Who";
+import { MIN_SCORED, perCallBps, rankScore } from "@/lib/rank";
 import { amtSym } from "@/lib/tokens";
 import { useData, useNow } from "@/lib/data";
 import { fmtSkill, pct } from "@/lib/format";
@@ -69,14 +70,14 @@ interface Row {
   avg_open_bps: number | null;
 }
 
-/** Calls a creator needs (in the period) to be ranked; fewer are listed after. */
-const MIN_CALLS = 3;
-const perCall = (r: Row) => (r.calls ? r.score_bps / r.calls : 0);
-/** Ranked by skill per call (so one lucky call can't top the board), then by total. */
+/** Scored calls a creator needs (in the period) to be ranked; fewer are listed after. */
+const MIN_CALLS = MIN_SCORED;
+const perCall = (r: Row) => perCallBps(r.score_bps, r.calls);
+/** Ranked by skill per call shrunk toward zero for short records (lib/rank.ts), then by total. */
 const byRank = (a: Row, b: Row) => {
   const qa = a.calls >= MIN_CALLS, qb = b.calls >= MIN_CALLS;
   if (qa !== qb) return qa ? -1 : 1;
-  return perCall(b) - perCall(a) || b.score_bps - a.score_bps;
+  return rankScore(b.score_bps, b.calls) - rankScore(a.score_bps, a.calls) || b.score_bps - a.score_bps;
 };
 
 /**
@@ -141,7 +142,8 @@ export default function LeaderboardPage() {
             Every call is scored against the odds the contract gave it when it was posted: a 20% call that hits earns
             <span className="num text-yes"> +0.80</span>, a 90% call that misses costs
             <span className="num text-bad"> −0.90</span>. Safe calls earn almost nothing; only real edge climbs. Ranked by skill per
-            call once a creator has {MIN_CALLS} scored calls. A call counts if its creator seeded at least{" "}
+            call once a creator has {MIN_CALLS} scored calls, weighted toward zero for short records so a few lucky long shots
+            can&apos;t top the board. A call counts if its creator seeded at least{" "}
             {stakeTokens.length ? stakeTokens.map((t) => amtSym(t.minScoredSeed, t, 0)).join(" or ") : "the scoring size"}, decided when it&apos;s posted.
           </p>
         </div>

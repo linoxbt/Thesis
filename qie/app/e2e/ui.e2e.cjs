@@ -126,7 +126,7 @@ async function main() {
     if (action === "start") {
       // The page must send a solved proof-of-work with every start.
       const pow = JSON.parse(route.request().postData() || "{}").pow;
-      const ok = pow && pow.challenge === "e2e-challenge" && require("node:crypto").createHash("sha256").update(`${pow.challenge}:${pow.nonce}`).digest("hex").startsWith("0000") && parseInt(require("node:crypto").createHash("sha256").update(`${pow.challenge}:${pow.nonce}`).digest("hex")[4], 16) < 4;
+      const ok = pow && pow.challenge === "e2e-challenge" && require("node:crypto").createHash("sha256").update(`${pow.challenge}:${pow.nonce}`).digest("hex").startsWith("0000");
       fn.powOk = (fn.powOk ?? true) && Boolean(ok);
       const { qieId } = JSON.parse(route.request().postData() ?? "{}");
       if (!/^tester(\.qie)?$/.test(qieId)) return json(404, { code: "QIE_ID_NOT_FOUND", message: "That QIE ID isn't registered. Check the spelling and try again." });
@@ -142,7 +142,7 @@ async function main() {
     if (action === "me") return fn.session ? json(200, fn.session) : json(401, { code: "NO_SESSION" });
     if (action === "nonce") return json(200, { nonce: "e2e0nonce0000001" });
     // A real-sized proof-of-work (the page solves it before starting a sign-in).
-    if (action === "challenge") return json(200, { challenge: "e2e-challenge", bits: 18 });
+    if (action === "challenge") return json(200, { challenge: "e2e-challenge", bits: 16 });
     if (action === "cancel") return (fn.cancels = (fn.cancels ?? 0) + 1), json(200, { ok: true });
     if (action === "logout") return (fn.session = null), json(200, { ok: true });
     if (action === "verify-wallet") return fn.verifyWallet === "down" ? json(502, { code: "QIE_UNREACHABLE" }) : json(200, { address: ACCOUNT, verified: false });

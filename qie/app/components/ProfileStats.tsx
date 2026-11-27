@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { Address } from "viem";
 import { isRefunded, useData } from "@/lib/data";
+import { MIN_SCORED, rankScore } from "@/lib/rank";
 import { callLine, fmtSkill, pct } from "@/lib/format";
 import { amtSym, perToken } from "@/lib/tokens";
 
@@ -18,13 +19,14 @@ function Tile({ label, value, sub }: { label: string; value: string; sub?: strin
 
 /**
  * Skill rank (all time, onchain), the leaderboard's way: by skill per scored
- * call among creators with at least 3 scored calls. Null if not ranked.
+ * call (shrunk toward zero for short records) among creators with at least
+ * MIN_SCORED scored calls. Null if not ranked.
  */
 export function useSkillRank(who: Address | null): number | null {
   const { creators } = useData();
   if (!who) return null;
-  const per = (s: { skillBps: number; scored: number }) => s.skillBps / s.scored;
-  const ranked = creators.filter((c) => c.stats.scored >= 3).sort((a, b) => per(b.stats) - per(a.stats) || b.stats.skillBps - a.stats.skillBps);
+  const score = (s: { skillBps: number; scored: number }) => rankScore(s.skillBps, s.scored);
+  const ranked = creators.filter((c) => c.stats.scored >= MIN_SCORED).sort((a, b) => score(b.stats) - score(a.stats) || b.stats.skillBps - a.stats.skillBps);
   const i = ranked.findIndex((c) => c.creator.toLowerCase() === who.toLowerCase());
   return i < 0 ? null : i + 1;
 }

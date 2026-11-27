@@ -361,7 +361,8 @@ export default function DocsPage() {
                 every scored call, hit or miss, is on the record. Smaller calls are practice.
               </li>
               <li>
-                <Strong>Ranking.</Strong> The leaderboard ranks skill per scored call, once a creator has three; this week and all time.
+                <Strong>Ranking.</Strong> The leaderboard ranks skill per scored call, once a creator has five, weighted toward zero for
+                short records (total skill ÷ (calls + 10)), so a few lucky long shots can&apos;t top the board; this week and all time.
               </li>
               <li>
                 <Strong>Verified creators.</Strong> Creators whose identity is verified with QIE Pass carry a shield, and &quot;Verified

@@ -193,8 +193,32 @@ describe("keeper", function () {
     await print(f.feed, 106);
     await quiet(() => tick(f.ctx));
     const settledAfter = async () => (await Promise.all(Array.from({ length: 15 }, (_, i) => f.calls.getCall(i)))).filter((c) => c.settled).length;
-    expect(await settledAfter()).to.equal(12);
+    expect(await settledAfter()).to.equal(11); // 12 transactions, 2 always held back for a sync + an action
     await quiet(() => tick(f.ctx));
     expect(await settledAfter()).to.equal(15);
+  });
+
+  it("final review M2: drops calls it won't keep once betting closes, instead of re-reading them forever", async () => {
+    const f = await setup();
+    const end = (await time.latest()) + 8 * HOUR;
+    for (let i = 0; i < 5; i++) await f.calls.connect(f.creator).createCall(await f.token.getAddress(), await f.feed.getAddress(), true, PX(102 + i / 10), end, 2n * USDC, "");
+    await quiet(() => tick(f.ctx));
+    expect(f.ctx.open.size).to.equal(6); // betting still open: they could still attract outside money
+    await time.increaseTo(end - 600); // betting has closed (last 10% of the window), not yet the deadline
+    await print(f.feed, 100.1);
+    await quiet(() => tick(f.ctx));
+    expect([...f.ctx.open]).to.deep.equal([0]); // only the real call is still followed
+  });
+
+  it("final review L1: running out of the tick's budget isn't counted as a failure", async () => {
+    const f = await setup();
+    const end = (await time.latest()) + 2 * DAY;
+    for (let i = 0; i < 14; i++) await f.calls.connect(f.creator).createCall(await f.token.getAddress(), await f.feed.getAddress(), true, PX(104 + i / 10), end, 10n * USDC, "");
+    await time.increase(300);
+    await print(f.feed, 100.2);
+    await time.increase(HOUR);
+    await print(f.feed, 106);
+    const r = await quiet(() => tick(f.ctx));
+    expect(r.failures).to.equal(0);
   });
 });

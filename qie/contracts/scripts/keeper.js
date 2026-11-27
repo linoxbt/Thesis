@@ -66,10 +66,13 @@ function errorName(calls, e) {
  * Returns the receipt of whichever attempt was mined; throws if it reverted
  * or nothing was mined.
  */
+/** This tick's transaction budget is spent: not a failure, the work resumes next tick. */
+class BudgetSpent extends Error {}
+
 async function send(ctx, contract, method, args, { timeoutMs = TX_TIMEOUT_MS, bumps = 3 } = {}) {
   const { wallet, provider } = ctx;
   if (ctx.budget !== undefined) {
-    if (ctx.budget <= 0) throw new Error(`${method}: this tick's transaction budget is spent; next tick`);
+    if (ctx.budget <= 0) throw new BudgetSpent(`${method}: this tick's transaction budget is spent; next tick`);
     ctx.budget -= 1;
   }
   const data = contract.interface.encodeFunctionData(method, args);
@@ -78,6 +81,11 @@ async function send(ctx, contract, method, args, { timeoutMs = TX_TIMEOUT_MS, bu
   let gasLimit = await estimate();
   const nonce = await provider.getTransactionCount(wallet.address, "latest");
   let gasPrice = (await provider.getFeeData()).gasPrice ?? 1_125_000_000n;
+  // A transaction left pending on this nonce by an earlier send: outbid it, or
+  // the node refuses the new one as an underpriced replacement.
+  const prior = ctx.lastPrice?.get(nonce);
+  if (prior && (prior * 13n) / 10n > gasPrice) gasPrice = (prior * 13n) / 10n;
+  const remember = () => ctx.lastPrice?.set(nonce, gasPrice);
   const hashes = [];
   const minedAttempt = async () => {
     for (const h of hashes) {
@@ -94,6 +102,7 @@ async function send(ctx, contract, method, args, { timeoutMs = TX_TIMEOUT_MS, bu
     let tx;
     try {
       tx = await wallet.sendTransaction({ to, data, nonce, gasLimit, gasPrice, type: 0 });
+      remember();
     } catch (e) {
       // "nonce too low" / "already known": an earlier attempt got in first.
       const rc = await minedAttempt();
@@ -247,8 +256,8 @@ async function handleCall(ctx, id, c, now) {
       return;
     }
     // 2. Keep the contract's own check caught up while betting is open, so a
-    // bet never needs a sync first.
-    if (now < Number(c.closeAt) && latest - c.checkedRound >= BigInt(SYNC_BACKLOG)) {
+    // bet never needs a sync first (only on calls people are betting on).
+    if (now < Number(c.closeAt) && c.volume > 0n && latest - c.checkedRound >= BigInt(SYNC_BACKLOG)) {
       await send(ctx, calls, "sync", [id, 200]);
       note("sync", `synced ${latest - c.checkedRound} unchecked rounds`, 0);
     }
@@ -310,22 +319,37 @@ async function tick(ctx) {
     if (!tokens.has(a)) tokens.set(a, await calls.stakeTokens(a).catch(() => null));
     return tokens.get(a);
   };
+  // Open calls, read 50 at a time (one RPC per page, not one per call).
+  const ids = [...ctx.open].sort((a, b) => a - b);
+  const byId = new Map();
+  for (let k = 0; k < ids.length; ) {
+    const from = ids[k];
+    const page = await calls.getCalls(from, 50);
+    page.forEach((c, i) => byId.set(from + i, c));
+    while (k < ids.length && ids[k] < from + 50) k++;
+  }
   let open = 0;
   let kept = 0;
-  for (const id of [...ctx.open].sort((a, b) => a - b)) {
-    const c = await calls.getCall(id);
-    if (c.settled) {
+  for (const id of ids) {
+    const c = byId.get(id);
+    if (!c || c.settled) {
       ctx.open.delete(id);
       continue;
     }
     open += 1;
-    if (!worthKeeping(c, await tokenOf(c.token))) continue;
+    if (!worthKeeping(c, await tokenOf(c.token))) {
+      // Once betting has closed a call can't become worth keeping (its seed and
+      // outside volume are final): stop reading it.
+      if (now >= Number(c.closeAt)) ctx.open.delete(id);
+      continue;
+    }
     kept += 1;
-    if (ctx.budget <= 0) continue; // the rest waits for the next tick
+    if (ctx.budget < 2) continue; // too little budget left for a sync + an action: next tick
     try {
       now = await blockTime();
       await handleCall(ctx, id, c, now);
     } catch (e) {
+      if (e instanceof BudgetSpent) continue; // not a failure: resumes next tick
       failures += 1;
       log(`call ${id}: ${short(e)}`);
     }
@@ -372,7 +396,7 @@ function makeCtx(wallet, address) {
     if (!cache.has(a)) cache.set(a, new ethers.Contract(a, FEED_ABI, provider));
     return cache.get(a);
   };
-  return { calls, wallet, provider, feedOf, scanned: new Map(), notes: new Map(), open: new Set(), seen: 0 };
+  return { calls, wallet, provider, feedOf, scanned: new Map(), notes: new Map(), open: new Set(), seen: 0, lastPrice: new Map() };
 }
 
 async function main() {

@@ -54,14 +54,17 @@ const LOGIN_COOKIE = "tq_login";
 const SESSION_COOKIE = "tq_session";
 const NONCE_COOKIE = "tq_nonce";
 const QIE_TIMEOUT_MS = 8_000;
-/** Leading zero bits the start proof-of-work needs (~260k hashes: well under a second in a browser). */
-const POW_BITS = 18;
+/** Leading zero bits the start proof-of-work needs (~65k hashes: a fraction of a second, even on a phone). */
+const POW_BITS = 16;
 const POW_TTL_MS = 120_000;
 const MAX_BADGES = 10;
 const LIMITS = {
   // [max, window seconds]
   "start:ip": [6, 600], // one browser/IP (/64 for IPv6) trying IDs
   "start:id-ip": [3, 600], // one IP retrying one QIE ID
+  // All IPs together on one QIE ID: a ceiling on prompts to one person. Past it
+  // the owner is pointed to wallet sign-in (which this can't block).
+  "start:id": [30, 3600],
   "status:ip": [300, 600], // sign-in polling (every 2–3 s while a prompt is open)
   "verify:ip": [20, 600],
   "verified:ip": [60, 600], // badge lookups: counted per address looked up at QIE
@@ -184,7 +187,8 @@ function normalizeQieId(input) {
 
 /** The user's IP as Netlify sees it: one address, never the whole forwarded chain. */
 function clientIp(event) {
-  const ip = header(event, "x-nf-client-connection-ip") || String(header(event, "x-forwarded-for") || "").split(",")[0].trim();
+  // Netlify sets x-nf-client-connection-ip; x-forwarded-for (client-controlled) only in local dev.
+  const ip = header(event, "x-nf-client-connection-ip") || (process.env.CONTEXT === "dev" ? String(header(event, "x-forwarded-for") || "").split(",")[0].trim() : "");
   return /^[0-9a-fA-F:.]{3,45}$/.test(ip) ? ip : undefined;
 }
 
@@ -247,12 +251,16 @@ async function bump(s, key, inc) {
   return Infinity;
 }
 
+/** Keys already over their limit: no more Blobs traffic for them until their window ends. */
+const over = new Map();
+
 /** Counts `inc` hits on `kind`/`id`; returns seconds to wait if over the limit, else 0. */
 async function overLimit(event, kind, id, inc = 1) {
   const [max, win] = LIMITS[kind];
   const slot = Math.floor(Date.now() / 1000 / win);
   const key = `${kind}:${crypto.createHash("sha256").update(String(id)).digest("hex").slice(0, 32)}:${slot}`;
   const wait = (slot + 1) * win - Math.floor(Date.now() / 1000);
+  if (over.get(key) > Date.now()) return wait;
   const s = limiter(event);
   let n;
   try {
@@ -262,7 +270,12 @@ async function overLimit(event, kind, id, inc = 1) {
     if (s) alert("Blobs read/write failed", e);
     n = memAdd(key, inc);
   }
-  return n > max ? wait : 0;
+  if (n > max) {
+    over.set(key, Date.now() + wait * 1000);
+    if (over.size > 5000) over.clear();
+    return wait;
+  }
+  return 0;
 }
 
 /** True the first time `key` is seen (nonces, proofs-of-work); false on a replay. */
@@ -352,6 +365,9 @@ async function start(event) {
   let wait = await overLimit(event, "start:ip", bucket);
   if (!wait) wait = await overLimit(event, "start:id-ip", `${qieId}|${bucket}`);
   if (wait) return tooMany(wait);
+  wait = await overLimit(event, "start:id", qieId);
+  if (wait)
+    return fail(429, "ID_BUSY", "Too many sign-in requests for this QIE ID right now. Sign in with your wallet instead, or try again later.", { retryAfterSeconds: wait });
   const ua = String(header(event, "user-agent") || "").slice(0, 512);
   const client = { ...(ip !== "unknown" ? { ip } : {}), ...(ua ? { userAgent: ua } : {}) };
   const r = await qie("POST", "/qie-login/requests", { qieId, ...(Object.keys(client).length ? { client } : {}) });
@@ -558,6 +574,6 @@ export const _internal = {
   POW_BITS,
   LIMITS,
   MAX_BADGES,
-  resetLimits: () => memory.clear(),
+  resetLimits: () => (memory.clear(), over.clear()),
   useStore: (s) => (testStore = s),
 };

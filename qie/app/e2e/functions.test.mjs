@@ -27,6 +27,7 @@ test("audit H1: the share link rewrite sends the id in the path, and the functio
   assert.equal(id({ path: "/s/12", rawUrl: "https://thesis-qie.netlify.app/s/12" }), 12);
   assert.equal(id({ path: "/.netlify/functions/share", rawUrl: "https://thesis-qie.netlify.app/s/3?x=1" }), 3);
   assert.equal(id({ path: "/.netlify/functions/share", queryStringParameters: { id: "4" } }), 4);
+  assert.equal(id({ path: "/.netlify/functions/share/0", queryStringParameters: { id: "1" } }), 0, "the path wins over ?id=");
   assert.equal(id({ path: "/s/abc" }), null);
   assert.equal(id({ path: "/s/1234567890" }), null);
 });
@@ -44,7 +45,7 @@ test("audit M5: junk on the image is redirected to the canonical URL before any 
   assert.notEqual(page.statusCode, 301);
   assert.notEqual(page.headers.location, "https://thesis-qie.netlify.app/s/5");
   const img = await share.handler({ path: "/.netlify/functions/share/5", queryStringParameters: { img: "1", junk: "1" } });
-  assert.equal(img.statusCode, 301);
+  assert.equal(img.statusCode, 302);
   assert.equal(img.headers.location, "https://thesis-qie.netlify.app/.netlify/functions/share/5?img=1");
 });
 
